@@ -272,8 +272,13 @@ async def init_db():
 async def get_pool():
     """إنشاء مجمع اتصالات (Pool)"""
     try:
-        pool = await asyncpg.create_pool(**DB_CONFIG)
-        logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح")
+        # التحقق من وجود dsn في الإعدادات
+        if "dsn" in DB_CONFIG:
+            pool = await asyncpg.create_pool(dsn=DB_CONFIG["dsn"])
+            logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN")
+        else:
+            pool = await asyncpg.create_pool(**DB_CONFIG)
+            logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح")
         return pool
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
