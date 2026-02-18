@@ -21,7 +21,6 @@ async def on_shutdown(bot: Bot):
     """تشغيل عند الإيقاف - حذف webhook"""
     await bot.delete_webhook()
     logging.info("✅ تم حذف webhook")
-
 async def main():
     logging.info("🚀 بدأ تشغيل البوت...")
     
@@ -48,31 +47,56 @@ async def main():
     
     # إنشاء Dispatcher وتمرير db_pool
     dp = Dispatcher()
-    dp["db_pool"] = db_pool  # هذا السطر مهم جداً!
+    dp["db_pool"] = db_pool
     
-    # ========== إضافة Middleware للتحقق من حالة البوت ==========
+    # ========== Middleware للتحقق من حالة البوت (معدل) ==========
     @dp.message.middleware()
-    @dp.callback_query.middleware()
-    async def check_bot_status(handler, event, data):
+    async def check_bot_status_middleware(handler, event, data):
         """التحقق من حالة البوت قبل معالجة الأوامر"""
-        from database import get_bot_status
+        from database import get_bot_status, get_maintenance_message
+        
+        # جلب db_pool من الـ data
+        pool = data.get('db_pool')
+        if not pool:
+            return await handler(event, data)
         
         user = event.from_user
         from config import ADMIN_ID, MODERATORS
         
         # تحقق من حالة البوت
-        bot_status = await get_bot_status(db_pool)
+        bot_status = await get_bot_status(pool)
         
         # إذا البوت متوقف والمستخدم ليس مشرف
         if not bot_status and user.id != ADMIN_ID and user.id not in MODERATORS:
-            from database import get_maintenance_message
-            msg = await get_maintenance_message(db_pool)
+            msg = await get_maintenance_message(pool)
             
             if isinstance(event, types.Message):
                 await event.answer(f"🛠 {msg}")
             elif isinstance(event, types.CallbackQuery):
                 await event.answer(msg, show_alert=True)
             return  # منع معالجة الحدث
+        
+        return await handler(event, data)
+    
+    # نفس الميدل وير للـ callback queries
+    @dp.callback_query.middleware()
+    async def check_bot_status_callback_middleware(handler, event, data):
+        """التحقق من حالة البوت قبل معالجة الأزرار"""
+        from database import get_bot_status, get_maintenance_message
+        
+        pool = data.get('db_pool')
+        if not pool:
+            return await handler(event, data)
+        
+        user = event.from_user
+        from config import ADMIN_ID, MODERATORS
+        
+        bot_status = await get_bot_status(pool)
+        
+        if not bot_status and user.id != ADMIN_ID and user.id not in MODERATORS:
+            msg = await get_maintenance_message(pool)
+            await event.answer(msg, show_alert=True)
+            return
         
         return await handler(event, data)
     # =========================================================
@@ -84,6 +108,9 @@ async def main():
         deposit.router,
         services.router
     )
+    
+    # ... باقي الكود (إعدادات webhook) كما هو ...
+
     
     # إعدادات webhook
     PORT = int(os.environ.get('PORT', 8000))
