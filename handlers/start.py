@@ -378,7 +378,7 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
         f"• 5 نقاط لكل مشترك جديد\n"
-        f"• كل 500 نقطة = 5$ ({500 * USD_TO_SYP:,.0f} ل.س)\n\n"
+        f"• كل 500 نقطة = 5$ ({500 * USD_TO_SYP:.0f} ل.س)\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
@@ -440,7 +440,7 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         f"**نقاطك الحالية:** {current_points}\n"
         f"**قيمتها:** {points_value_syp:,.0f} ل.س\n"
         f"**سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n\n"
+        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({redemption_rate * exchange_rate:.0f} ل.س)\n\n"
         f"📊 **إحصائيات النقاط:**\n"
         f"• إجمالي النقاط المكتسبة: {points_earned}\n"
         f"• إجمالي النقاط المستخدمة: {abs(points_used)}\n"
