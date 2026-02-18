@@ -27,6 +27,16 @@ class AdminStates(StatesGroup):
     waiting_points_amount = State()
     waiting_redeem_action = State()
     waiting_redeem_notes = State()
+    # حالات جديدة
+    waiting_product_name = State()
+    waiting_product_price = State()
+    waiting_product_min = State()
+    waiting_product_profit = State()
+    waiting_product_category = State()
+    waiting_product_id = State()
+    waiting_new_syriatel_numbers = State()
+    waiting_reset_confirm = State()
+    waiting_reset_rate = State()
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -41,17 +51,44 @@ async def admin_panel(message: types.Message, db_pool):
     status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
 
     kb = [
-        [types.InlineKeyboardButton(text="📈 تعديل سعر الصرف", callback_data="edit_rate")],
-        [types.InlineKeyboardButton(text="📢 إرسال رسالة للكل", callback_data="broadcast")],
-        [types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance")],
-        [types.InlineKeyboardButton(text="📊 إحصائيات البوت", callback_data="bot_stats")],
-        [types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")],
-        [types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
-        [types.InlineKeyboardButton(
-            text=f"🔄 إيقاف البوت" if bot_status else "🔄 تشغيل البوت", 
-            callback_data="toggle_bot"
-        )],
-        [types.InlineKeyboardButton(text="✏️ تعديل رسالة الصيانة", callback_data="edit_maintenance")],
+        # الصف الأول
+        [
+            types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
+            types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")
+        ],
+        # الصف الثاني
+        [
+            types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
+            types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")
+        ],
+        # الصف الثالث
+        [
+            types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
+            types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")
+        ],
+        # الصف الرابع - أزرار المنتجات
+        [
+            types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
+            types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product")
+        ],
+        # الصف الخامس
+        [
+            types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
+            types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products")
+        ],
+        # الصف السادس - أزرار سيرياتل
+        [
+            types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
+            types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot")
+        ],
+        # الصف السابع - زر التصفير
+        [
+            types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot")
+        ],
+        # الصف الثامن
+        [
+            types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance")
+        ],
     ]
     
     await message.answer(
@@ -118,6 +155,453 @@ async def save_maintenance_message(message: types.Message, state: FSMContext, db
     
     await message.answer("✅ تم تحديث رسالة الصيانة بنجاح")
     await state.clear()
+
+# ============= إدارة أرقام سيرياتل =============
+@router.callback_query(F.data == "edit_syriatel")
+async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل أرقام سيرياتل كاش"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from config import SYRIATEL_NUMS
+    current_nums = "\n".join([f"{i+1}. `{num}`" for i, num in enumerate(SYRIATEL_NUMS)])
+    
+    text = (
+        f"📞 **أرقام سيرياتل كاش الحالية:**\n\n"
+        f"{current_nums}\n\n"
+        f"**أدخل الأرقام الجديدة** (كل رقم في سطر منفصل):\n"
+        f"مثال:\n"
+        f"74091109\n"
+        f"63826779\n"
+        f"0912345678"
+    )
+    
+    await callback.message.answer(text, parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_new_syriatel_numbers)
+
+@router.message(AdminStates.waiting_new_syriatel_numbers)
+async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
+    """حفظ أرقام سيرياتل الجديدة"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # تقسيم الأرقام (كل سطر رقم)
+    numbers = [line.strip() for line in message.text.split('\n') if line.strip()]
+    
+    # تحديث ملف config.py مؤقتاً
+    import config
+    config.SYRIATEL_NUMS = numbers
+    
+    # يمكنك تخزينها في قاعدة البيانات
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE bot_settings SET value = $1 WHERE key = 'syriatel_nums'",
+            ','.join(numbers)
+        )
+    
+    text = "✅ **تم تحديث أرقام سيرياتل كاش بنجاح!**\n\nالأرقام الجديدة:\n"
+    for i, num in enumerate(numbers, 1):
+        text += f"{i}. `{num}`\n"
+    
+    await message.answer(text, parse_mode="Markdown")
+    await state.clear()
+
+# ============= إدارة المنتجات =============
+@router.callback_query(F.data == "add_product")
+async def add_product_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """بدء إضافة منتج جديد"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    # جلب الأقسام
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT id, display_name FROM categories ORDER BY sort_order")
+    
+    if not categories:
+        await callback.answer("❌ لا توجد أقسام. أضف قسماً أولاً.", show_alert=True)
+        return
+    
+    # عرض الأقسام للاختيار
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        builder.row(types.InlineKeyboardButton(
+            text=cat['display_name'],
+            callback_data=f"sel_cat_{cat['id']}"
+        ))
+    
+    await callback.message.answer(
+        "📱 **إضافة منتج جديد**\n\n"
+        "اختر القسم أولاً:",
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(AdminStates.waiting_product_category)
+
+@router.callback_query(F.data.startswith("sel_cat_"))
+async def select_category_for_product(callback: types.CallbackQuery, state: FSMContext):
+    """اختيار القسم للمنتج"""
+    cat_id = int(callback.data.split("_")[2])
+    await state.update_data(category_id=cat_id)
+    
+    await callback.message.edit_text(
+        "📝 **أدخل اسم المنتج:**"
+    )
+    await state.set_state(AdminStates.waiting_product_name)
+
+@router.message(AdminStates.waiting_product_name)
+async def get_product_name(message: types.Message, state: FSMContext):
+    """استلام اسم المنتج"""
+    await state.update_data(product_name=message.text)
+    await message.answer(
+        "💰 **أدخل سعر الوحدة بالدولار:**\n"
+        "مثال: 0.001"
+    )
+    await state.set_state(AdminStates.waiting_product_price)
+
+@router.message(AdminStates.waiting_product_price)
+async def get_product_price(message: types.Message, state: FSMContext):
+    """استلام سعر المنتج"""
+    try:
+        price = float(message.text)
+        await state.update_data(product_price=price)
+        await message.answer(
+            "📦 **أدخل الحد الأدنى للكمية:**\n"
+            "مثال: 100"
+        )
+        await state.set_state(AdminStates.waiting_product_min)
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح")
+
+@router.message(AdminStates.waiting_product_min)
+async def get_product_min(message: types.Message, state: FSMContext):
+    """استلام الحد الأدنى"""
+    try:
+        min_units = int(message.text)
+        await state.update_data(product_min=min_units)
+        await message.answer(
+            "📈 **أدخل نسبة الربح (%):**\n"
+            "مثال: 10"
+        )
+        await state.set_state(AdminStates.waiting_product_profit)
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح")
+
+@router.message(AdminStates.waiting_product_profit)
+async def get_product_profit(message: types.Message, state: FSMContext, db_pool):
+    """استلام نسبة الربح وحفظ المنتج"""
+    try:
+        profit = float(message.text)
+        data = await state.get_data()
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type)
+                VALUES ($1, $2, $3, $4, $5, 'service')
+            ''', 
+            data['product_name'],
+            data['product_price'],
+            data['product_min'],
+            profit,
+            data['category_id']
+            )
+        
+        await message.answer(
+            f"✅ **تم إضافة المنتج بنجاح!**\n\n"
+            f"📱 الاسم: {data['product_name']}\n"
+            f"💰 السعر: ${data['product_price']}\n"
+            f"📦 الحد الأدنى: {data['product_min']}\n"
+            f"📈 الربح: {profit}%"
+        )
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح")
+    except Exception as e:
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+@router.callback_query(F.data == "edit_product")
+async def edit_product_list(callback: types.CallbackQuery, db_pool):
+    """عرض قائمة المنتجات للتعديل"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        products = await conn.fetch('''
+            SELECT a.id, a.name, c.display_name 
+            FROM applications a
+            LEFT JOIN categories c ON a.category_id = c.id
+            ORDER BY c.sort_order, a.name
+        ''')
+    
+    if not products:
+        await callback.answer("❌ لا توجد منتجات", show_alert=True)
+        return
+    
+    builder = InlineKeyboardBuilder()
+    for p in products:
+        builder.row(types.InlineKeyboardButton(
+            text=f"{p['name']} ({p['display_name']})",
+            callback_data=f"edit_prod_{p['id']}"
+        ))
+    
+    await callback.message.edit_text(
+        "✏️ **اختر المنتج للتعديل:**",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("edit_prod_"))
+async def edit_product_form(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """عرض نموذج تعديل المنتج"""
+    prod_id = int(callback.data.split("_")[2])
+    
+    async with db_pool.acquire() as conn:
+        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", prod_id)
+    
+    if not product:
+        await callback.answer("❌ المنتج غير موجود", show_alert=True)
+        return
+    
+    await state.update_data(product_id=prod_id)
+    
+    text = (
+        f"✏️ **تعديل المنتج:** {product['name']}\n\n"
+        f"السعر الحالي: ${product['unit_price_usd']}\n"
+        f"الحد الأدنى: {product['min_units']}\n"
+        f"الربح: {product['profit_percentage']}%\n\n"
+        f"📝 أرسل البيانات الجديدة بالصيغة:\n"
+        f"`الاسم|السعر|الحد_الأدنى|الربح`\n\n"
+        f"مثال: `اسم جديد|0.002|200|15`"
+    )
+    
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await state.set_state(AdminStates.waiting_product_id)
+
+@router.message(AdminStates.waiting_product_id)
+async def update_product(message: types.Message, state: FSMContext, db_pool):
+    """تحديث بيانات المنتج"""
+    try:
+        parts = message.text.split('|')
+        if len(parts) != 4:
+            return await message.answer("❌ صيغة غير صحيحة. استخدم: `الاسم|السعر|الحد_الأدنى|الربح`")
+        
+        name, price, min_units, profit = [p.strip() for p in parts]
+        
+        data = await state.get_data()
+        prod_id = data['product_id']
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE applications 
+                SET name = $1, unit_price_usd = $2, min_units = $3, profit_percentage = $4
+                WHERE id = $5
+            ''', name, float(price), int(min_units), float(profit), prod_id)
+        
+        await message.answer(f"✅ **تم تحديث المنتج بنجاح!**")
+        await state.clear()
+        
+    except Exception as e:
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+@router.callback_query(F.data == "delete_product")
+async def delete_product_list(callback: types.CallbackQuery, db_pool):
+    """عرض قائمة المنتجات للحذف"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        products = await conn.fetch('''
+            SELECT a.id, a.name, c.display_name 
+            FROM applications a
+            LEFT JOIN categories c ON a.category_id = c.id
+            ORDER BY c.sort_order, a.name
+        ''')
+    
+    if not products:
+        await callback.answer("❌ لا توجد منتجات", show_alert=True)
+        return
+    
+    builder = InlineKeyboardBuilder()
+    for p in products:
+        builder.row(types.InlineKeyboardButton(
+            text=f"🗑️ {p['name']} ({p['display_name']})",
+            callback_data=f"del_prod_{p['id']}"
+        ))
+    
+    await callback.message.edit_text(
+        "🗑️ **اختر المنتج للحذف:**",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("del_prod_"))
+async def confirm_delete_product(callback: types.CallbackQuery, db_pool):
+    """تأكيد حذف المنتج"""
+    prod_id = int(callback.data.split("_")[2])
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ نعم", callback_data=f"conf_del_{prod_id}"),
+        types.InlineKeyboardButton(text="❌ لا", callback_data="cancel_del")
+    )
+    
+    await callback.message.edit_text(
+        "⚠️ **هل أنت متأكد من حذف هذا المنتج؟**",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("conf_del_"))
+async def execute_delete_product(callback: types.CallbackQuery, db_pool):
+    """تنفيذ حذف المنتج"""
+    prod_id = int(callback.data.split("_")[2])
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM applications WHERE id = $1", prod_id)
+    
+    await callback.message.edit_text("✅ **تم حذف المنتج بنجاح!**")
+
+@router.callback_query(F.data == "list_products")
+async def list_products(callback: types.CallbackQuery, db_pool):
+    """عرض جميع المنتجات"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        products = await conn.fetch('''
+            SELECT a.*, c.display_name 
+            FROM applications a
+            LEFT JOIN categories c ON a.category_id = c.id
+            ORDER BY c.sort_order, a.name
+        ''')
+    
+    if not products:
+        await callback.answer("❌ لا توجد منتجات", show_alert=True)
+        return
+    
+    text = "📱 **قائمة المنتجات**\n\n"
+    for p in products:
+        text += (
+            f"**{p['name']}**\n"
+            f"• القسم: {p['display_name']}\n"
+            f"• السعر: ${p['unit_price_usd']}\n"
+            f"• الحد الأدنى: {p['min_units']}\n"
+            f"• الربح: {p['profit_percentage']}%\n"
+            f"• النوع: {p['type']}\n"
+            f"• الحالة: {'✅ نشط' if p['is_active'] else '❌ غير نشط'}\n\n"
+        )
+    
+    await callback.message.edit_text(text, parse_mode="Markdown")
+
+# ============= تصفير البوت =============
+@router.callback_query(F.data == "reset_bot")
+async def reset_bot_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء عملية تصفير البوت"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="⚠️ نعم، تصفير البوت", callback_data="confirm_reset"),
+        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_del")
+    )
+    
+    await callback.message.edit_text(
+        "⚠️ **تحذير: تصفير البوت** ⚠️\n\n"
+        "هذا الإجراء سيقوم بحذف:\n"
+        "• جميع المستخدمين\n"
+        "• جميع طلبات الشحن\n"
+        "• جميع طلبات التطبيقات\n"
+        "• جميع النقاط وسجل النقاط\n"
+        "• جميع الإحالات\n\n"
+        "**سيتم الاحتفاظ بالمشرفين فقط.**\n\n"
+        "هل أنت متأكد؟",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "confirm_reset")
+async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
+    """طلب سعر الصرف الجديد بعد التصفير"""
+    await callback.message.edit_text(
+        "💰 **أدخل سعر الصرف الجديد**\n"
+        "مثال: 25000\n\n"
+        "سيتم استخدام هذا السعر بعد تصفير البوت."
+    )
+    await state.set_state(AdminStates.waiting_reset_rate)
+
+@router.message(AdminStates.waiting_reset_rate)
+async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
+    """تنفيذ تصفير البوت"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        new_rate = float(message.text)
+        
+        from config import ADMIN_ID, MODERATORS
+        admin_ids = [ADMIN_ID] + MODERATORS
+        admin_ids_str = ','.join([str(id) for id in admin_ids if id])
+        
+        async with db_pool.acquire() as conn:
+            # 1. مسح سجل النقاط
+            await conn.execute("DELETE FROM points_history")
+            
+            # 2. مسح طلبات الاسترداد
+            await conn.execute("DELETE FROM redemption_requests")
+            
+            # 3. مسح طلبات الشحن
+            await conn.execute("DELETE FROM deposit_requests")
+            
+            # 4. مسح طلبات التطبيقات
+            await conn.execute("DELETE FROM orders")
+            
+            # 5. مسح المستخدمين (مع الاحتفاظ بالمشرفين)
+            if admin_ids_str:
+                await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
+                
+                # إعادة ضبط المشرفين
+                for admin_id in admin_ids:
+                    if admin_id:
+                        await conn.execute('''
+                            UPDATE users 
+                            SET balance = 0, total_points = 0, total_deposits = 0, 
+                                total_orders = 0, referral_count = 0, referral_earnings = 0,
+                                total_points_earned = 0, total_points_redeemed = 0
+                            WHERE user_id = $1
+                        ''', admin_id)
+            else:
+                await conn.execute("DELETE FROM users")
+            
+            # 6. تحديث سعر الصرف
+            await conn.execute('''
+                INSERT INTO bot_settings (key, value, description) 
+                VALUES ('usd_to_syp', $1, 'سعر صرف الدولار مقابل الليرة')
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            ''', str(new_rate))
+            
+            # 7. إعادة ضبط إعدادات النقاط
+            await conn.execute('''
+                UPDATE bot_settings SET value = '5' 
+                WHERE key IN ('points_per_order', 'points_per_referral')
+            ''')
+        
+        await message.answer(
+            f"✅ **تم تصفير البوت بنجاح!**\n\n"
+            f"💰 سعر الصرف الجديد: {new_rate} ل.س\n"
+            f"⭐ نقاط لكل طلب: 5\n"
+            f"🔗 نقاط لكل إحالة: 5\n\n"
+            f"البوت الآن جاهز للبدء من جديد!"
+        )
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح")
+    except Exception as e:
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+@router.callback_query(F.data == "cancel_del")
+async def cancel_action(callback: types.CallbackQuery):
+    """إلغاء أي عملية"""
+    await callback.message.edit_text("✅ تم الإلغاء.")
 
 # إدارة النقاط
 @router.callback_query(F.data == "manage_points")
