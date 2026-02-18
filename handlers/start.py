@@ -61,7 +61,7 @@ def get_back_keyboard():
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, db_pool):
-    """معالج أمر /start مع دعم الإحالات"""
+    """معالج أمر /start مع دعم الإحالات والتحقق من اشتراك القناة"""
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name or ""
@@ -76,6 +76,39 @@ async def cmd_start(message: types.Message, db_pool):
     is_banned = False
     total_points = 0
     is_new_user = False
+    
+    # ========== التحقق من اشتراك القناة ==========
+    channel_username = "@LINKcharger22"  # اسم القناة بدون https
+    try:
+        member = await message.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        is_member = member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        # إذا كان البوت ليس مشرفاً في القناة أو القناة خاصة، قد يحدث خطأ
+        print(f"⚠️ خطأ في التحقق من القناة: {e}")
+        # نعطي المستخدم فرصة، أو نطلب منه الاشتراك بطريقة أخرى
+        is_member = False  # للأمان نعتبره غير مشترك
+    
+    if not is_member:
+        # المستخدم غير مشترك، نطلب منه الاشتراك
+        join_button = InlineKeyboardBuilder()
+        join_button.row(types.InlineKeyboardButton(
+            text="📢 انضم إلى القناة",
+            url="https://t.me/LINKcharger22"
+        ))
+        join_button.row(types.InlineKeyboardButton(
+            text="✅ تحقق من الاشتراك",
+            callback_data="check_subscription"
+        ))
+        
+        await message.answer(
+            "❌ **عذراً، يجب الاشتراك في قناتنا أولاً لاستخدام البوت.**\n\n"
+            "📢 **قناة البوت:** @LINKcharger22\n\n"
+            "🔹 بعد الاشتراك، اضغط على زر 'تحقق من الاشتراك'.",
+            reply_markup=join_button.as_markup(),
+            parse_mode="Markdown"
+        )
+        return  # نوقف التنفيذ هنا
+    # =============================================
     
     async with db_pool.acquire() as conn:
         # التحقق من وجود المستخدم
@@ -114,6 +147,7 @@ async def cmd_start(message: types.Message, db_pool):
             except Exception as e:
                 print(f"خطأ في إنشاء كود إحالة: {e}")
             
+            # ========== نص الترحيب للمستخدم الجديد ==========
             welcome_text = (
                 "🎉 أهلاً بك في LINK 🔗 BOT لخدمات الشحن!\n\n"
                 "🌟 تم إنشاء حسابك بنجاح\n\n"
@@ -124,6 +158,7 @@ async def cmd_start(message: types.Message, db_pool):
                 "• 🔗 دعوة أصدقائك وكسب نقاط إضافية\n\n"
                 "🔹 لبدء الاستخدام، اختر من القائمة أدناه."
             )
+            # ===============================================
             
             # ========== معالجة الإحالة للمستخدم الجديد ==========
             if referral_code:
@@ -240,6 +275,7 @@ async def cmd_start(message: types.Message, db_pool):
             except:
                 total_points = 0
             
+            # ========== نص الترحيب للمستخدم العائد ==========
             welcome_text = (
                 f"👋 أهلاً بعودتك {first_name or ''}!\n\n"
                 f"📊 ملخص حسابك:\n"
@@ -247,6 +283,7 @@ async def cmd_start(message: types.Message, db_pool):
                 f"⭐ النقاط: {total_points}\n\n"
                 "🔸 اختر ما تريد من القائمة."
             )
+            # ================================================
     
     # التحقق من الحظر - بعد كل العمليات
     if is_banned:
@@ -261,7 +298,26 @@ async def cmd_start(message: types.Message, db_pool):
         welcome_text,
         reply_markup=get_main_menu_keyboard(is_admin(user_id))
     )
-
+@router.callback_query(F.data == "check_subscription")
+async def check_subscription(callback: types.CallbackQuery, db_pool):
+    """التحقق من اشتراك المستخدم بعد الانضمام للقناة"""
+    user_id = callback.from_user.id
+    channel_username = "@LINKcharger22"
+    
+    try:
+        member = await callback.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        is_member = member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        print(f"⚠️ خطأ في التحقق من القناة: {e}")
+        is_member = False
+    
+    if is_member:
+        # المستخدم مشترك الآن، نرسل له الترحيب وندعو الدالة الأصلية
+        await callback.message.delete()
+        await cmd_start(callback.message, db_pool)
+    else:
+        await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
+        
 @router.message(F.text == "🔙 رجوع للقائمة")
 async def back_to_main_menu(message: types.Message, db_pool):
     """معالجة زر الرجوع للقائمة الرئيسية"""
