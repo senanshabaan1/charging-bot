@@ -12,6 +12,12 @@ from datetime import datetime
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "secret_key_for_session_management")
 
+# إعدادات إضافية للسيرفر على Render
+app.config['SESSION_COOKIE_SECURE'] = True      # مهم للـ HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_SECURE'] = True
+
 @app.route('/health')
 def health():
     """مسار للتحقق من صحة الخدمة - مهم لـ Render"""
