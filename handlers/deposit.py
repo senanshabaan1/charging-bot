@@ -42,15 +42,20 @@ async def back_from_deposit(callback: types.CallbackQuery):
         reply_markup=get_back_keyboard()
     )
 
+# في handlers/deposit.py - عدل دالة start_dep
+
 @router.callback_query(F.data.startswith("m_"))
 async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء عملية الشحن - مع جلب سعر الصرف من قاعدة البيانات"""
     method = callback.data
     
     # جلب سعر الصرف الحالي من قاعدة البيانات
-    from database import get_exchange_rate
+    from database import get_exchange_rate, get_syriatel_numbers
     current_rate = await get_exchange_rate(db_pool)
     logger.info(f"💰 سعر الصرف الحالي للشحن: {current_rate}")
+    
+    # جلب أرقام سيرياتل من قاعدة البيانات
+    syriatel_nums = await get_syriatel_numbers(db_pool)
     
     if method == "m_sham_syp":
         method_name = "شام كاش (ل.س)"
@@ -60,7 +65,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
         wallet = SHAM_CASH_NUM_USD
     elif method == "m_syr":
         method_name = "سيرياتل كاش"
-        wallet = SYRIATEL_NUMS[0] if SYRIATEL_NUMS else "غير محدد"
+        wallet = syriatel_nums[0] if syriatel_nums else "غير محدد"
     elif method == "m_usdt":
         method_name = "USDT BEP20"
         wallet = USDT_BEP20_WALLET
@@ -72,7 +77,8 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
         method=method,
         method_name=method_name,
         wallet=wallet,
-        current_rate=current_rate
+        current_rate=current_rate,
+        syriatel_nums=syriatel_nums  # حفظ الأرقام في حالة المستخدم
     )
     
     await state.set_state(DepStates.waiting_amount)
@@ -122,21 +128,15 @@ async def get_amount(message: types.Message, state: FSMContext):
         display_amount=display_amount
     )
     
-    if data['method'] == "m_syr":
-        # عرض أرقام سيرياتل كاش مع إمكانية النسخ
-        nums_text = ""
-        for i, num in enumerate(SYRIATEL_NUMS, 1):
-            nums_text += f"📞 **رقم {i}:** `{num}`\n"
-        
-        await message.answer(
-            f"📤 **تحويل {display_amount}**\n\n"
-            f"{nums_text}\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية (12 رقم):**\n"
-            f"💡 *اضغط على الرقم لنسخه*",
-            reply_markup=get_back_keyboard(),
-            parse_mode="Markdown"
-        )
-        await state.set_state(DepStates.waiting_tx)
+if data['method'] == "m_syr":
+    nums = "\n".join(data.get('syriatel_nums', ["74091109", "63826779"]))
+    await message.answer(
+        f"📤 **تحويل {display_amount}**\n\n"
+        f"📞 **إلى الرقم:**\n`{nums}`\n\n"
+        f"✅ بعد التحويل، أرسل **رقم العملية** (12 رقم):",
+        reply_markup=get_back_keyboard()
+    )
+    await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] in ["m_sham_syp", "m_sham_usd"]:
         await message.answer(
