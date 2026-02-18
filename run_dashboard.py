@@ -182,7 +182,440 @@ def update_rate():
     return redirect(url_for('index'))
 
 # باقي الدوال (deposit_action, order_action, user_management, etc) كما هي...
+@app.route('/user_management')
+@login_required
+def user_management():
+    """إدارة المستخدمين"""
+    conn = get_db_connection()
+    if not conn:
+        return "خطأ في الاتصال بقاعدة البيانات", 500
 
+    cur = conn.cursor()
+    
+    # جلب المستخدمين
+    cur.execute("SELECT user_id, username, balance, is_banned, created_at FROM users ORDER BY created_at DESC")
+    users = cur.fetchall()
+    
+    # إحصائيات المستخدمين
+    cur.execute("SELECT COUNT(*) as total, SUM(CASE WHEN is_banned THEN 1 ELSE 0 END) as banned FROM users")
+    user_stats = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    return render_template('users.html',
+                          users=users,
+                          user_stats=user_stats,
+                          rate=config.USD_TO_SYP)
+
+@app.route('/user_action/<int:user_id>', methods=['POST'])
+@login_required
+def user_action(user_id):
+    """إجراءات على المستخدم"""
+    action = request.form.get('action')
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        if action == 'toggle_ban':
+            # تبديل حالة الحظر
+            cur.execute('UPDATE users SET is_banned = NOT is_banned WHERE user_id = %s', (user_id,))
+            flash(f'تم تغيير حالة حظر المستخدم {user_id}', 'info')
+
+        elif action == 'set_balance':
+            new_bal = request.form.get('balance')
+            if new_bal:
+                cur.execute('UPDATE users SET balance = %s WHERE user_id = %s', (float(new_bal), user_id))
+                flash(f'تم تحديث رصيد المستخدم {user_id} إلى {new_bal}', 'success')
+
+        conn.commit()
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for('user_management'))
+
+@app.route('/applications')
+@login_required
+def applications_management():
+    """إدارة التطبيقات"""
+    conn = get_db_connection()
+    if not conn:
+        return "خطأ في الاتصال بقاعدة البيانات", 500
+
+    cur = conn.cursor()
+    
+    # جلب الأقسام
+    cur.execute("SELECT id, name, display_name, icon FROM categories ORDER BY sort_order")
+    categories = cur.fetchall()
+    
+    # جلب التطبيقات مع أقسامها
+    cur.execute("""
+        SELECT a.id, a.name, a.unit_price_usd, a.min_units, a.profit_percentage, 
+               a.category_id, c.display_name as category_name, c.icon as category_icon
+        FROM applications a
+        LEFT JOIN categories c ON a.category_id = c.id
+        ORDER BY c.sort_order, a.id
+    """)
+    applications = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+    
+    return render_template('applications.html',
+                          applications=applications,
+                          categories=categories,
+                          rate=config.USD_TO_SYP)
+
+@app.route('/add_application', methods=['POST'])
+@login_required
+def add_application():
+    """إضافة تطبيق جديد"""
+    name = request.form.get('name')
+    unit_price = request.form.get('unit_price')
+    min_units = request.form.get('min_units')
+    profit_percentage = request.form.get('profit_percentage', 10)
+    category_id = request.form.get('category_id')
+    
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # التحقق إذا كان التطبيق موجوداً بالفعل
+        cur.execute("SELECT id FROM applications WHERE name = %s", (name,))
+        existing = cur.fetchone()
+        
+        if existing:
+            flash(f'التطبيق "{name}" موجود بالفعل!', 'danger')
+        else:
+            cur.execute(
+                "INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id) VALUES (%s, %s, %s, %s, %s)",
+                (name, float(unit_price), int(min_units), float(profit_percentage), category_id)
+            )
+            conn.commit()
+            
+            flash(f'✅ تم إضافة التطبيق "{name}" بنجاح', 'success')
+            
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+    return redirect(url_for('applications_management'))
+
+@app.route('/edit_application/<int:app_id>', methods=['POST'])
+@login_required
+def edit_application(app_id):
+    """تعديل تطبيق"""
+    name = request.form.get('name')
+    unit_price = request.form.get('unit_price')
+    min_units = request.form.get('min_units')
+    profit_percentage = request.form.get('profit_percentage', 10)
+    category_id = request.form.get('category_id')
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute(
+            "UPDATE applications SET name = %s, unit_price_usd = %s, min_units = %s, profit_percentage = %s, category_id = %s WHERE id = %s",
+            (name, float(unit_price), int(min_units), float(profit_percentage), category_id, app_id)
+        )
+        conn.commit()
+        
+        flash(f'✅ تم تحديث التطبيق "{name}" بنجاح', 'success')
+        
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+    return redirect(url_for('applications_management'))
+
+@app.route('/delete_application/<int:app_id>', methods=['POST'])
+@login_required
+def delete_application(app_id):
+    """حذف تطبيق"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # الحصول على اسم التطبيق قبل الحذف
+        cur.execute("SELECT name FROM applications WHERE id = %s", (app_id,))
+        app = cur.fetchone()
+        
+        if app:
+            app_name = app[0]
+            cur.execute("DELETE FROM applications WHERE id = %s", (app_id,))
+            conn.commit()
+            flash(f'✅ تم حذف التطبيق "{app_name}" بنجاح', 'success')
+        else:
+            flash('❌ التطبيق غير موجود', 'danger')
+            
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+    return redirect(url_for('applications_management'))
+
+@app.route('/categories')
+@login_required
+def categories_management():
+    """إدارة الأقسام"""
+    conn = get_db_connection()
+    if not conn:
+        return "خطأ في الاتصال بقاعدة البيانات", 500
+
+    cur = conn.cursor()
+    
+    # جلب الأقسام
+    cur.execute("SELECT id, name, display_name, icon, sort_order FROM categories ORDER BY sort_order")
+    categories = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+    
+    return render_template('categories.html',
+                          categories=categories)
+
+@app.route('/add_category', methods=['POST'])
+@login_required
+def add_category():
+    """إضافة قسم جديد"""
+    name = request.form.get('name')
+    display_name = request.form.get('display_name')
+    icon = request.form.get('icon', '📁')
+    sort_order = request.form.get('sort_order', 0)
+    
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute(
+            "INSERT INTO categories (name, display_name, icon, sort_order) VALUES (%s, %s, %s, %s)",
+            (name, display_name, icon, int(sort_order))
+        )
+        conn.commit()
+        
+        flash(f'✅ تم إضافة القسم "{display_name}" بنجاح', 'success')
+        
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+    return redirect(url_for('categories_management'))
+
+@app.route('/edit_category/<int:cat_id>', methods=['POST'])
+@login_required
+def edit_category(cat_id):
+    """تعديل قسم"""
+    name = request.form.get('name')
+    display_name = request.form.get('display_name')
+    icon = request.form.get('icon')
+    sort_order = request.form.get('sort_order')
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        cur.execute(
+            "UPDATE categories SET name = %s, display_name = %s, icon = %s, sort_order = %s WHERE id = %s",
+            (name, display_name, icon, int(sort_order), cat_id)
+        )
+        conn.commit()
+        
+        flash(f'✅ تم تحديث القسم "{display_name}" بنجاح', 'success')
+        
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+    return redirect(url_for('categories_management'))
+
+@app.route('/delete_category/<int:cat_id>', methods=['POST'])
+@login_required
+def delete_category(cat_id):
+    """حذف قسم"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # التحقق من عدم وجود تطبيقات في هذا القسم
+        cur.execute("SELECT COUNT(*) FROM applications WHERE category_id = %s", (cat_id,))
+        count = cur.fetchone()[0]
+        
+        if count > 0:
+            flash(f'❌ لا يمكن حذف القسم لأنه يحتوي على {count} تطبيق/تطبيقات', 'danger')
+        else:
+            cur.execute("DELETE FROM categories WHERE id = %s", (cat_id,))
+            conn.commit()
+            flash(f'✅ تم حذف القسم بنجاح', 'success')
+            
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+    return redirect(url_for('categories_management'))
+
+@app.route('/deposit_action/<int:deposit_id>', methods=['POST'])
+@login_required
+def deposit_action(deposit_id):
+    """معالجة طلب الإيداع"""
+    action = request.form.get('action')
+    notes = request.form.get('notes', '')
+    
+    conn = get_db_connection()
+    if not conn:
+        flash('خطأ في الاتصال بقاعدة البيانات', 'danger')
+        return redirect(url_for('index'))
+
+    cur = conn.cursor()
+
+    try:
+        if action == 'approve':
+            # جلب معلومات الطلب
+            cur.execute("SELECT user_id, amount_syp FROM deposit_requests WHERE id = %s", (deposit_id,))
+            deposit = cur.fetchone()
+            
+            if deposit:
+                user_id, amount_syp = deposit
+                # تحديث رصيد المستخدم
+                cur.execute("UPDATE users SET balance = balance + %s, total_deposits = total_deposits + %s WHERE user_id = %s", 
+                           (amount_syp, amount_syp, user_id))
+                # تحديث حالة الطلب
+                cur.execute("UPDATE deposit_requests SET status = 'approved', admin_notes = %s WHERE id = %s", (notes, deposit_id))
+                flash(f'تمت الموافقة على طلب الشحن #{deposit_id} وإضافة {amount_syp} ل.س للمستخدم {user_id}', 'success')
+        
+        elif action == 'reject':
+            cur.execute("UPDATE deposit_requests SET status = 'rejected', admin_notes = %s WHERE id = %s", (notes, deposit_id))
+            flash(f'تم رفض طلب الشحن #{deposit_id}', 'info')
+
+        conn.commit()
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for('index'))
+
+@app.route('/order_action/<int:order_id>', methods=['POST'])
+@login_required
+def order_action(order_id):
+    """معالجة طلب التطبيق"""
+    action = request.form.get('action')
+    notes = request.form.get('notes', '')
+    
+    conn = get_db_connection()
+    if not conn:
+        flash('خطأ في الاتصال بقاعدة البيانات', 'danger')
+        return redirect(url_for('index'))
+
+    cur = conn.cursor()
+
+    try:
+        if action == 'complete':
+            # تحديث حالة الطلب إلى مكتمل
+            cur.execute("UPDATE orders SET status = 'completed', admin_notes = %s WHERE id = %s", 
+                       (notes, order_id))
+            flash(f'تم تأكيد تنفيذ الطلب #{order_id}', 'success')
+        
+        elif action == 'failed':
+            # جلب معلومات الطلب لإعادة الرصيد
+            cur.execute("SELECT user_id, total_amount_syp FROM orders WHERE id = %s", (order_id,))
+            order = cur.fetchone()
+            
+            if order:
+                user_id, amount_syp = order
+                # إعادة الرصيد للمستخدم
+                cur.execute("UPDATE users SET balance = balance + %s WHERE user_id = %s", 
+                           (amount_syp, user_id))
+                # تحديث حالة الطلب إلى فاشل
+                cur.execute("UPDATE orders SET status = 'failed', admin_notes = %s WHERE id = %s", 
+                           (notes, order_id))
+                flash(f'تم إلغاء الطلب #{order_id} وإعادة الرصيد للمستخدم', 'info')
+
+        conn.commit()
+    except Exception as e:
+        flash(f'حدث خطأ: {e}', 'danger')
+    finally:
+        cur.close()
+        conn.close()
+
+    return redirect(url_for('index'))
+
+@app.route('/get_user_info/<int:user_id>')
+@login_required
+def get_user_info(user_id):
+    """جلب معلومات المستخدم بصيغة JSON"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT user_id, username, balance, is_banned, created_at,
+               total_deposits, total_orders, last_activity
+        FROM users WHERE user_id = %s
+    """, (user_id,))
+    user = cur.fetchone()
+    
+    cur.execute("""
+        SELECT COUNT(*), SUM(amount_syp) 
+        FROM deposit_requests 
+        WHERE user_id = %s AND status = 'approved'
+    """, (user_id,))
+    deposits = cur.fetchone()
+    
+    cur.execute("""
+        SELECT COUNT(*), SUM(total_amount_syp) 
+        FROM orders 
+        WHERE user_id = %s AND status = 'completed'
+    """, (user_id,))
+    orders = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    if user:
+        return jsonify({
+            'user_id': user[0],
+            'username': user[1] or 'غير محدد',
+            'balance': user[2],
+            'is_banned': user[3],
+            'created_at': user[4].strftime('%Y-%m-%d %H:%M:%S') if user[4] else 'غير محدد',
+            'total_deposits': user[5] or 0,
+            'total_orders': user[6] or 0,
+            'last_activity': user[7].strftime('%Y-%m-%d %H:%M:%S') if user[7] else 'غير محدد',
+            'approved_deposits_count': deposits[0] or 0,
+            'approved_deposits_amount': deposits[1] or 0,
+            'completed_orders_count': orders[0] or 0,
+            'completed_orders_amount': orders[1] or 0
+        })
+    
+    return jsonify({'error': 'User not found'})
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     port = int(os.environ.get('PORT', 5000))
