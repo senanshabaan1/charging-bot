@@ -16,10 +16,12 @@ MODERATORS = [int(x) for x in os.getenv("MODERATORS", "").split(",") if x]
 # الأولوية لـ DATABASE_URL (من Render)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+print(f"🔍 DATABASE_URL found: {'Yes' if DATABASE_URL else 'No'}")  # للتأكد
+
 if DATABASE_URL:
     # تحليل رابط PostgreSQL من Render
-    # مثال: postgresql://user:password@host:port/dbname
     try:
+        # مثال: postgresql://user:password@host:port/dbname
         import re
         match = re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
         if match:
@@ -34,12 +36,9 @@ if DATABASE_URL:
             print(f"✅ Using Render database: {host}/{database}")
         else:
             # إذا ما انطابق النمط، استخدم الرابط مباشرة
+            print("⚠️ DATABASE_URL format not recognized, using as dsn")
             DB_CONFIG = {
-                "host": os.getenv("DB_HOST", "localhost"),
-                "port": os.getenv("DB_PORT", "5432"),
-                "database": os.getenv("DB_NAME", "charging_bot"),
-                "user": os.getenv("DB_USER", "postgres"),
-                "password": os.getenv("DB_PASSWORD", "")
+                "dsn": DATABASE_URL
             }
     except Exception as e:
         print(f"⚠️ Error parsing DATABASE_URL: {e}, using fallback config")
@@ -51,7 +50,7 @@ if DATABASE_URL:
             "password": os.getenv("DB_PASSWORD", "")
         }
 else:
-    # إذا ما في DATABASE_URL، استخدم الإعدادات العادية
+    print("⚠️ No DATABASE_URL found, using local config")
     DB_CONFIG = {
         "host": os.getenv("DB_HOST", "localhost"),
         "port": os.getenv("DB_PORT", "5432"),
