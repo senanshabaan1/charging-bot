@@ -128,24 +128,22 @@ async def get_amount(message: types.Message, state: FSMContext):
         display_amount=display_amount
     )
     
-if data['method'] == "m_syr":
-    nums = "\n".join(data.get('syriatel_nums', ["74091109", "63826779"]))
-    await message.answer(
-        f"📤 **تحويل {display_amount}**\n\n"
-        f"📞 **إلى الرقم:**\n`{nums}`\n\n"
-        f"✅ بعد التحويل، أرسل **رقم العملية** (12 رقم):",
-        reply_markup=get_back_keyboard()
-    )
-    await state.set_state(DepStates.waiting_tx)
+    if data['method'] == "m_syr":
+        nums = "\n".join(data.get('syriatel_nums', ["74091109", "63826779"]))
+        await message.answer(
+            f"📤 **تحويل {display_amount}**\n\n"
+            f"📞 **إلى الرقم:**\n`{nums}`\n\n"
+            f"✅ بعد التحويل، أرسل **رقم العملية** (12 رقم):",
+            reply_markup=get_back_keyboard()
+        )
+        await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] in ["m_sham_syp", "m_sham_usd"]:
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
             f"👛 **إلى المحفظة:**\n`{data['wallet']}`\n\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
-            f"💡 *اضغط على المحفظة لنسخها*",
-            reply_markup=get_back_keyboard(),
-            parse_mode="Markdown"
+            f"✅ بعد التحويل، أرسل **رقم العملية**:",
+            reply_markup=get_back_keyboard()
         )
         await state.set_state(DepStates.waiting_tx)
     
@@ -153,10 +151,8 @@ if data['method'] == "m_syr":
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
             f"👛 **إلى العنوان (BEP20):**\n`{data['wallet']}`\n\n"
-            f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
-            f"💡 *اضغط على العنوان لنسخه*",
-            reply_markup=get_back_keyboard(),
-            parse_mode="Markdown"
+            f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**",
+            reply_markup=get_back_keyboard()
         )
         await state.set_state(DepStates.waiting_photo)
 
