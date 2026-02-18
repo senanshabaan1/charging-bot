@@ -50,6 +50,33 @@ async def main():
     dp = Dispatcher()
     dp["db_pool"] = db_pool  # هذا السطر مهم جداً!
     
+    # ========== إضافة Middleware للتحقق من حالة البوت ==========
+    @dp.message.middleware()
+    @dp.callback_query.middleware()
+    async def check_bot_status(handler, event, data):
+        """التحقق من حالة البوت قبل معالجة الأوامر"""
+        from database import get_bot_status
+        
+        user = event.from_user
+        from config import ADMIN_ID, MODERATORS
+        
+        # تحقق من حالة البوت
+        bot_status = await get_bot_status(db_pool)
+        
+        # إذا البوت متوقف والمستخدم ليس مشرف
+        if not bot_status and user.id != ADMIN_ID and user.id not in MODERATORS:
+            from database import get_maintenance_message
+            msg = await get_maintenance_message(db_pool)
+            
+            if isinstance(event, types.Message):
+                await event.answer(f"🛠 {msg}")
+            elif isinstance(event, types.CallbackQuery):
+                await event.answer(msg, show_alert=True)
+            return  # منع معالجة الحدث
+        
+        return await handler(event, data)
+    # =========================================================
+    
     # تسجيل الهاندلرز
     dp.include_routers(
         admin.router,
