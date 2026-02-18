@@ -3,6 +3,7 @@ asyncpg==0.30.0
 python-dotenv==1.0.0
 Flask==3.1.0
 psycopg2-binary==2.9.10
-aiohttp==3.11.11
+aiohttp==3.9.5  # إصدار أقدم قد يكون أكثر استقراراً
 pytz==2024.2
 gunicorn==21.2.0
+# لست بحاجة لتحديد pydantic أو pydantic-core هنا لأن aiogram سيجلبها
