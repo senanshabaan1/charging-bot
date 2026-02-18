@@ -1,23 +1,65 @@
 # config.py
 import os
 from dotenv import load_dotenv
+import re
 
-# تحميل المتغيرات من ملف .env
-load_dotenv()
+# تحميل المتغيرات من ملف .env (للتشغيل المحلي فقط)
+if os.path.exists('.env'):
+    load_dotenv()
 
 # التوكن والإعدادات الأساسية
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 MODERATORS = [int(x) for x in os.getenv("MODERATORS", "").split(",") if x]
 
-# قاعدة البيانات
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "port": os.getenv("DB_PORT", "5432"),
-    "database": os.getenv("DB_NAME", "charging_bot"),
-    "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "")
-}
+# ====== قسم قاعدة البيانات المعدل ======
+# الأولوية لـ DATABASE_URL (من Render)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if DATABASE_URL:
+    # تحليل رابط PostgreSQL من Render
+    # مثال: postgresql://user:password@host:port/dbname
+    try:
+        import re
+        match = re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
+        if match:
+            user, password, host, port, database = match.groups()
+            DB_CONFIG = {
+                "host": host,
+                "port": port,
+                "database": database,
+                "user": user,
+                "password": password
+            }
+            print(f"✅ Using Render database: {host}/{database}")
+        else:
+            # إذا ما انطابق النمط، استخدم الرابط مباشرة
+            DB_CONFIG = {
+                "host": os.getenv("DB_HOST", "localhost"),
+                "port": os.getenv("DB_PORT", "5432"),
+                "database": os.getenv("DB_NAME", "charging_bot"),
+                "user": os.getenv("DB_USER", "postgres"),
+                "password": os.getenv("DB_PASSWORD", "")
+            }
+    except Exception as e:
+        print(f"⚠️ Error parsing DATABASE_URL: {e}, using fallback config")
+        DB_CONFIG = {
+            "host": os.getenv("DB_HOST", "localhost"),
+            "port": os.getenv("DB_PORT", "5432"),
+            "database": os.getenv("DB_NAME", "charging_bot"),
+            "user": os.getenv("DB_USER", "postgres"),
+            "password": os.getenv("DB_PASSWORD", "")
+        }
+else:
+    # إذا ما في DATABASE_URL، استخدم الإعدادات العادية
+    DB_CONFIG = {
+        "host": os.getenv("DB_HOST", "localhost"),
+        "port": os.getenv("DB_PORT", "5432"),
+        "database": os.getenv("DB_NAME", "charging_bot"),
+        "user": os.getenv("DB_USER", "postgres"),
+        "password": os.getenv("DB_PASSWORD", "")
+    }
+# =======================================
 
 # أرقام الدفع
 SYRIATEL_NUMS = os.getenv("SYRIATEL_NUMS", "").split(",")
@@ -32,26 +74,13 @@ ORDERS_GROUP = int(os.getenv("ORDERS_GROUP", "0"))
 # إعدادات الويب
 WEB_USERNAME = os.getenv("WEB_USERNAME", "admin")
 WEB_PASSWORD = os.getenv("WEB_PASSWORD", "admin")
-WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
-WEB_PORT = int(os.getenv("WEB_PORT", "5000"))
 
 # سعر الصرف الافتراضي
 USD_TO_SYP = int(os.getenv("DEFAULT_USD_TO_SYP", "118"))
-BOT_STATUS = True  # حالة البوت (يعمل/متوقف)
-
-# إعدادات API (اختياري)
-EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL", "https://api.example.com/order")
-EXTERNAL_API_KEY = os.getenv("EXTERNAL_API_KEY", "")
-
-# أقسام التطبيقات
-APP_CATEGORIES = {
-    "games": "🎮 ألعاب",
-    "services": "🛠 خدمات"
-}
+BOT_STATUS = True
 
 # دالة لتحميل سعر الصرف من قاعدة البيانات
 async def load_exchange_rate(pool):
-    """تحميل سعر الصرف من قاعدة البيانات"""
     from database import get_exchange_rate
     global USD_TO_SYP
     USD_TO_SYP = await get_exchange_rate(pool)
