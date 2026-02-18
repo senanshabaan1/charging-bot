@@ -187,13 +187,17 @@ async def init_db():
                 ('bot_status', 'running', 'حالة البوت (running/stopped)'),
                 ('maintenance_message', 'البوت قيد الصيانة حالياً، يرجى المحاولة لاحقاً', 'رسالة الصيانة'),
                 ('points_per_order', '5', 'نقاط لكل عملية شراء'),
-                ('points_per_deposit', '5', 'نقاط لكل عملية شحن'),
                 ('points_per_referral', '5', 'نقاط لكل عملية من خلال الإحالة'),
                 ('redemption_rate', '500', 'عدد النقاط مقابل 5 دولار'),
                 ('last_restart', CURRENT_TIMESTAMP::TEXT, 'آخر تشغيل للبوت')
             ON CONFLICT (key) DO NOTHING;
         ''')
-
+       # ===== إضافة مفتاح أرقام سيرياتل إلى قاعدة البيانات =====
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value, description) 
+            VALUES ('syriatel_nums', '74091109,63826779', 'أرقام سيرياتل كاش')
+            ON CONFLICT (key) DO NOTHING;
+        ''')
         # إضافة الأعمدة إذا لم تكن موجودة (للتحديثات)
         tables_columns = {
             'applications': [
@@ -1188,3 +1192,41 @@ async def set_exchange_rate(pool, rate):
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث سعر الصرف: {e}")
         return False
+        async def get_syriatel_numbers(pool):
+    """جلب أرقام سيرياتل من قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            numbers_str = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'syriatel_nums'"
+            )
+            if numbers_str:
+                return numbers_str.split(',')
+            else:
+                # القيم الافتراضية
+                default_nums = ["74091109", "63826779"]
+                await conn.execute('''
+                    INSERT INTO bot_settings (key, value, description) 
+                    VALUES ('syriatel_nums', $1, 'أرقام سيرياتل كاش')
+                    ON CONFLICT (key) DO UPDATE SET value = $1
+                ''', ','.join(default_nums))
+                return default_nums
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أرقام سيرياتل: {e}")
+        return ["74091109", "63826779"]
+
+async def set_syriatel_numbers(pool, numbers):
+    """حفظ أرقام سيرياتل في قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            numbers_str = ','.join(numbers)
+            await conn.execute('''
+                INSERT INTO bot_settings (key, value, description) 
+                VALUES ('syriatel_nums', $1, 'أرقام سيرياتل كاش')
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            ''', numbers_str)
+            logging.info(f"✅ تم تحديث أرقام سيرياتل: {numbers_str}")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في حفظ أرقام سيرياتل: {e}")
+        return False
+
