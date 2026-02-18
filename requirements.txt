@@ -1,0 +1,8 @@
+aiogram==3.17.0
+asyncpg==0.30.0
+python-dotenv==1.0.0
+Flask==3.1.0
+psycopg2-binary==2.9.10
+aiohttp==3.11.11
+pytz==2024.2
+gunicorn==21.2.0
