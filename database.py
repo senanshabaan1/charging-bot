@@ -1192,8 +1192,8 @@ async def set_exchange_rate(pool, rate):
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث سعر الصرف: {e}")
         return False
-        async def get_syriatel_numbers(pool):
-    """جلب أرقام سيرياتل من قاعدة البيانات"""
+async def get_syriatel_numbers(pool):
+    """جلب أرقام سيرياتل من قاعدة البيانات"""  # هذه السطر لازم يكون عنده 4 مسافات
     try:
         async with pool.acquire() as conn:
             numbers_str = await conn.fetchval(
@@ -1202,7 +1202,6 @@ async def set_exchange_rate(pool, rate):
             if numbers_str:
                 return numbers_str.split(',')
             else:
-                # القيم الافتراضية
                 default_nums = ["74091109", "63826779"]
                 await conn.execute('''
                     INSERT INTO bot_settings (key, value, description) 
