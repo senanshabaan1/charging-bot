@@ -956,12 +956,27 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
         except Exception as e:
             logger.error(f"❌ فشل إرسال رسالة الرفض للمستخدم {user_id}: {e}")
         
-        # تحديث رسالة المجموعة
+        # تحديث رسالة المجموعة - نسخة محسنة للصور والنصوص
         try:
-            await callback.message.edit_text(
-                callback.message.text + "\n\n❌ **تم رفض الطلب**",
-                reply_markup=None
-            )
+            # التحقق من نوع الرسالة (صورة أو نص)
+            current_text = callback.message.text or callback.message.caption or ""
+            
+            # إضافة نص الرفض
+            new_text = current_text + "\n\n❌ **تم رفض الطلب**"
+            
+            if callback.message.photo:
+                # إذا كانت رسالة تحتوي على صورة
+                await callback.message.edit_caption(
+                    caption=new_text,
+                    reply_markup=None
+                )
+            else:
+                # إذا كانت رسالة نصية عادية
+                await callback.message.edit_text(
+                    text=new_text,
+                    reply_markup=None
+                )
+            logger.info(f"✅ تم تحديث رسالة المجموعة للرفض")
         except Exception as e:
             logger.error(f"❌ فشل تحديث رسالة المجموعة: {e}")
         
