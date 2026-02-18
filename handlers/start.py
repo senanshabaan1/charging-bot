@@ -8,6 +8,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 router = Router()
+
 async def notify_admins(bot, message_text, db_pool=None):
     """إرسال إشعار لجميع المشرفين - مع التأكد من عدم التكرار"""
     from config import ADMIN_ID, MODERATORS
@@ -30,6 +31,7 @@ async def notify_admins(bot, message_text, db_pool=None):
     
     logger.info(f"✅ تم إرسال إشعار لـ {sent_count} مشرف")
     return sent_count
+
 # دالة التحقق من المشرفين
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -302,7 +304,7 @@ async def my_account(message: types.Message, db_pool):
     points_value_syp = points_value_usd * exchange_rate
     
     # قيمة 500 نقطة بالليرة
-    base_syp = 5 * exchange_rate  # 5 * 110 = 550 ل.س
+    base_syp = 5 * exchange_rate
     
     # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
@@ -323,9 +325,9 @@ async def my_account(message: types.Message, db_pool):
         f"📅 **اليوزر:** @{username or message.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value_syp:,.0f} ل.س\n"
-        f"💱 **سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:,.0f} ل.س)\n\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n"
+        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
@@ -334,6 +336,7 @@ async def my_account(message: types.Message, db_pool):
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
+
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
     """عرض رابط الإحالة"""
@@ -407,8 +410,9 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         
         from database import get_exchange_rate
         exchange_rate = await get_exchange_rate(db_pool)
-                # قيمة 500 نقطة بالليرة
-        base_syp = 5 * exchange_rate  # 5 * 110 = 550 ل.س
+        
+        # قيمة 500 نقطة بالليرة
+        base_syp = 5 * exchange_rate
         
         # جلب إجمالي النقاط المكتسبة (فقط النقاط الموجبة)
         points_earned = await conn.fetchval(
@@ -434,13 +438,13 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
     # حساب القيمة بالسعر الحالي
     points_value_usd = (current_points / redemption_rate) * 5
     points_value_syp = points_value_usd * exchange_rate
-    كل {redemption_rate} نقطة = 5$** ({base_syp:,.0f} ل.س)\n\n"
+    
     text = (
         f"⭐ **رصيد النقاط**\n\n"
         f"**نقاطك الحالية:** {current_points}\n"
-        f"**قيمتها:** {points_value_syp:,.0f} ل.س\n"
-        f"**سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 5$** ({base_syp:,.0f} ل.س)\n\n"             
+        f"**قيمتها:** {points_value_syp:.0f} ل.س\n"
+        f"**سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({base_syp:.0f} ل.س)\n\n"
         f"📊 **إحصائيات النقاط:**\n"
         f"• إجمالي النقاط المكتسبة: {points_earned}\n"
         f"• إجمالي النقاط المستخدمة: {abs(points_used)}\n"
@@ -461,6 +465,7 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
 @router.callback_query(F.data == "points_history_simple")
 async def points_history_simple(callback: types.CallbackQuery, db_pool):
     """عرض سجل النقاط"""
@@ -548,8 +553,8 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         )
     
     # حساب قيمة 500 نقطة بالليرة
-    base_usd = 5  # 5 دولار لكل 500 نقطة
-    base_syp = base_usd * exchange_rate  # 5 * 110 = 550 ل.س
+    base_usd = 5
+    base_syp = base_usd * exchange_rate
     
     # حساب المبالغ الممكنة
     max_redemptions = min(points // redemption_rate, 5)
@@ -557,11 +562,11 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     for i in range(1, max_redemptions + 1):
         points_needed = i * redemption_rate
-        syp_amount = i * base_syp  # i * 550 ل.س
-        usd_amount = i * base_usd  # i * 5 دولار
+        syp_amount = i * base_syp
+        usd_amount = i * base_usd
         
         builder.row(types.InlineKeyboardButton(
-            text=f"{usd_amount}$ ({syp_amount:,.0f} ل.س) - {points_needed} نقطة",
+            text=f"{usd_amount}$ ({syp_amount:.0f} ل.س) - {points_needed} نقطة",
             callback_data=f"redeem_{points_needed}_{syp_amount}_{exchange_rate}"
         ))
     
@@ -573,8 +578,8 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     text = (
         f"🎁 **استرداد النقاط**\n\n"
         f"لديك {points} نقطة\n"
-        f"💰 **سعر الصرف الحالي:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({base_syp:,.0f} ل.س)\n\n"
+        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({base_syp:.0f} ل.س)\n\n"
         f"اختر المبلغ الذي تريد استرداده:"
     )
     
@@ -608,8 +613,8 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
             await callback.message.edit_text(
                 f"✅ **تم إرسال طلب الاسترداد بنجاح!**\n\n"
                 f"⭐ النقاط: {points}\n"
-                f"💰 المبلغ: {amount_syp:,.0f} ل.س\n"
-                f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n\n"
+                f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س = 1$\n\n"
                 f"⏳ في انتظار موافقة الإدارة.\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
@@ -621,8 +626,8 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 f"👤 المستخدم: @{callback.from_user.username or 'غير معروف'}\n"
                 f"🆔 الآيدي: `{callback.from_user.id}`\n"
                 f"⭐ النقاط: {points}\n"
-                f"💰 المبلغ: {amount_syp:,.0f} ل.س\n"
-                f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س\n"
+                f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
             
@@ -678,7 +683,7 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value:,.0f} ل.س\n\n"
+        f"💵 **قيمة نقاطك:** {points_value:.0f} ل.س\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
