@@ -117,17 +117,22 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(
         f"✅ تم {action_text} البوت بنجاح\n\n"
-        f"الحالة الآن: {status_text}"
+        f"الحالة الآن: {status_text}\n\n"
+        f"{'⚠️ البوت متوقف عن العمل للمستخدمين العاديين' if not new_status else '✅ البوت يعمل بشكل طبيعي'}"
     )
     
     # إرسال إشعار للمشرفين
-    try:
-        await callback.bot.send_message(
-            callback.from_user.id,
-            f"ℹ️ تم {action_text} البوت بواسطة @{callback.from_user.username or 'مشرف'}"
-        )
-    except:
-        pass
+    from config import ADMIN_ID, MODERATORS
+    admin_ids = [ADMIN_ID] + MODERATORS
+    for admin_id in admin_ids:
+        if admin_id and admin_id != callback.from_user.id:
+            try:
+                await callback.bot.send_message(
+                    admin_id,
+                    f"ℹ️ تم {action_text} البوت بواسطة @{callback.from_user.username or 'مشرف'}"
+                )
+            except:
+                pass
 
 @router.callback_query(F.data == "edit_maintenance")
 async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContext):
@@ -181,27 +186,27 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_new_syriatel_numbers)
 async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
-    """حفظ أرقام سيرياتل الجديدة"""
+    """حفظ أرقام سيرياتل الجديدة في قاعدة البيانات"""
     if not is_admin(message.from_user.id):
         return
     
     # تقسيم الأرقام (كل سطر رقم)
     numbers = [line.strip() for line in message.text.split('\n') if line.strip()]
     
-    # تحديث ملف config.py مؤقتاً
-    import config
-    config.SYRIATEL_NUMS = numbers
+    # حفظ في قاعدة البيانات
+    from database import set_syriatel_numbers
+    success = await set_syriatel_numbers(db_pool, numbers)
     
-    # يمكنك تخزينها في قاعدة البيانات
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE bot_settings SET value = $1 WHERE key = 'syriatel_nums'",
-            ','.join(numbers)
-        )
-    
-    text = "✅ **تم تحديث أرقام سيرياتل كاش بنجاح!**\n\nالأرقام الجديدة:\n"
-    for i, num in enumerate(numbers, 1):
-        text += f"{i}. `{num}`\n"
+    if success:
+        # تحديث المتغير في config مؤقتاً
+        import config
+        config.SYRIATEL_NUMS = numbers
+        
+        text = "✅ **تم تحديث أرقام سيرياتل كاش بنجاح!**\n\nالأرقام الجديدة:\n"
+        for i, num in enumerate(numbers, 1):
+            text += f"{i}. `{num}`\n"
+    else:
+        text = "❌ **فشل تحديث الأرقام**"
     
     await message.answer(text, parse_mode="Markdown")
     await state.clear()
