@@ -1,6 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
 
 # C extensions
@@ -173,7 +173,7 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
 # Abstra
 # Abstra is an AI-powered process automation framework.
@@ -186,7 +186,7 @@ cython_debug/
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #  and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
 
 # Ruff stuff:
 .ruff_cache/
@@ -205,3 +205,120 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ==================== PostgreSQL Specific ====================
+# PostgreSQL logs and temporary files
+*.log
+postgresql-*.log
+pg_log/
+postgresql.log
+
+# PostgreSQL data directories (if you run local PostgreSQL)
+pgdata/
+data/
+postgres_data/
+PGDATA/
+
+# PostgreSQL runtime files
+postmaster.pid
+postmaster.opts
+pg_stat_tmp/
+pg_replslot/
+pg_tblspc/
+pg_wal/
+pg_commit_ts/
+pg_dynshmem/
+pg_notify/
+pg_serial/
+pg_snapshots/
+pg_subtrans/
+
+# PostgreSQL configuration (if you have local custom configs)
+postgresql.auto.conf
+pg_hba.conf
+postgresql.conf.local
+
+# Database dumps and backups
+*.sql
+*.sql.gz
+*.sql.zip
+*.dump
+*.backup
+*.bak
+*.dmp
+backups/
+dumps/
+database_backups/
+pg_dump_*.sql
+
+# Local database connection files
+.pgpass
+.pg_service.conf
+pgpass.conf
+
+# Alembic migrations (if you use it)
+alembic/versions/
+alembic.ini
+
+# ==================== Project Specific ====================
+# Instance folder for Flask
+instance/
+.instance
+
+# Secrets and credentials
+.secrets/
+credentials.json
+client_secret.json
+service_account.json
+
+# Uploaded files (if your app handles uploads)
+uploads/
+media/
+static/uploads/
+
+# PID files
+*.pid
+*.pid.lock
+
+# Temp files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
