@@ -129,30 +129,48 @@ async def get_amount(message: types.Message, state: FSMContext):
     )
     
     if data['method'] == "m_syr":
-        nums = "\n".join(data.get('syriatel_nums', ["74091109", "63826779"]))
+        # جلب أرقام سيرياتل
+        syriatel_nums = data.get('syriatel_nums', ["74091109", "63826779"])
+        
+        # بناء نص الأرقام
+        nums_text = ""
+        for i, num in enumerate(syriatel_nums, 1):
+            nums_text += f"📞 **رقم {i}:** `{num}`\n"
+        
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"📞 **إلى الرقم:**\n`{nums}`\n\n"
-            f"✅ بعد التحويل، أرسل **رقم العملية** (12 رقم):",
-            reply_markup=get_back_keyboard()
+            f"{nums_text}\n"
+            f"✅ **بعد التحويل، أرسل رقم العملية (12 رقم):**\n"
+            f"💡 *اضغط على الرقم لنسخه*",
+            reply_markup=get_back_keyboard(),
+            parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] in ["m_sham_syp", "m_sham_usd"]:
+        # تحديد نوع العملة
+        currency = "ل.س" if data['method'] == "m_sham_syp" else "$"
+        
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"👛 **إلى المحفظة:**\n`{data['wallet']}`\n\n"
-            f"✅ بعد التحويل، أرسل **رقم العملية**:",
-            reply_markup=get_back_keyboard()
+            f"👛 **إلى محفظة شام كاش ({currency}):**\n"
+            f"`{data['wallet']}`\n\n"
+            f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
+            f"💡 *اضغط على رقم المحفظة لنسخه*",
+            reply_markup=get_back_keyboard(),
+            parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] == "m_usdt":
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"👛 **إلى العنوان (BEP20):**\n`{data['wallet']}`\n\n"
-            f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**",
-            reply_markup=get_back_keyboard()
+            f"👛 **إلى عنوان USDT (BEP20):**\n"
+            f"`{data['wallet']}`\n\n"
+            f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
+            f"💡 *اضغط على العنوان لنسخه*",
+            reply_markup=get_back_keyboard(),
+            parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_photo)
 
