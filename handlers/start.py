@@ -339,8 +339,11 @@ async def my_account(message: types.Message, db_pool):
 
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
-    """عرض رابط الإحالة"""
-    from database import generate_referral_code
+    """عرض رابط الإحالة مع سعر الصرف الحالي"""
+    from database import generate_referral_code, get_exchange_rate
+    
+    # جلب سعر الصرف الحالي من قاعدة البيانات
+    exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
         try:
@@ -373,6 +376,9 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         except:
             points_from_referrals = 0
     
+    # حساب قيمة 5 دولار بسعر الصرف الحالي
+    five_usd_value = 5 * exchange_rate
+    
     text = (
         f"🔗 رابط الإحالة الخاص بك\n\n"
         f"{link}\n\n"
@@ -381,7 +387,8 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
         f"• 5 نقاط لكل مشترك جديد\n"
-        f"• كل 500 نقطة = 5$ ({5 * USD_TO_SYP:.0f} ل.س)\n\n"
+        f"• كل 500 نقطة = 5$ ({five_usd_value:.0f} ل.س)\n"
+        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
