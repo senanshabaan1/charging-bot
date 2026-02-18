@@ -651,9 +651,13 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
-    """العودة إلى الملف الشخصي"""
-    # إنشاء رسالة جديدة بدلاً من تعديل القديمة
+    """العودة إلى الملف الشخصي - مع سعر الصرف الحالي"""
     user_id = callback.from_user.id
+    
+    # جلب سعر الصرف الحالي من قاعدة البيانات
+    from database import get_exchange_rate, get_redemption_rate
+    exchange_rate = await get_exchange_rate(db_pool)
+    redemption_rate = await get_redemption_rate(db_pool)
     
     async with db_pool.acquire() as conn:
         try:
@@ -671,7 +675,10 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
             username = None
             first_name = None
     
-    points_value = (points / 500) * 5 * USD_TO_SYP
+    # حساب قيمة النقاط بسعر الصرف الحالي
+    points_value_usd = (points / redemption_rate) * 5
+    points_value_syp = points_value_usd * exchange_rate
+    base_syp = 5 * exchange_rate
     
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -690,7 +697,9 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value:.0f} ل.س\n\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n"
+        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
