@@ -42,9 +42,12 @@ def login_required(f):
     return decorated_function
 
 @app.route('/login', methods=['GET', 'POST'])
-@login_required
 def login():
     """صفحة تسجيل الدخول"""
+    # إذا كان المستخدم مسجل دخوله بالفعل، حوله للصفحة الرئيسية
+    if 'logged_in' in session:
+        return redirect(url_for('index'))
+        
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
