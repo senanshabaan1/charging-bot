@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>إدارة التطبيقات | لوحة التحكم</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .sidebar { background: #2c3e50; min-height: 100vh; color: white; padding: 20px; }
+        .sidebar a { color: white; text-decoration: none; padding: 10px; border-radius: 5px; }
+        .sidebar a:hover { background: #34495e; }
+        .sidebar a.active { background: #3498db; }
+        .calculator-info { background-color: #e7f3ff; border-right: 4px solid #0d6efd; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .price-badge { background-color: #20c997; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.9em; }
+        .table-responsive { max-height: 500px; overflow-y: auto; }
+        .form-control:readonly { background-color: #f8f9fa; }
+        .final-price-box { background-color: #d1e7dd; border: 1px solid #badbcc; border-radius: 5px; padding: 15px; margin-top: 15px; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <!-- الشريط الجانبي -->
+        <div class="col-md-2 sidebar">
+            <h4 class="text-center mb-4">إدارة البوت</h4>
+            <hr>
+            <ul class="nav flex-column">
+                <li class="nav-item mb-2">
+                    <a href="/" class="nav-link text-white">
+                        <i class="fa fa-home me-2"></i> الرئيسية
+                    </a>
+                </li>
+                <li class="nav-item mb-2">
+                    <a href="/user_management" class="nav-link text-white">
+                        <i class="fa fa-users me-2"></i> إدارة المستخدمين
+                    </a>
+                </li>
+                <li class="nav-item mb-2">
+                    <a href="/applications" class="nav-link text-white active">
+                        <i class="fa fa-mobile me-2"></i> إدارة التطبيقات
+                    </a>
+                </li>
+                <li class="nav-item mb-2">
+                    <a href="/categories" class="nav-link text-white">
+                        <i class="fa fa-folder me-2"></i> إدارة الأقسام
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/logout" class="nav-link text-danger">
+                        <i class="fa fa-sign-out-alt me-2"></i> خروج
+                    </a>
+                </li>
+            </ul>
+            
+            <hr class="my-4">
+            
+            <div class="mt-4">
+                <h6>تعديل سعر الصرف</h6>
+                <form action="/update_rate" method="POST" class="mt-3">
+                    <div class="input-group">
+                        <input type="number" step="any" name="new_rate" class="form-control" value="{{ rate }}" required>
+                        <button type="submit" class="btn btn-sm btn-success">تحديث</button>
+                    </div>
+                </form>
+            </div>
+            
+            <div class="mt-4">
+                <a href="/categories" class="btn btn-primary w-100">
+                    <i class="fa fa-folder me-2"></i>إدارة الأقسام
+                </a>
+            </div>
+        </div>
+
+        <!-- المحتوى الرئيسي -->
+        <div class="col-md-10 p-4">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>📱 إدارة التطبيقات</h2>
+                <div>
+                    <a href="/categories" class="btn btn-primary me-2">
+                        <i class="fa fa-folder me-2"></i>إدارة الأقسام
+                    </a>
+                    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addAppModal">
+                        <i class="fa fa-plus me-2"></i>إضافة تطبيق جديد
+                    </button>
+                </div>
+            </div>
+
+            <!-- قائمة التطبيقات -->
+            {% if applications %}
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-white">
+                    <h5>قائمة التطبيقات ({{ applications|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>القسم</th>
+                                    <th>اسم التطبيق</th>
+                                    <th>سعر الوحدة</th>
+                                    <th>الحد الأدنى</th>
+                                    <th>نسبة الربح</th>
+                                    <th>السعر النهائي</th>
+                                    <th>الإجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for app in applications %}
+                                <tr>
+                                    <td>{{ app[0] }}</td>
+                                    <td>
+                                        <span class="badge bg-info">{{ app[7] }} {{ app[6] or 'بدون قسم' }}</span>
+                                    </td>
+                                    <td>
+                                        <strong>{{ app[1] }}</strong>
+                                    </td>
+                                    <td>
+                                        <span class="price-badge">${{ "%.6f"|format(app[2]) }}</span>
+                                        <br>
+                                        <small class="text-muted">{{ (app[2] * rate)|int }} ل.س</small>
+                                    </td>
+                                    <td>{{ app[3] }}</td>
+                                    <td>
+                                        <span class="badge bg-info">{{ app[4] }}%</span>
+                                    </td>
+                                    <td>
+                                        {% set final_price = app[2] * (1 + app[4]/100) %}
+                                        <span class="price-badge">${{ "%.6f"|format(final_price) }}</span>
+                                        <br>
+                                        <small class="text-muted">{{ (final_price * rate)|int }} ل.س</small>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-warning" 
+                                                    data-bs-toggle="modal" 
+                                                    data-bs-target="#editAppModal{{ app[0] }}">
+                                                <i class="fa fa-edit"></i> تعديل
+                                            </button>
+                                            <form action="/delete_application/{{ app[0] }}" 
+                                                  method="POST" 
+                                                  class="d-inline"
+                                                  onsubmit="return confirm('هل أنت متأكد من حذف التطبيق {{ app[1] }}؟')">
+                                                <button type="submit" class="btn btn-danger">
+                                                    <i class="fa fa-trash"></i> حذف
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <!-- Modal لتعديل التطبيق -->
+                                <div class="modal fade" id="editAppModal{{ app[0] }}" tabindex="-1">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content">
+                                            <form action="/edit_application/{{ app[0] }}" method="POST">
+                                                <div class="modal-header">
+                                                    <h5>تعديل التطبيق: {{ app[1] }}</h5>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-3">
+                                                        <label class="form-label">اسم التطبيق</label>
+                                                        <input type="text" name="name" class="form-control" value="{{ app[1] }}" required>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label">القسم</label>
+                                                        <select name="category_id" class="form-control" required>
+                                                            {% for cat in categories %}
+                                                            <option value="{{ cat[0] }}" {% if cat[0] == app[5] %}selected{% endif %}>
+                                                                {{ cat[3] }} {{ cat[2] }}
+                                                            </option>
+                                                            {% endfor %}
+                                                        </select>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label">سعر الوحدة ($)</label>
+                                                        <input type="number" step="0.000001" name="unit_price" class="form-control" value="{{ app[2] }}" required>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label">الحد الأدنى للكمية</label>
+                                                        <input type="number" name="min_units" class="form-control" value="{{ app[3] }}" required>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label">نسبة الربح %</label>
+                                                        <input type="number" step="any" name="profit_percentage" class="form-control" value="{{ app[4] }}" min="0" max="100" required>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                                                    <button type="submit" class="btn btn-primary">حفظ التعديلات</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-info text-center">
+                <i class="fa fa-info-circle me-2"></i>
+                لا توجد تطبيقات حالياً. قم بإضافة تطبيق جديد.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal لإضافة تطبيق جديد (معدل - كمية قابلة للتعديل) -->
+<div class="modal fade" id="addAppModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="/add_application" method="POST">
+                <div class="modal-header">
+                    <h5>إضافة تطبيق جديد</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- العمود الأيمن: الحاسبة الذكية -->
+                        <div class="col-md-6">
+                            <div class="calculator-info mb-3">
+                                <h6><i class="fa fa-calculator me-2"></i>حاسبة الأسعار الذكية</h6>
+                                <small class="text-muted">أدخل الكمية والسعر الذي تدفعه واختر العملة.</small>
+                            </div>
+
+                            <!-- الكمية (قابلة للتعديل) -->
+                            <div class="mb-3">
+                                <label class="form-label">الكمية (عدد الوحدات) <span class="text-danger">*</span></label>
+                                <input type="number" id="quantity" class="form-control" value="1000" min="1">
+                                <small class="text-muted">أدخل الكمية التي تشتريها من الموقع (مثال: 1000، 500، 100)</small>
+                            </div>
+
+                            <!-- حقل لاختيار عملة السعر المدخل -->
+                            <div class="mb-3">
+                                <label class="form-label">عملة السعر المدخل</label>
+                                <div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="inputCurrency" id="currencySYP" value="SYP" checked>
+                                        <label class="form-check-label" for="currencySYP">🇸🇾 ليرة سورية (ل.س)</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="inputCurrency" id="currencyUSD" value="USD">
+                                        <label class="form-check-label" for="currencyUSD">🇺🇸 دولار أمريكي ($)</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- السعر المدخل -->
+                            <div class="mb-3">
+                                <label class="form-label" id="priceLabel">السعر المدفوع مقابل الكمية (ل.س)</label>
+                                <input type="number" id="inputPrice" class="form-control" step="any" placeholder="مثال: 130.29">
+                                <small class="text-muted">أدخل السعر الكلي الذي دفعته في الموقع.</small>
+                            </div>
+
+                            <!-- نسبة الربح -->
+                            <div class="mb-3">
+                                <label class="form-label">نسبة الربح %</label>
+                                <input type="number" id="profit_percentage" class="form-control" min="0" max="100" step="any" value="10">
+                                <small class="text-muted">النسبة المئوية التي تريد ربحها.</small>
+                            </div>
+                        </div>
+                        
+                        <!-- العمود الأيسر: النتائج وبيانات التطبيق -->
+                        <div class="col-md-6">
+                            <!-- صندوق النتائج النهائية (ما سيراه المستخدم) -->
+                            <div class="final-price-box mb-4">
+                                <h6 class="text-success"><i class="fa fa-eye me-2"></i>ما سيراه المستخدم في البوت:</h6>
+                                <hr>
+                                <p>💰 سعر الوحدة: 
+                                    <strong><span id="final_unit_price_display">$0.000000</span></strong>
+                                    <br>
+                                    <small class="text-muted">(<span id="final_unit_price_syp_display">0</span> ل.س)</small>
+                                </p>
+                                <p>📦 الحد الأدنى للطلب: <strong><span id="min_units_display">100</span></strong></p>
+                                <p>💵 أقل سعر للطلب: 
+                                    <strong><span id="min_order_price_display">$0.00</span></strong>
+                                    <br>
+                                    <small class="text-muted">(<span id="min_order_price_syp_display">0</span> ل.س)</small>
+                                </p>
+                            </div>
+
+                            <!-- بيانات التطبيق للإرسال -->
+                            <div class="mb-3">
+                                <label class="form-label">اسم التطبيق <span class="text-danger">*</span></label>
+                                <input type="text" name="name" class="form-control" placeholder="مثال: شدات ببجي" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">القسم <span class="text-danger">*</span></label>
+                                <select name="category_id" class="form-control" required>
+                                    <option value="">-- اختر القسم --</option>
+                                    {% for cat in categories %}
+                                    <option value="{{ cat[0] }}">{{ cat[3] }} {{ cat[2] }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">سعر الوحدة بالدولار <span class="text-danger">*</span></label>
+                                <input type="number" id="unit_price" name="unit_price" class="form-control" step="any" required readonly>
+                                <small class="text-muted">يتم حسابه تلقائياً (القيمة التي ستحفظ)</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">الحد الأدنى للكمية <span class="text-danger">*</span></label>
+                                <input type="number" name="min_units" id="min_units_input" class="form-control" value="100" required>
+                                <small class="text-muted">أقل كمية يمكن للمستخدم طلبها</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">نسبة الربح % <span class="text-danger">*</span></label>
+                                <input type="number" name="profit_percentage" id="profit_percentage_final" class="form-control" min="0" max="100" step="any" value="10" required>
+                                <small class="text-muted">النسبة المئوية التي تريد ربحها من كل عملية</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-success">إضافة التطبيق</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // حاسبة الأسعار الذكية مع كمية قابلة للتعديل
+    function calculatePrices() {
+        // الحصول على القيم من المدخلات
+        const quantity = parseFloat(document.getElementById('quantity').value) || 0;
+        const inputPrice = parseFloat(document.getElementById('inputPrice').value) || 0;
+        const profitPercentage = parseFloat(document.getElementById('profit_percentage').value) || 0;
+        const minUnits = parseFloat(document.getElementById('min_units_input').value) || 100;
+        
+        // تحديد العملة المختارة
+        const currencySYP = document.getElementById('currencySYP').checked;
+        
+        // الحقول التي سنقوم بتحديثها
+        const unitPriceField = document.getElementById('unit_price');
+        const finalUnitPriceSpan = document.getElementById('final_unit_price_display');
+        const finalUnitPriceSypSpan = document.getElementById('final_unit_price_syp_display');
+        const minOrderPriceSpan = document.getElementById('min_order_price_display');
+        const minOrderPriceSypSpan = document.getElementById('min_order_price_syp_display');
+        const minUnitsDisplay = document.getElementById('min_units_display');
+        const profitPercentageFinal = document.getElementById('profit_percentage_final');
+        
+        // سعر الصرف الحالي من الثابت
+        const rate = {{ rate }};
+        
+        // تحديث نص التسمية حسب العملة المختارة
+        const priceLabel = document.getElementById('priceLabel');
+        if (currencySYP) {
+            priceLabel.textContent = 'السعر المدفوع مقابل الكمية (ل.س)';
+        } else {
+            priceLabel.textContent = 'السعر المدفوع مقابل الكمية ($)';
+        }
+        
+        // تحديث عرض الحد الأدنى
+        if (minUnitsDisplay) {
+            minUnitsDisplay.textContent = minUnits;
+        }
+        
+        if (quantity > 0 && inputPrice > 0) {
+            // 1. تحويل السعر المدخل إلى دولار إذا كان بالليرة السورية
+            let priceInUsd;
+            if (currencySYP) {
+                // إذا كان المدخل بالليرة السورية، نقسمه على سعر الصرف
+                priceInUsd = inputPrice / rate;
+            } else {
+                // إذا كان المدخل بالدولار، نستخدمه كما هو
+                priceInUsd = inputPrice;
+            }
+            
+            // 2. حساب سعر الوحدة الأصلي بالدولار
+            const originalUnitPriceInUsd = priceInUsd / quantity;
+            
+            // 3. إضافة نسبة الربح
+            const profitMultiplier = 1 + (profitPercentage / 100);
+            const finalUnitPriceInUsd = originalUnitPriceInUsd * profitMultiplier;
+            
+            // 4. حساب أسعار الطلبات
+            const minOrderPriceInUsd = finalUnitPriceInUsd * minUnits;
+            
+            // 5. تحويل لليرة السورية للعرض
+            const finalUnitPriceInSyp = finalUnitPriceInUsd * rate;
+            const minOrderPriceInSyp = minOrderPriceInUsd * rate;
+            
+            // 6. تحديث الحقول
+            // حقل سعر الوحدة الذي سيتم إرساله مع الفورم
+            unitPriceField.value = finalUnitPriceInUsd.toFixed(6);
+            
+            // حقول العرض
+            finalUnitPriceSpan.textContent = '$' + finalUnitPriceInUsd.toFixed(6);
+            finalUnitPriceSypSpan.textContent = Math.round(finalUnitPriceInSyp).toLocaleString();
+            
+            minOrderPriceSpan.textContent = '$' + minOrderPriceInUsd.toFixed(2);
+            minOrderPriceSypSpan.textContent = Math.round(minOrderPriceInSyp).toLocaleString();
+            
+            // تحديث حقل نسبة الربح النهائي
+            profitPercentageFinal.value = profitPercentage;
+            
+        } else {
+            // إذا لم يتم إدخال بيانات كافية
+            unitPriceField.value = '';
+            finalUnitPriceSpan.textContent = '$0.000000';
+            finalUnitPriceSypSpan.textContent = '0';
+            minOrderPriceSpan.textContent = '$0.00';
+            minOrderPriceSypSpan.textContent = '0';
+        }
+    }
+    
+    // إضافة مستمعات الأحداث للحاسبة
+    document.addEventListener('DOMContentLoaded', function() {
+        // جميع المدخلات التي تؤثر على الحساب
+        const quantityInput = document.getElementById('quantity');
+        const inputPrice = document.getElementById('inputPrice');
+        const profitPercentageInput = document.getElementById('profit_percentage');
+        const currencySYP = document.getElementById('currencySYP');
+        const currencyUSD = document.getElementById('currencyUSD');
+        const minUnitsInput = document.getElementById('min_units_input');
+        const profitFinalInput = document.getElementById('profit_percentage_final');
+        
+        // قائمة بكل العناصر التي يجب مراقبتها
+        const elements = [
+            quantityInput,
+            inputPrice,
+            profitPercentageInput,
+            currencySYP,
+            currencyUSD,
+            minUnitsInput
+        ];
+        
+        // إضافة مستمعات الأحداث
+        elements.forEach(element => {
+            if (element) {
+                element.addEventListener('input', calculatePrices);
+                element.addEventListener('change', calculatePrices);
+            }
+        });
+        
+        // معالجة خاصة لأزرار الراديو
+        if (currencySYP && currencyUSD) {
+            currencySYP.addEventListener('change', calculatePrices);
+            currencyUSD.addEventListener('change', calculatePrices);
+        }
+        
+        // تحديث الحاسبة عند فتح المودال
+        const addAppModal = document.getElementById('addAppModal');
+        if (addAppModal) {
+            addAppModal.addEventListener('shown.bs.modal', function() {
+                // إعادة تعيين القيم الافتراضية
+                document.getElementById('currencySYP').checked = true;
+                document.getElementById('quantity').value = 1000;
+                document.getElementById('inputPrice').value = '';
+                document.getElementById('profit_percentage').value = 10;
+                document.getElementById('min_units_input').value = 100;
+                calculatePrices();
+            });
+        }
+        
+        // تحديث الحاسبة عند تغيير نسبة الربح في الحقل النهائي
+        if (profitFinalInput) {
+            profitFinalInput.addEventListener('input', function() {
+                document.getElementById('profit_percentage').value = this.value;
+                calculatePrices();
+            });
+        }
+        
+        // تنفيذ الحساب مرة واحدة عند التحميل
+        calculatePrices();
+    });
+</script>
+</body>
+</html>

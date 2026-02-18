@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>إدارة المستخدمين | لوحة التحكم</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body { background: #f8f9fa; }
+        .sidebar { background: #2c3e50; min-height: 100vh; color: white; padding: 20px; }
+        .user-avatar { width: 40px; height: 40px; border-radius: 50%; background: #6c757d; color: white; 
+                      display: flex; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-2 sidebar">
+            <h4 class="text-center mb-4">إدارة البوت</h4>
+            <hr>
+            <ul class="nav flex-column">
+                <li class="nav-item mb-2">
+                    <a href="/" class="nav-link text-white">
+                        <i class="fa fa-home me-2"></i> الرئيسية
+                    </a>
+                </li>
+                <li class="nav-item mb-2">
+                    <a href="/user_management" class="nav-link text-white active">
+                        <i class="fa fa-users me-2"></i> إدارة المستخدمين
+                    </a>
+                </li>
+                <li class="nav-item mb-2">
+                    <a href="/applications" class="nav-link text-white">
+                        <i class="fa fa-mobile me-2"></i> إدارة التطبيقات
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/logout" class="nav-link text-danger">
+                        <i class="fa fa-sign-out-alt me-2"></i> خروج
+                    </a>
+                </li>
+            </ul>
+            
+            <hr class="my-4">
+            
+            <div class="mt-4">
+                <h6>تعديل سعر الصرف</h6>
+                <form action="/update_rate" method="POST" class="mt-3">
+                    <div class="input-group">
+                        <input type="number" step="any" name="new_rate" class="form-control" value="{{ rate }}" required>
+                        <button type="submit" class="btn btn-sm btn-success">تحديث</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-md-10 p-4">
+            <h2 class="mb-4">👥 إدارة المستخدمين</h2>
+            
+            <!-- إحصائيات المستخدمين -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white p-3">
+                        <h5>إجمالي المستخدمين</h5>
+                        <h3>{{ user_stats[0] }}</h3>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-danger text-white p-3">
+                        <h5>المستخدمين المحظورين</h5>
+                        <h3>{{ user_stats[1] }}</h3>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white p-3">
+                        <h5>إجمالي الأرصدة</h5>
+                        <h3>{{ "{:,}".format(user_stats[2] or 0) }} ل.س</h3>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-info text-white p-3">
+                        <h5>الأيام النشطة</h5>
+                        <h3>{{ user_stats[3] }}</h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- جدول المستخدمين -->
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5>قائمة المستخدمين</h5>
+                    <div>
+                        <input type="text" id="searchInput" class="form-control" placeholder="بحث باسم أو آيدي..." style="width: 250px;">
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="usersTable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>المستخدم</th>
+                                    <th>الرصيد</th>
+                                    <th>الإيداعات</th>
+                                    <th>الطلبات</th>
+                                    <th>الحالة</th>
+                                    <th>تاريخ التسجيل</th>
+                                    <th>الإجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for user in users %}
+                                <tr>
+                                    <td>{{ user[0] }}</td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="user-avatar me-2">
+                                                {{ user[1][0].upper() if user[1] else 'U' }}
+                                            </div>
+                                            <div>
+                                                <strong>{{ user[1] or 'بدون اسم' }}</strong><br>
+                                                <small class="text-muted">ID: {{ user[0] }}</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>{{ "{:,}".format(user[2]) }} ل.س</td>
+                                    <td>{{ "{:,}".format(user[5] or 0) }} ل.س</td>
+                                    <td>{{ "{:,}".format(user[6] or 0) }} ل.س</td>
+                                    <td>
+                                        {% if user[3] %}
+                                        <span class="badge bg-danger">محظور</span>
+                                        {% else %}
+                                        <span class="badge bg-success">نشط</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ user[4].strftime('%Y-%m-%d') if user[4] else '-' }}</td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary" 
+                                                    onclick="showUserInfo({{ user[0] }})">
+                                                <i class="fa fa-info-circle"></i>
+                                            </button>
+                                            <button class="btn btn-outline-warning" 
+                                                    data-bs-toggle="modal" 
+                                                    data-bs-target="#editBalance{{ user[0] }}">
+                                                <i class="fa fa-edit"></i>
+                                            </button>
+                                            <form action="/user_action/{{ user[0] }}" method="POST" class="d-inline">
+                                                <input type="hidden" name="action" value="toggle_ban">
+                                                <button type="submit" class="btn btn-{{ 'success' if user[3] else 'danger' }}">
+                                                    {% if user[3] %}
+                                                    <i class="fa fa-unlock"></i>
+                                                    {% else %}
+                                                    <i class="fa fa-ban"></i>
+                                                    {% endif %}
+                                                </button>
+                                            </form>
+                                            <button class="btn btn-outline-info" 
+                                                    data-bs-toggle="modal" 
+                                                    data-bs-target="#sendMessage{{ user[0] }}">
+                                                <i class="fa fa-envelope"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <!-- Modal لتعديل الرصيد -->
+                                <div class="modal fade" id="editBalance{{ user[0] }}">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content">
+                                            <form action="/user_action/{{ user[0] }}" method="POST">
+                                                <input type="hidden" name="action" value="set_balance">
+                                                <div class="modal-header">
+                                                    <h5>تعديل رصيد المستخدم {{ user[0] }}</h5>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-3">
+                                                        <label class="form-label">الرصيد الجديد (ل.س)</label>
+                                                        <input type="number" name="balance" class="form-control" 
+                                                               value="{{ user[2] }}" step="any" required>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                                                    <button type="submit" class="btn btn-primary">حفظ</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Modal لإرسال رسالة -->
+                                <div class="modal fade" id="sendMessage{{ user[0] }}">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content">
+                                            <form action="/user_action/{{ user[0] }}" method="POST">
+                                                <input type="hidden" name="action" value="send_message">
+                                                <div class="modal-header">
+                                                    <h5>إرسال رسالة للمستخدم {{ user[0] }}</h5>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-3">
+                                                        <label class="form-label">الرسالة</label>
+                                                        <textarea name="message" class="form-control" rows="4" required></textarea>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                                                    <button type="submit" class="btn btn-primary">إرسال</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal لمعلومات المستخدم -->
+<div class="modal fade" id="userInfoModal">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">معلومات المستخدم</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="userInfoContent">
+                جاري تحميل المعلومات...
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // بحث في الجدول
+    document.getElementById('searchInput').addEventListener('keyup', function() {
+        const filter = this.value.toLowerCase();
+        const rows = document.querySelectorAll('#usersTable tbody tr');
+        
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(filter) ? '' : 'none';
+        });
+    });
+    
+    // عرض معلومات المستخدم
+    async function showUserInfo(userId) {
+        const response = await fetch(`/get_user_info/${userId}`);
+        const user = await response.json();
+        
+        if (user.error) {
+            document.getElementById('userInfoContent').innerHTML = 
+                `<div class="alert alert-danger">${user.error}</div>`;
+        } else {
+            const html = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>المعلومات الأساسية</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>الآيدي:</strong></td><td>${user.user_id}</td></tr>
+                            <tr><td><strong>اليوزر:</strong></td><td>@${user.username}</td></tr>
+                            <tr><td><strong>الرصيد:</strong></td><td>${user.balance.toLocaleString()} ل.س</td></tr>
+                            <tr><td><strong>الحالة:</strong></td>
+                                <td>${user.is_banned ? 
+                                    '<span class="badge bg-danger">محظور</span>' : 
+                                    '<span class="badge bg-success">نشط</span>'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>الإحصائيات</h6>
+                        <table class="table table-sm">
+                            <tr><td><strong>تاريخ التسجيل:</strong></td><td>${user.created_at}</td></tr>
+                            <tr><td><strong>آخر نشاط:</strong></td><td>${user.last_activity}</td></tr>
+                            <tr><td><strong>إجمالي الإيداعات:</strong></td>
+                                <td>${user.approved_deposits_count} طلب (${user.approved_deposits_amount.toLocaleString()} ل.س)</td></tr>
+                            <tr><td><strong>إجمالي الطلبات:</strong></td>
+                                <td>${user.completed_orders_count} طلب (${user.completed_orders_amount.toLocaleString()} ل.س)</td></tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+            document.getElementById('userInfoContent').innerHTML = html;
+        }
+        
+        const modal = new bootstrap.Modal(document.getElementById('userInfoModal'));
+        modal.show();
+    }
+</script>
+</body>
+</html>
