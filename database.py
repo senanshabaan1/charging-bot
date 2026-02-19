@@ -177,12 +177,11 @@ async def init_db():
         await conn.execute('''
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
                 VALUES 
-                    (0, 'VIP 0', 0, 1, '🟢'),
-                    (1, 'VIP 1', 500000, 2, '🔵'),
-                    (2, 'VIP 2', 1000000, 3, '🟣'),
-                    (3, 'VIP 3', 2000000, 4, '🟡'),
-                    (4, 'VIP 4', 5000000, 5, '🔴'),
-                    (5, 'VIP 5', 10000000, 6, '💎')
+                    (0, 'VIP 0', 0, 0, '🟢'),
+                    (1, 'VIP 1', 1000, 1, '🔵'),
+                    (2, 'VIP 2', 2000, 2, '🟣'),
+                    (3, 'VIP 3', 4000, 3, '🟡'),
+                    (4, 'VIP 4', 8000, 5, '🔴')
                 ON CONFLICT (level) DO UPDATE SET 
                     min_spent = EXCLUDED.min_spent,
                     discount_percent = EXCLUDED.discount_percent,
@@ -662,47 +661,35 @@ async def get_user_vip(pool, user_id):
         return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
 
 async def update_user_vip(pool, user_id):
-    """تحديث مستوى VIP للمستخدم بناءً على مجموع مشترياته"""
+    """تحديث مستوى VIP للمستخدم بناءً على إجمالي مشترياته بالليرة"""
     try:
         async with pool.acquire() as conn:
-            # حساب مجموع مشتريات المستخدم
+            # حساب إجمالي مشتريات المستخدم من الطلبات المكتملة فقط
             total_spent = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
                 WHERE user_id = $1 AND status = 'completed'
             ''', user_id) or 0
             
-            # إضافة إجمالي الشحنات (اختياري)
-            total_deposits = await conn.fetchval('''
-                SELECT COALESCE(SUM(amount_syp), 0) 
-                FROM deposit_requests 
-                WHERE user_id = $1 AND status = 'approved'
-            ''', user_id) or 0
-            
-            total_spent = total_spent + total_deposits
-            
-            # تحديد المستوى المناسب
+            # تحديد المستوى والخصم بناءً على إجمالي المشتريات
             level = 0
-            discount = 1
+            discount = 0  # VIP 0 بدون خصم
             
-            if total_spent >= 10000000:  # 10 مليون
-                level = 5
-                discount = 6
-            elif total_spent >= 5000000:   # 5 مليون
+            if total_spent >= 8000:
                 level = 4
                 discount = 5
-            elif total_spent >= 2000000:   # 2 مليون
+            elif total_spent >= 4000:
                 level = 3
-                discount = 4
-            elif total_spent >= 1000000:   # 1 مليون
-                level = 2
                 discount = 3
-            elif total_spent >= 500000:    # 500 ألف
-                level = 1
+            elif total_spent >= 2000:
+                level = 2
                 discount = 2
+            elif total_spent >= 1000:
+                level = 1
+                discount = 1
             else:
                 level = 0
-                discount = 1
+                discount = 0
             
             # تحديث المستخدم
             await conn.execute('''
@@ -711,10 +698,45 @@ async def update_user_vip(pool, user_id):
                 WHERE user_id = $4
             ''', level, total_spent, discount, user_id)
             
-            return {'level': level, 'discount': discount, 'total_spent': total_spent}
+            # جلب معلومات المستوى للعرض
+            vip_info = {
+                'level': level,
+                'discount': discount,
+                'total_spent': total_spent,
+                'next_level': get_next_vip_level(total_spent)
+            }
+            
+            return vip_info
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
         return None
+
+def get_next_vip_level(total_spent):
+    """حساب المستوى التالي والمبلغ المتبقي"""
+    levels = [
+        (1000, 1, "VIP 1 🔵 (خصم 1%)"),
+        (2000, 2, "VIP 2 🟣 (خصم 2%)"),
+        (4000, 3, "VIP 3 🟡 (خصم 3%)"),
+        (8000, 4, "VIP 4 🔴 (خصم 5%)")
+    ]
+    
+    for required, level, name in levels:
+        if total_spent < required:
+            remaining = required - total_spent
+            return {
+                'next_level': level,
+                'next_level_name': name,
+                'remaining': remaining,
+                'next_discount': level  # الخصم الجديد
+            }
+    
+    # إذا وصل للمستوى الرابع
+    return {
+        'next_level': 4,
+        'next_level_name': "VIP 4 🔴 (الأقصى)",
+        'remaining': 0,
+        'next_discount': 5
+    }
 
 async def get_top_users_by_deposits(pool, limit=10):
     """أكثر المستخدمين إيداعاً"""
