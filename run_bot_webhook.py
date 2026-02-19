@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from config import TOKEN, ADMIN_ID
-from database import init_db, get_pool
+from database import init_db, get_pool, fix_points_history_table  # أضف fix_points_history_table هنا
 from handlers import start, deposit, services, admin
 
 logging.basicConfig(level=logging.INFO)
