@@ -1,7 +1,11 @@
 # database.py
 import asyncpg
 import logging
+import pytz
+from datetime import datetime
 from config import DB_CONFIG
+
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 async def init_db():
     """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
@@ -188,7 +192,6 @@ async def init_db():
                     icon = EXCLUDED.icon;
         ''')
 
-
         # جدول السجلات
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS logs (
@@ -216,18 +219,20 @@ async def init_db():
             VALUES 
                 ('bot_status', 'running', 'حالة البوت (running/stopped)'),
                 ('maintenance_message', 'البوت قيد الصيانة حالياً، يرجى المحاولة لاحقاً', 'رسالة الصيانة'),
-                ('points_per_order', '5', 'نقاط لكل عملية شراء'),
-                ('points_per_referral', '5', 'نقاط لكل عملية من خلال الإحالة'),
-                ('redemption_rate', '500', 'عدد النقاط مقابل 5 دولار'),
+                ('points_per_order', '1', 'نقاط لكل عملية شراء'),
+                ('points_per_referral', '1', 'نقاط لكل عملية من خلال الإحالة'),
+                ('redemption_rate', '100', 'عدد النقاط مقابل 1 دولار'),
                 ('last_restart', CURRENT_TIMESTAMP::TEXT, 'آخر تشغيل للبوت')
             ON CONFLICT (key) DO NOTHING;
         ''')
-       # ===== إضافة مفتاح أرقام سيرياتل إلى قاعدة البيانات =====
+       
+        # ===== إضافة مفتاح أرقام سيرياتل إلى قاعدة البيانات =====
         await conn.execute('''
             INSERT INTO bot_settings (key, value, description) 
             VALUES ('syriatel_nums', '74091109,63826779', 'أرقام سيرياتل كاش')
             ON CONFLICT (key) DO NOTHING;
         ''')
+        
         # إضافة الأعمدة إذا لم تكن موجودة (للتحديثات)
         tables_columns = {
             'applications': [
@@ -324,15 +329,33 @@ async def init_db():
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
 
 async def get_pool():
-    """إنشاء مجمع اتصالات (Pool)"""
+    """إنشاء مجمع اتصالات (Pool) مع ضبط المنطقة الزمنية"""
     try:
         # التحقق من وجود dsn في الإعدادات
         if "dsn" in DB_CONFIG:
-            pool = await asyncpg.create_pool(dsn=DB_CONFIG["dsn"])
-            logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN")
+            pool = await asyncpg.create_pool(
+                dsn=DB_CONFIG["dsn"],
+                command_timeout=60,
+                server_settings={
+                    'timezone': 'Asia/Damascus'
+                },
+                init=[  # أوامر تهيئة لكل اتصال جديد
+                    "SET TIMEZONE TO 'Asia/Damascus';",
+                ]
+            )
+            logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN مع ضبط التوقيت")
         else:
-            pool = await asyncpg.create_pool(**DB_CONFIG)
-            logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح")
+            pool = await asyncpg.create_pool(
+                **DB_CONFIG,
+                command_timeout=60,
+                server_settings={
+                    'timezone': 'Asia/Damascus'
+                },
+                init=[
+                    "SET TIMEZONE TO 'Asia/Damascus';",
+                ]
+            )
+            logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح مع ضبط التوقيت")
         return pool
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
@@ -347,6 +370,84 @@ async def test_connection():
         return True
     except Exception as e:
         logging.error(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
+        return False
+
+# ============= دوال ضبط المنطقة الزمنية =============
+
+async def set_database_timezone(pool):
+    """ضبط المنطقة الزمنية لقاعدة البيانات لجميع الاتصالات"""
+    try:
+        async with pool.acquire() as conn:
+            # ضبط المنطقة الزمنية للاتصال الحالي
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # التحقق من الوقت بعد الضبط
+            db_time = await conn.fetchval("SELECT NOW()")
+            
+            # جلب الوقت الحقيقي من قاعدة البيانات (بدون تحويل)
+            db_time_utc = await conn.fetchval("SELECT NOW() AT TIME ZONE 'UTC'")
+            
+            logging.info(f"🕒 وقت DB بعد الضبط (Asia/Damascus): {db_time}")
+            logging.info(f"🕒 وقت DB بصيغة UTC: {db_time_utc}")
+            
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في ضبط توقيت قاعدة البيانات: {e}")
+        return False
+
+def format_local_time(dt):
+    """تنسيق الوقت حسب توقيت دمشق للعرض"""
+    if dt is None:
+        return "غير معروف"
+    
+    if isinstance(dt, str):
+        try:
+            # محاولة تحويل النص إلى datetime
+            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+        except:
+            return dt
+    
+    # إذا كان الوقت بدون منطقة زمنية، نضيف UTC
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    
+    # نحول إلى توقيت دمشق
+    local_dt = dt.astimezone(DAMASCUS_TZ)
+    return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+async def update_old_records_timezone(pool):
+    """تحديث السجلات القديمة إلى التوقيت الصحيح (مرة واحدة)"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود سجلات قديمة
+            tables = ['users', 'deposit_requests', 'orders', 'points_history', 'redemption_requests']
+            
+            for table in tables:
+                try:
+                    # تحديث created_at إذا كان موجوداً
+                    await conn.execute(f"""
+                        UPDATE {table} 
+                        SET created_at = created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Damascus'
+                        WHERE created_at IS NOT NULL
+                          AND EXTRACT(HOUR FROM created_at) < 3  -- تقريباً السجلات الليلية
+                    """)
+                    
+                    # تحديث updated_at إذا كان موجوداً
+                    if table in ['deposit_requests', 'orders', 'redemption_requests']:
+                        await conn.execute(f"""
+                            UPDATE {table} 
+                            SET updated_at = updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Damascus'
+                            WHERE updated_at IS NOT NULL
+                              AND EXTRACT(HOUR FROM updated_at) < 3
+                        """)
+                    
+                    logging.info(f"✅ تم تحديث توقيت الجدول {table}")
+                except Exception as e:
+                    logging.warning(f"⚠️ خطأ في تحديث الجدول {table}: {e}")
+            
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث السجلات القديمة: {e}")
         return False
 
 # ============= دوال حالة البوت =============
@@ -491,7 +592,7 @@ async def process_referral(pool, referred_user_id, referrer_code):
                 points = await conn.fetchval(
                     "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
                 )
-                points = int(points) if points else 5
+                points = int(points) if points else 1
                 
                 # إضافة نقاط للمستخدم الذي قام بالإحالة
                 await add_points(pool, referrer['user_id'], points, 'referral', 
@@ -526,8 +627,9 @@ async def get_points_history(pool, user_id, limit=10):
     """جلب سجل نقاط المستخدم"""
     try:
         async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             history = await conn.fetch('''
-                SELECT points, action, description, created_at
+                SELECT points, action, description, created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -563,6 +665,7 @@ async def create_redemption_request(pool, user_id, username, points, amount_usd,
     except Exception as e:
         logging.error(f"❌ خطأ في إنشاء طلب استرداد نقاط: {e}")
         return None, str(e)
+
 async def approve_redemption(pool, request_id, admin_id):
     """الموافقة على طلب استرداد نقاط"""
     try:
@@ -634,12 +737,12 @@ async def calculate_points_value(pool, points):
             # جلب سعر الصرف الحالي
             exchange_rate = await get_exchange_rate(pool)
             
-            # جلب معدل الاسترداد (كم نقطة مقابل 5 دولار)
+            # جلب معدل الاسترداد (كم نقطة مقابل 1 دولار)
             redemption_rate = await get_redemption_rate(pool)
             
             # حساب قيمة النقاط
-            # مثال: 500 نقطة = 5 دولار
-            usd_value = (points / redemption_rate) * 5
+            # مثال: 100 نقطة = 1 دولار
+            usd_value = (points / redemption_rate) 
             syp_value = usd_value * exchange_rate
             
             return {
@@ -821,6 +924,7 @@ async def get_top_users_by_points(pool, limit=10):
     except Exception as e:
         logging.error(f"❌ خطأ في جلب أكثر المستخدمين نقاط: {e}")
         return []
+
 # ============= دوال الفئات الفرعية =============
 
 async def get_app_variants(pool, app_id):
@@ -853,16 +957,22 @@ async def get_app_variant(pool, variant_id):
 # ============= دوال الإحصائيات =============
 
 async def get_user_profile(pool, user_id):
-    """جلب معلومات الملف الشخصي للمستخدم بشكل كامل"""
+    """جلب معلومات الملف الشخصي للمستخدم بشكل كامل مع توقيت محلي"""
     try:
         async with pool.acquire() as conn:
-            # معلومات المستخدم الأساسية
+            # ضبط التوقيت لكل استعلام
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # معلومات المستخدم الأساسية مع تحويل التوقيت
             user = await conn.fetchrow('''
-                SELECT user_id, username, first_name, last_name, balance, is_banned, 
-                       created_at, total_deposits, total_orders, total_points,
-                       referral_code, referred_by, referral_count, referral_earnings,
-                       total_points_earned, total_points_redeemed, last_activity,
-                       vip_level, total_spent, discount_percent
+                SELECT 
+                    user_id, username, first_name, last_name, balance, is_banned, 
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at,
+                    total_deposits, total_orders, total_points,
+                    referral_code, referred_by, referral_count, referral_earnings,
+                    total_points_earned, total_points_redeemed, 
+                    last_activity AT TIME ZONE 'Asia/Damascus' as last_activity,
+                    vip_level, total_spent, discount_percent
                 FROM users 
                 WHERE user_id = $1
             ''', user_id)
@@ -903,9 +1013,11 @@ async def get_user_profile(pool, user_id):
                 WHERE referred_by = $1
             ''', user_id)
             
-            # آخر 5 طلبات
+            # آخر 5 طلبات مع توقيت محلي
             recent_orders = await conn.fetch('''
-                SELECT app_name, variant_name, quantity, total_amount_syp, status, created_at
+                SELECT 
+                    app_name, variant_name, quantity, total_amount_syp, status, 
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM orders
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -929,9 +1041,12 @@ async def get_user_full_stats(pool, user_id):
     return await get_user_profile(pool, user_id)
 
 async def get_bot_stats(pool):
-    """جلب إحصائيات البوت"""
+    """جلب إحصائيات البوت مع توقيت محلي"""
     try:
         async with pool.acquire() as conn:
+            # ضبط التوقيت
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
             users_stats = await conn.fetchrow('''
                 SELECT 
                     COUNT(*) as total_users,
@@ -986,15 +1101,15 @@ async def get_bot_stats(pool):
             # جلب إعدادات النقاط
             points_per_order = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_order'"
-            ) or 5
+            ) or 1
             
             points_per_deposit = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_deposit'"
-            ) or 5
+            ) or 1
             
             points_per_referral = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
-            ) or 5
+            ) or 1
             
             return {
                 'users': dict(users_stats) if users_stats else {},
@@ -1270,10 +1385,10 @@ async def get_points_per_order(pool):
             points = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_order'"
             )
-            return int(points) if points else 5
+            return int(points) if points else 1
     except Exception as e:
         logging.error(f"❌ خطأ في جلب نقاط الطلب: {e}")
-        return 5
+        return 1
 
 async def get_points_per_deposit(pool):
     """جلب عدد النقاط لكل عملية شحن من الإعدادات"""
@@ -1282,10 +1397,10 @@ async def get_points_per_deposit(pool):
             points = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_deposit'"
             )
-            return int(points) if points else 5
+            return int(points) if points else 1
     except Exception as e:
         logging.error(f"❌ خطأ في جلب نقاط الشحن: {e}")
-        return 5
+        return 1
 
 async def get_points_per_referral(pool):
     """جلب عدد النقاط لكل إحالة من الإعدادات"""
@@ -1294,17 +1409,18 @@ async def get_points_per_referral(pool):
             points = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
             )
-            return int(points) if points else 5
+            return int(points) if points else 1
     except Exception as e:
         logging.error(f"❌ خطأ في جلب نقاط الإحالة: {e}")
-        return 5
+        return 1
 
 async def get_user_points_history(pool, user_id, limit=20):
     """جلب سجل نقاط المستخدم مع تفاصيل أكثر"""
     try:
         async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             history = await conn.fetch('''
-                SELECT points, action, description, created_at
+                SELECT points, action, description, created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -1345,6 +1461,7 @@ async def get_user_referral_info(pool, user_id):
     """جلب معلومات الإحالة للمستخدم"""
     try:
         async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             info = await conn.fetchrow('''
                 SELECT referral_code, referral_count, referral_earnings, referred_by
                 FROM users WHERE user_id = $1
@@ -1353,7 +1470,7 @@ async def get_user_referral_info(pool, user_id):
             if info:
                 # جلب قائمة المحالين
                 referrals = await conn.fetch('''
-                    SELECT user_id, username, created_at
+                    SELECT user_id, username, created_at AT TIME ZONE 'Asia/Damascus' as created_at
                     FROM users WHERE referred_by = $1
                     ORDER BY created_at DESC
                     LIMIT 10
@@ -1372,16 +1489,16 @@ async def get_user_referral_info(pool, user_id):
         return None
 
 async def get_redemption_rate(pool):
-    """جلب معدل استرداد النقاط (كم نقطة مقابل 5 دولار)"""
+    """جلب معدل استرداد النقاط (كم نقطة مقابل 1 دولار)"""
     try:
         async with pool.acquire() as conn:
             rate = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
             )
-            return int(rate) if rate else 500
+            return int(rate) if rate else 100
     except Exception as e:
         logging.error(f"❌ خطأ في جلب معدل الاسترداد: {e}")
-        return 500
+        return 100
 
 # ============= دوال سعر الصرف =============
 
@@ -1392,10 +1509,10 @@ async def get_exchange_rate(pool):
             rate = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'usd_to_syp'"
             )
-            return float(rate) if rate else 25000
+            return float(rate) if rate else 118
     except Exception as e:
         logging.error(f"❌ خطأ في جلب سعر الصرف: {e}")
-        return 25000
+        return 118
 
 async def set_exchange_rate(pool, rate):
     """تحديث سعر الصرف في قاعدة البيانات"""
@@ -1411,6 +1528,7 @@ async def set_exchange_rate(pool, rate):
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث سعر الصرف: {e}")
         return False
+
 async def get_syriatel_numbers(pool):
     """جلب أرقام سيرياتل من قاعدة البيانات"""
     try:
@@ -1447,6 +1565,7 @@ async def set_syriatel_numbers(pool, numbers):
     except Exception as e:
         logging.error(f"❌ خطأ في حفظ أرقام سيرياتل: {e}")
         return False
+
 async def fix_points_history_table(pool):
     """إصلاح جدول النقاط للتأكد من وجود الأعمدة المطلوبة"""
     try:
@@ -1458,10 +1577,9 @@ async def fix_points_history_table(pool):
             
             # إضافة إعدادات النقاط إذا لم تكن موجودة
             settings = [
-                ('points_per_referral', '5'),
-                ('points_per_order', '5'),
-                ('points_per_deposit', '5'),
-                ('redemption_rate', '500'),
+                ('points_per_referral', '1'),
+                ('points_per_order', '1'),
+                ('redemption_rate', '100'),
             ]
             
             for key, value in settings:
