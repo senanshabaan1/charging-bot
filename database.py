@@ -322,6 +322,12 @@ async def init_db():
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
         # ===============================================================
+        # ===== كود إضافة manual_vip =====
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
+            logging.info("✅ تم إضافة عمود manual_vip")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود manual_vip: {e}")
 
         await conn.close()
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح.")
@@ -784,21 +790,36 @@ async def get_user_vip(pool, user_id):
         return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
 
 async def update_user_vip(pool, user_id):
-    """تحديث مستوى VIP للمستخدم بناءً على إجمالي مشترياته من التطبيقات فقط"""
+    """تحديث مستوى VIP للمستخدم - مع الحفاظ على المستويات اليدوية"""
     try:
         async with pool.acquire() as conn:
-            # حساب إجمالي مشتريات المستخدم من الطلبات المكتملة فقط (التطبيقات)
+            # التحقق أولاً إذا كان المستخدم يدوياً
+            user = await conn.fetchrow(
+                "SELECT manual_vip, vip_level, discount_percent FROM users WHERE user_id = $1",
+                user_id
+            )
+            
+            # إذا كان المستخدم يدوياً، لا تغير مستواه
+            if user and user['manual_vip']:
+                logging.info(f"👑 المستخدم {user_id} لديه مستوى يدوي VIP {user['vip_level']} - لم يتم التحديث")
+                return {
+                    'level': user['vip_level'],
+                    'discount': user['discount_percent'],
+                    'total_spent': 0,
+                    'next_level': None,
+                    'manual': True
+                }
+            
+            # حساب إجمالي مشتريات المستخدم
             total_spent = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
                 WHERE user_id = $1 AND status = 'completed'
             ''', user_id) or 0
             
-            logging.info(f"📊 إجمالي مشتريات المستخدم {user_id} من التطبيقات: {total_spent} ل.س")
-            
-            # تحديد المستوى والخصم بناءً على إجمالي المشتريات
+            # تحديد المستوى والخصم بناءً على المشتريات
             level = 0
-            discount = 0  # VIP 0 بدون خصم
+            discount = 0
             
             if total_spent >= 8000:
                 level = 4
@@ -812,28 +833,26 @@ async def update_user_vip(pool, user_id):
             elif total_spent >= 1000:
                 level = 1
                 discount = 1
-            else:
-                level = 0
-                discount = 0
             
-            # تحديث المستخدم
+            # تحديث المستخدم (فقط إذا لم يكن يدوياً)
             await conn.execute('''
                 UPDATE users 
-                SET vip_level = $1, total_spent = $2, discount_percent = $3
-                WHERE user_id = $4
+                SET vip_level = $1, 
+                    total_spent = $2, 
+                    discount_percent = $3,
+                    manual_vip = FALSE
+                WHERE user_id = $4 AND (manual_vip IS NULL OR manual_vip = FALSE)
             ''', level, total_spent, discount, user_id)
             
-            logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (خصم {discount}%)")
+            logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (تلقائي)")
             
-            # جلب معلومات المستوى للعرض
-            vip_info = {
+            return {
                 'level': level,
                 'discount': discount,
                 'total_spent': total_spent,
-                'next_level': get_next_vip_level(total_spent)
+                'next_level': get_next_vip_level(total_spent),
+                'manual': False
             }
-            
-            return vip_info
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
         return None
