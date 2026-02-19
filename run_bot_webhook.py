@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from config import TOKEN, ADMIN_ID
-from database import init_db, get_pool, fix_points_history_table  # أضف fix_points_history_table هنا
+from database import init_db, get_pool, fix_points_history_table, set_database_timezone, update_old_records_timezone, DAMASCUS_TZ
 from handlers import start, deposit, services, admin
 import pytz
 from datetime import datetime
@@ -45,11 +45,42 @@ async def main():
         logging.error("❌ فشل الاتصال بقاعدة البيانات")
         return
     
-    # ضبط المنطقة الزمنية لكل اتصال جديد
+    # ===== ضبط المنطقة الزمنية بشكل كامل =====
+    
+    # ضبط التوقيت لكل اتصال
     async with db_pool.acquire() as conn:
         await set_timezone_for_connection(conn)
     
+    # ضبط التوقيت للمجمع بأكمله
+    await set_database_timezone(db_pool)
+    
+    # تحديث السجلات القديمة (مرة واحدة فقط)
+    try:
+        await update_old_records_timezone(db_pool)
+        logging.info("✅ تم تحديث السجلات القديمة إلى التوقيت الصحيح")
+    except Exception as e:
+        logging.warning(f"⚠️ لم يتم تحديث السجلات القديمة: {e}")
+    
+    # التحقق من الوقت
+    async with db_pool.acquire() as conn:
+        # جلب الوقت بعدة طرق للتحقق
+        db_time_now = await conn.fetchval("SELECT NOW()")
+        db_time_utc = await conn.fetchval("SELECT NOW() AT TIME ZONE 'UTC'")
+        db_time_damascus = await conn.fetchval("SELECT NOW() AT TIME ZONE 'Asia/Damascus'")
+        
+        current_local = datetime.now(DAMASCUS_TZ)
+        
+        logging.info(f"🕒 وقت السيرفر المحلي: {current_local.strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.info(f"🕒 وقت DB (بعد الضبط): {db_time_now}")
+        logging.info(f"🕒 وقت DB (UTC): {db_time_utc}")
+        logging.info(f"🕒 وقت DB (دمشق): {db_time_damascus}")
+        
+        # حساب الفرق للتحقق
+        if db_time_damascus:
+            logging.info(f"✅ التوقيت مضبوط بشكل صحيح")
+    
     logging.info(f"🕒 الوقت الحالي في النظام: {datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+    # ==========================================
     
     # تهيئة قاعدة البيانات وإصلاحها
     await init_db()
