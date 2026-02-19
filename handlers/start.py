@@ -1,10 +1,12 @@
 # handlers/start.py
 from aiogram import Router, types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command  # أضف Command هنا
+from aiogram.fsm.context import FSMContext  # أضف FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from config import ADMIN_ID, MODERATORS, USD_TO_SYP
 import logging
 from datetime import datetime
+import pytz  # أضف pytz
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -57,7 +59,53 @@ def get_back_keyboard():
     """إنشاء زر رجوع فقط"""
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
+    builder.row(types.KeyboardButton(text="/رجوع"))  # أضف هذا السطر كخيار إضافي
     return builder.as_markup(resize_keyboard=True)
+# ========== أضف الكود الجديد هنا ==========
+
+@router.message(Command("cancel"))
+@router.message(Command("رجوع"))
+@router.message(F.text == "/cancel")
+@router.message(F.text == "/رجوع")
+async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
+    """
+    إلغاء أي عملية حالية والعودة للقائمة الرئيسية
+    شغال من أي مكان وفي أي وقت
+    """
+    # ضبط المنطقة الزمنية لدمشق
+    damascus_tz = pytz.timezone('Asia/Damascus')
+    current_time = datetime.now(damascus_tz).strftime('%H:%M:%S')
+    
+    # الحصول على حالة FSM الحالية (إذا كان في عملية جارية)
+    current_state = await state.get_state()
+    
+    # مسح حالة FSM
+    await state.clear()
+    
+    # التحقق من إذا كان المستخدم مشرف
+    is_admin_user = is_admin(message.from_user.id)
+    
+    if current_state:
+        # كان في عملية جارية وتم إلغاؤها
+        cancel_text = (
+            f"✅ **تم إلغاء العملية الحالية**\n\n"
+            f"🕐 {current_time}\n"
+            f"🔸 يمكنك البدء من جديد باستخدام الأزرار أدناه."
+        )
+    else:
+        # ما كان في عملية جارية
+        cancel_text = (
+            f"👋 **أهلاً بعودتك!**\n\n"
+            f"🕐 {current_time}\n"
+            f"🔸 اختر ما تريد من القائمة."
+        )
+    
+    # إرسال رسالة التأكيد مع القائمة الرئيسية
+    await message.answer(
+        cancel_text,
+        reply_markup=get_main_menu_keyboard(is_admin_user),
+        parse_mode="Markdown"
+    )
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, db_pool):
