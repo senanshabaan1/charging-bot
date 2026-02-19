@@ -41,6 +41,10 @@ class AdminStates(StatesGroup):
     waiting_admin_id = State()           # لإضافة مشرف جديد
     waiting_admin_info = State()          # للبحث عن معلومات مشرف
     waiting_admin_remove = State()        # لتأكيد إزالة مشرف
+    # ===== حالات جديدة لرفع مستوى VIP =====
+    waiting_vip_user_id = State()          # لإدخال آيدي المستخدم
+    waiting_vip_level = State()            # لإدخال مستوى VIP الجديد
+    waiting_vip_discount = State()         # لإدخال نسبة الخصم المخصصة
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -1358,7 +1362,14 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
                 callback_data=f"add_points_{user['user_id']}"
             )
         )
-        
+       		 # ===== زر جديد لرفع مستوى VIP =====
+	builder.row(
+    	    types.InlineKeyboardButton(
+        	text="👑 رفع مستوى VIP",
+       		callback_data=f"upgrade_vip_{user['user_id']}"
+	    )
+	)
+		# =================================
         await message.answer(
             info_text,
             reply_markup=builder.as_markup(),
@@ -1953,7 +1964,7 @@ async def get_all_admins(pool):
         async with pool.acquire() as conn:
             # جلب المشرفين الأساسيين من config
             from config import ADMIN_ID, MODERATORS
-            admin_ids = [ADMIN_ID] + MODORATORS
+            admin_ids = [ADMIN_ID] + MODERATORS
             
             # جلب معلومات المشرفين من جدول users
             admins = await conn.fetch('''
@@ -2406,6 +2417,200 @@ async def show_admin_logs(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
+# ============= رفع مستوى VIP ومنح خصم مخصص =============
+
+@router.callback_query(F.data.startswith("upgrade_vip_"))
+async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db_pool):  # أضف db_pool
+    """بدء رفع مستوى VIP لمستخدم"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    user_id = int(callback.data.split("_")[2])
+    await state.update_data(target_user=user_id)
+    
+    # جلب معلومات المستخدم الحالية
+    async with db_pool.acquire() as conn:  # ✅ صححناها
+        user = await conn.fetchrow(
+            "SELECT username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
+            user_id
+        )
+    
+    if not user:
+        return await callback.answer("المستخدم غير موجود", show_alert=True)
+    
+    username = user['username'] or user['first_name'] or str(user_id)
+    current_vip = user['vip_level']
+    current_discount = user['discount_percent']
+    total_spent = user['total_spent']
+    
+    # رسالة اختيار مستوى VIP
+    text = (
+        f"👑 **رفع مستوى VIP للمستخدم**\n\n"
+        f"👤 المستخدم: @{username}\n"
+        f"🆔 الآيدي: `{user_id}`\n"
+        f"📊 المستوى الحالي: VIP {current_vip} (خصم {current_discount}%)\n"
+        f"💰 إجمالي المشتريات: {total_spent:,.0f} ل.س\n\n"
+        f"اختر المستوى الجديد:"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    # أزرار المستويات
+    levels = [
+        ("🟢 VIP 0 (0%)", 0, 0),
+        ("🔵 VIP 1 (1%)", 1, 1),
+        ("🟣 VIP 2 (2%)", 2, 2),
+        ("🟡 VIP 3 (3%)", 3, 3),
+        ("🔴 VIP 4 (5%)", 4, 5),
+        ("💎 VIP 5 (7%)", 5, 7),
+        ("👑 VIP 6 (10%)", 6, 10),
+    ]
+    
+    for btn_text, level, discount in levels:
+        if level != current_vip:  # ما نظهر المستوى الحالي
+            builder.row(types.InlineKeyboardButton(
+                text=btn_text,
+                callback_data=f"set_vip_{user_id}_{level}_{discount}"
+            ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🎯 خصم مخصص",
+        callback_data=f"custom_discount_{user_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data=f"user_info_cancel"
+    ))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("set_vip_"))
+async def set_vip_level(callback: types.CallbackQuery, db_pool):
+    """تحديد مستوى VIP للمستخدم"""
+    parts = callback.data.split("_")
+    user_id = int(parts[2])
+    level = int(parts[3])
+    discount = int(parts[4])
+    
+    async with db_pool.acquire() as conn:
+        # تحديث مستوى VIP والخصم
+        await conn.execute('''
+            UPDATE users 
+            SET vip_level = $1, discount_percent = $2 
+            WHERE user_id = $3
+        ''', level, discount, user_id)
+        
+        # جلب معلومات المستخدم
+        user = await conn.fetchrow(
+            "SELECT username, first_name FROM users WHERE user_id = $1",
+            user_id
+        )
+    
+    username = user['username'] or user['first_name'] or str(user_id)
+    
+    # إرسال تأكيد
+    await callback.message.edit_text(
+        f"✅ **تم تحديث مستوى VIP بنجاح**\n\n"
+        f"👤 المستخدم: @{username}\n"
+        f"🆔 الآيدي: `{user_id}`\n"
+        f"👑 المستوى الجديد: VIP {level}\n"
+        f"💰 نسبة الخصم: {discount}%"
+    )
+    
+    # إرسال إشعار للمستخدم
+    try:
+        vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+        icon = vip_icons[level] if level < len(vip_icons) else "⭐"
+        
+        await callback.bot.send_message(
+            user_id,
+            f"🎉 **تم ترقية مستواك في البوت!**\n\n"
+            f"{icon} مستواك الجديد: VIP {level}\n"
+            f"💰 نسبة الخصم: {discount}%\n\n"
+            f"شكراً لاستخدامك خدماتنا!"
+        )
+    except:
+        pass
+
+@router.callback_query(F.data.startswith("custom_discount_"))
+async def custom_discount_start(callback: types.CallbackQuery, state: FSMContext, db_pool):  # أضف db_pool
+    """بدء إعطاء خصم مخصص"""
+    user_id = int(callback.data.split("_")[2])
+    await state.update_data(target_user=user_id)
+    
+    await callback.message.edit_text(
+        f"🎯 **إعطاء خصم مخصص**\n\n"
+        f"أدخل نسبة الخصم المطلوبة (0-100):\n"
+        f"مثال: `15` تعني 15% خصم\n\n"
+        f"❌ للإلغاء أرسل /cancel"
+    )
+    await state.set_state(AdminStates.waiting_vip_discount)
+
+@router.message(AdminStates.waiting_vip_discount)
+async def set_custom_discount(message: types.Message, state: FSMContext, db_pool):
+    """تحديد خصم مخصص لمستخدم"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "/رجوع", "🔙 رجوع للقائمة"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
+    try:
+        discount = float(message.text.strip())
+        if discount < 0 or discount > 100:
+            return await message.answer("❌ نسبة الخصم يجب أن تكون بين 0 و 100")
+        
+        data = await state.get_data()
+        user_id = data['target_user']
+        
+        async with db_pool.acquire() as conn:
+            # تحديث الخصم فقط (المستوى يبقى كما هو)
+            await conn.execute('''
+                UPDATE users 
+                SET discount_percent = $1 
+                WHERE user_id = $2
+            ''', discount, user_id)
+            
+            # جلب معلومات المستخدم
+            user = await conn.fetchrow(
+                "SELECT username, first_name, vip_level FROM users WHERE user_id = $1",
+                user_id
+            )
+        
+        username = user['username'] or user['first_name'] or str(user_id)
+        vip_level = user['vip_level']
+        
+        await message.answer(
+            f"✅ **تم تحديث الخصم بنجاح**\n\n"
+            f"👤 المستخدم: @{username}\n"
+            f"🆔 الآيدي: `{user_id}`\n"
+            f"👑 مستوى VIP: {vip_level}\n"
+            f"💰 نسبة الخصم الجديدة: {discount}%"
+        )
+        
+        # إرسال إشعار للمستخدم
+        try:
+            await message.bot.send_message(
+                user_id,
+                f"🎁 **تم تعديل نسبة الخصم في حسابك!**\n\n"
+                f"💰 نسبة الخصم الجديدة: {discount}%\n"
+                f"👑 مستواك الحالي: VIP {vip_level}\n\n"
+                f"شكراً لاستخدامك خدماتنا!"
+            )
+        except:
+            pass
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح")
+
+@router.callback_query(F.data == "user_info_cancel")
+async def user_info_cancel(callback: types.CallbackQuery):
+    """إلغاء والعودة لمعلومات المستخدم"""
+    await callback.message.edit_text("✅ تم الإلغاء")
 
 @router.callback_query(F.data == "back_to_admin_panel")
 async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
