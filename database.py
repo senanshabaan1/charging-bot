@@ -298,6 +298,26 @@ async def init_db():
         except Exception as e:
             logging.warning(f"⚠️ لم يتم إنشاء أكواد الإحالة للمستخدمين الحاليين: {e}")
 
+        # ========== إضافة أعمدة VIP إذا لم تكن موجودة (للتحديثات) ==========
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS vip_level INTEGER DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود vip_level")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود vip_level: {e}")
+
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS total_spent FLOAT DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود total_spent")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود total_spent: {e}")
+
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS discount_percent INTEGER DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود discount_percent")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
+        # ===============================================================
+
         await conn.close()
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح.")
     except Exception as e:
@@ -841,7 +861,8 @@ async def get_user_profile(pool, user_id):
                 SELECT user_id, username, first_name, last_name, balance, is_banned, 
                        created_at, total_deposits, total_orders, total_points,
                        referral_code, referred_by, referral_count, referral_earnings,
-                       total_points_earned, total_points_redeemed, last_activity
+                       total_points_earned, total_points_redeemed, last_activity,
+                       vip_level, total_spent, discount_percent
                 FROM users 
                 WHERE user_id = $1
             ''', user_id)
@@ -1391,7 +1412,7 @@ async def set_exchange_rate(pool, rate):
         logging.error(f"❌ خطأ في تحديث سعر الصرف: {e}")
         return False
 async def get_syriatel_numbers(pool):
-    """جلب أرقام سيرياتل من قاعدة البيانات"""  # هذه السطر لازم يكون عنده 4 مسافات
+    """جلب أرقام سيرياتل من قاعدة البيانات"""
     try:
         async with pool.acquire() as conn:
             numbers_str = await conn.fetchval(
