@@ -661,15 +661,17 @@ async def get_user_vip(pool, user_id):
         return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
 
 async def update_user_vip(pool, user_id):
-    """تحديث مستوى VIP للمستخدم بناءً على إجمالي مشترياته بالليرة"""
+    """تحديث مستوى VIP للمستخدم بناءً على إجمالي مشترياته من التطبيقات فقط"""
     try:
         async with pool.acquire() as conn:
-            # حساب إجمالي مشتريات المستخدم من الطلبات المكتملة فقط
+            # حساب إجمالي مشتريات المستخدم من الطلبات المكتملة فقط (التطبيقات)
             total_spent = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
                 WHERE user_id = $1 AND status = 'completed'
             ''', user_id) or 0
+            
+            logging.info(f"📊 إجمالي مشتريات المستخدم {user_id} من التطبيقات: {total_spent} ل.س")
             
             # تحديد المستوى والخصم بناءً على إجمالي المشتريات
             level = 0
@@ -697,6 +699,8 @@ async def update_user_vip(pool, user_id):
                 SET vip_level = $1, total_spent = $2, discount_percent = $3
                 WHERE user_id = $4
             ''', level, total_spent, discount, user_id)
+            
+            logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (خصم {discount}%)")
             
             # جلب معلومات المستوى للعرض
             vip_info = {
