@@ -6,6 +6,11 @@ from config import SYRIATEL_NUMS, SHAM_CASH_NUM, SHAM_CASH_NUM_USD, USDT_BEP20_W
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 import asyncio
 import logging
+import pytz
+from datetime import datetime
+
+# ضبط المنطقة الزمنية لدمشق
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -19,6 +24,10 @@ def get_back_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
     return builder.as_markup(resize_keyboard=True)
+
+def get_damascus_time():
+    """الحصول على الوقت الحالي بتوقيت دمشق"""
+    return datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 @router.message(F.text == "💰 شحن المحفظة")
 async def choose_meth(message: types.Message):
@@ -41,8 +50,6 @@ async def back_from_deposit(callback: types.CallbackQuery):
         "تم العودة للقائمة الرئيسية.",
         reply_markup=get_back_keyboard()
     )
-
-# في handlers/deposit.py - عدل دالة start_dep
 
 @router.callback_query(F.data.startswith("m_"))
 async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -78,7 +85,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
         method_name=method_name,
         wallet=wallet,
         current_rate=current_rate,
-        syriatel_nums=syriatel_nums  # حفظ الأرقام في حالة المستخدم
+        syriatel_nums=syriatel_nums
     )
     
     await state.set_state(DepStates.waiting_amount)
@@ -175,7 +182,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         await state.set_state(DepStates.waiting_photo)
 
 async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id: str = None):
-    """إرسال طلب الشحن للمجموعة مع أزرار"""
+    """إرسال طلب الشحن للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
         user_info = f"👤 المستخدم: @{data.get('username', 'غير معروف')}\n"
         user_info += f"🆔 الآيدي: `{data['user_id']}`\n"
@@ -187,14 +194,16 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
         
         tx_info_text = f"🔢 رقم العملية: `{tx_info}`\n" if tx_info else ""
         
-        from datetime import datetime
+        # استخدام توقيت دمشق
+        current_time = get_damascus_time()
+        
         caption = (
             "🆕 **طلب شحن جديد**\n\n"
             f"{user_info}"
             f"{amount_info}"
             f"{method_info}"
             f"{tx_info_text}"
-            f"⏰ الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"⏰ الوقت: {current_time}\n\n"
             "🔹 **الإجراءات:**"
         )
         
@@ -251,7 +260,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             parse_mode="Markdown"
         )
     
-    from datetime import datetime
     async with db_pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
@@ -279,7 +287,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             'display_amount': data['display_amount'],
             'amount_syp': data['amount_syp'],
             'method_name': data['method_name'],
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
         group_msg_id = await send_to_group(bot, channel_data, tx)
@@ -303,7 +310,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_pool):
     data = await state.get_data()
     
-    from datetime import datetime
     async with db_pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
@@ -332,7 +338,6 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
             'display_amount': data['display_amount'],
             'amount_syp': data['amount_syp'],
             'method_name': data['method_name'],
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
         group_msg_id = await send_to_group(bot, channel_data, photo_file_id=message.photo[-1].file_id)
