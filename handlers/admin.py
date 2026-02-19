@@ -560,11 +560,9 @@ async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(AdminStates.waiting_reset_rate)
 
-# في handlers/admin.py - عدل دالة execute_reset_bot
-
 @router.message(AdminStates.waiting_reset_rate)
 async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
-    """تنفيذ تصفير البوت - مع إعادة ضبط VIP"""
+    """تنفيذ تصفير البوت - مع إعادة ضبط VIP والخصومات اليدوية"""
     if not is_admin(message.from_user.id):
         return
     
@@ -592,7 +590,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
             if admin_ids_str:
                 await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
                 
-                # إعادة ضبط المشرفين - مع إعادة تعيين VIP إلى 0
+                # إعادة ضبط المشرفين - مع إعادة تعيين VIP والخصومات اليدوية
                 for admin_id in admin_ids:
                     if admin_id:
                         await conn.execute('''
@@ -609,6 +607,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
                                 vip_level = 0,           -- إعادة ضبط مستوى VIP
                                 total_spent = 0,         -- إعادة ضبط إجمالي المشتريات
                                 discount_percent = 0,    -- إعادة ضبط نسبة الخصم
+                                manual_vip = FALSE,      -- 👈 إعادة ضبط الحالة اليدوية
                                 last_activity = CURRENT_TIMESTAMP
                             WHERE user_id = $1
                         ''', admin_id)
@@ -634,7 +633,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
                 WHERE key = 'redemption_rate'
             ''')
             
-            # 9. إعادة ضبط مستويات VIP في جدول vip_levels (إذا أردت)
+            # 9. إعادة ضبط مستويات VIP في جدول vip_levels
             await conn.execute('''
                 INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
                 VALUES 
@@ -655,7 +654,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
             f"⭐ نقاط لكل طلب: 1\n"
             f"🔗 نقاط لكل إحالة: 1\n"
             f"🎁 100 نقطة = 1 دولار\n"
-            f"👑 تم إعادة ضبط جميع مستويات VIP إلى 0\n\n"
+            f"👑 تم إعادة ضبط جميع مستويات VIP والخصومات اليدوية إلى 0\n\n"
             f"البوت الآن جاهز للبدء من جديد!"
         )
         await state.clear()
@@ -665,6 +664,8 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
+
+
 
 @router.callback_query(F.data == "cancel_del")
 async def cancel_action(callback: types.CallbackQuery):
