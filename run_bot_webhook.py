@@ -22,7 +22,6 @@ async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="🚀 بدء استخدام البوت"),
         BotCommand(command="cancel", description="❌ إلغاء العملية الحالية"),
-        BotCommand(command="الغاء", description="🔙 إلغاء العملية"),
         BotCommand(command="services", description="📱 خدمات الشحن"),
         BotCommand(command="deposit", description="💰 شحن المحفظة"),
         BotCommand(command="profile", description="👤 ملفي الشخصي"),
