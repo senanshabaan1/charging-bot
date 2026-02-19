@@ -162,6 +162,34 @@ async def init_db():
             );
         ''')
 
+        # جدول مستويات VIP
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS vip_levels (
+                level INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                min_spent FLOAT NOT NULL,
+                discount_percent INTEGER NOT NULL,
+                icon TEXT DEFAULT '⭐'
+            );
+        ''')
+
+        # إضافة المستويات الافتراضية
+        await conn.execute('''
+            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
+                VALUES 
+                    (0, 'VIP 0', 0, 1, '🟢'),
+                    (1, 'VIP 1', 500000, 2, '🔵'),
+                    (2, 'VIP 2', 1000000, 3, '🟣'),
+                    (3, 'VIP 3', 2000000, 4, '🟡'),
+                    (4, 'VIP 4', 5000000, 5, '🔴'),
+                    (5, 'VIP 5', 10000000, 6, '💎')
+                ON CONFLICT (level) DO UPDATE SET 
+                    min_spent = EXCLUDED.min_spent,
+                    discount_percent = EXCLUDED.discount_percent,
+                    icon = EXCLUDED.icon;
+        ''')
+
+
         # جدول السجلات
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS logs (
@@ -606,6 +634,147 @@ async def calculate_points_value(pool, points):
         logging.error(f"❌ خطأ في حساب قيمة النقاط: {e}")
         return None
 
+# ============= دوال VIP =============
+
+async def get_vip_levels(pool):
+    """جلب جميع مستويات VIP"""
+    try:
+        async with pool.acquire() as conn:
+            levels = await conn.fetch('''
+                SELECT * FROM vip_levels ORDER BY level
+            ''')
+            return levels
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب مستويات VIP: {e}")
+        return []
+
+async def get_user_vip(pool, user_id):
+    """جلب مستوى VIP للمستخدم"""
+    try:
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow('''
+                SELECT vip_level, total_spent, discount_percent 
+                FROM users WHERE user_id = $1
+            ''', user_id)
+            return user or {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب مستوى VIP للمستخدم {user_id}: {e}")
+        return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
+
+async def update_user_vip(pool, user_id):
+    """تحديث مستوى VIP للمستخدم بناءً على مجموع مشترياته"""
+    try:
+        async with pool.acquire() as conn:
+            # حساب مجموع مشتريات المستخدم
+            total_spent = await conn.fetchval('''
+                SELECT COALESCE(SUM(total_amount_syp), 0) 
+                FROM orders 
+                WHERE user_id = $1 AND status = 'completed'
+            ''', user_id) or 0
+            
+            # إضافة إجمالي الشحنات (اختياري)
+            total_deposits = await conn.fetchval('''
+                SELECT COALESCE(SUM(amount_syp), 0) 
+                FROM deposit_requests 
+                WHERE user_id = $1 AND status = 'approved'
+            ''', user_id) or 0
+            
+            total_spent = total_spent + total_deposits
+            
+            # تحديد المستوى المناسب
+            level = 0
+            discount = 1
+            
+            if total_spent >= 10000000:  # 10 مليون
+                level = 5
+                discount = 6
+            elif total_spent >= 5000000:   # 5 مليون
+                level = 4
+                discount = 5
+            elif total_spent >= 2000000:   # 2 مليون
+                level = 3
+                discount = 4
+            elif total_spent >= 1000000:   # 1 مليون
+                level = 2
+                discount = 3
+            elif total_spent >= 500000:    # 500 ألف
+                level = 1
+                discount = 2
+            else:
+                level = 0
+                discount = 1
+            
+            # تحديث المستخدم
+            await conn.execute('''
+                UPDATE users 
+                SET vip_level = $1, total_spent = $2, discount_percent = $3
+                WHERE user_id = $4
+            ''', level, total_spent, discount, user_id)
+            
+            return {'level': level, 'discount': discount, 'total_spent': total_spent}
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
+        return None
+
+async def get_top_users_by_deposits(pool, limit=10):
+    """أكثر المستخدمين إيداعاً"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, total_deposits, vip_level 
+                FROM users 
+                ORDER BY total_deposits DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين إيداعاً: {e}")
+        return []
+
+async def get_top_users_by_orders(pool, limit=10):
+    """أكثر المستخدمين طلبات"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, total_orders, vip_level 
+                FROM users 
+                ORDER BY total_orders DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين طلبات: {e}")
+        return []
+
+async def get_top_users_by_referrals(pool, limit=10):
+    """أكثر المستخدمين إحالة"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, referral_count, referral_earnings, vip_level 
+                FROM users 
+                ORDER BY referral_count DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين إحالة: {e}")
+        return []
+
+async def get_top_users_by_points(pool, limit=10):
+    """أكثر المستخدمين نقاط"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, total_points, vip_level 
+                FROM users 
+                ORDER BY total_points DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين نقاط: {e}")
+        return []
 # ============= دوال الفئات الفرعية =============
 
 async def get_app_variants(pool, app_id):
