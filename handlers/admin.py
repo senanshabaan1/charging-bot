@@ -2269,13 +2269,25 @@ async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_admin_info)
 async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
-    """عرض معلومات المشرف"""
+    """عرض معلومات المشرف - مع دعم الإلغاء"""
     if not is_admin(message.from_user.id):
         return
     
+    # ===== التحقق من أوامر الإلغاء أولاً =====
+    if message.text in ["/cancel", "/الغاء", "/رجوع", "🔙 رجوع للقائمة"]:
+        await state.clear()
+        from handlers.start import get_main_menu_keyboard
+        await message.answer(
+            "✅ **تم إلغاء العملية**\n\n"
+            "👋 أهلاً بعودتك للقائمة الرئيسية.",
+            reply_markup=get_main_menu_keyboard(is_admin(message.from_user.id))
+        )
+        return
+    # ==========================================
+    
     search_term = message.text.strip()
     
-    from database import get_admin_info
+    from database import get_admin_info, get_user_by_id
     
     # محاولة تحويل النص إلى رقم إذا كان آيدي
     try:
@@ -2290,12 +2302,19 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
             if user:
                 user_id = user['user_id']
             else:
-                return await message.answer("❌ المستخدم غير موجود")
+                return await message.answer(
+                    "❌ **المستخدم غير موجود**\n\n"
+                    "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.\n"
+                    "أو أرسل /cancel للإلغاء"
+                )
     
     info = await get_admin_info(db_pool, user_id)
     
     if not info:
-        return await message.answer("❌ المستخدم غير موجود أو ليس مشرفاً")
+        return await message.answer(
+            "❌ **المستخدم غير موجود أو ليس مشرفاً**\n\n"
+            "أدخل آيدي مشرف صحيح أو أرسل /cancel للإلغاء"
+        )
     
     user = info['user']
     stats = info['stats']
@@ -2307,10 +2326,10 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
     
     # تحديد الدور
     from config import ADMIN_ID
-    role = "👑 المالك" if user_id == ADMIN_ID else "🛡️ مشرف"
+    role = "👑 **المالك**" if user_id == ADMIN_ID else "🛡️ **مشرف**"
     
     text = (
-        f"**{role}**\n\n"
+        f"{role}\n\n"
         f"🆔 **الآيدي:** `{user['user_id']}`\n"
         f"👤 **اليوزر:** @{user['username'] or 'غير معروف'}\n"
         f"📝 **الاسم:** {user['first_name'] or ''} {user['last_name'] or ''}\n"
@@ -2336,7 +2355,14 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
             text += f"• {action['action']}: {action['details']}\n"
             text += f"  🕐 {action_time}\n"
     
-    await message.answer(text, parse_mode="Markdown")
+    # إرسال المعلومات
+    try:
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        # إذا فشل الـ Markdown، نرسل بدون تنسيق
+        logger.error(f"خطأ في تنسيق Markdown: {e}")
+        await message.answer(text, parse_mode=None)
+    
     await state.clear()
 
 @router.callback_query(F.data == "admin_logs")
