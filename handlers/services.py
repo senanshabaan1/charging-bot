@@ -667,7 +667,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
-        f"📋 **سيتم التنفيذ خلال 24 ساعة.**\n"
+        f"📋 **الوقت المتوقع 5 دقائق.**\n"
         f"⭐ **نقاط مضافة:** +{points}"
         f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}",
