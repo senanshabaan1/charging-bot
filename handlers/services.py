@@ -162,6 +162,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         # جلب مستوى VIP للمستخدم
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
+        vip_level = user_vip.get('vip_level', 0)
     
     if not apps:
         await callback.answer("لا توجد تطبيقات في هذا القسم حالياً", show_alert=True)
@@ -213,7 +214,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     
     # إظهار مستوى المستخدم
     vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
-    vip_text = vip_icons[user_vip['vip_level']] if user_vip['vip_level'] <= 5 else "VIP 0 🟢"
+    vip_text = vip_icons[vip_level] if vip_level <= 5 else "VIP 0 🟢"
     
     await callback.message.edit_text(
         f"📱 **{category['display_name']}**\n\n"
@@ -249,7 +250,7 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء طلب شراء"""
+    """بدء طلب شراء مع تطبيق الخصم"""
     parts = callback.data.split("_")
     app_id = int(parts[1])
     app_type = parts[2] if len(parts) > 2 else 'service'
@@ -257,9 +258,12 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     async with db_pool.acquire() as conn:
         app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", app_id)
         
-        # جلب سعر الصرف الحالي
-        from database import get_exchange_rate
+        # جلب سعر الصرف الحالي ومستوى VIP
+        from database import get_exchange_rate, get_user_vip
         current_rate = await get_exchange_rate(db_pool)
+        user_vip = await get_user_vip(db_pool, callback.from_user.id)
+        discount = user_vip.get('discount_percent', 0)
+        vip_level = user_vip.get('vip_level', 0)
     
     if not app:
         return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
@@ -267,7 +271,9 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     await state.update_data({
         'app': dict(app),
         'app_type': app_type,
-        'current_rate': current_rate
+        'current_rate': current_rate,
+        'discount': discount,
+        'vip_level': vip_level
     })
     
     # معالجة مختلفة حسب نوع التطبيق
@@ -275,19 +281,31 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         # خدمة عادية - نطلب الكمية
         profit_percentage = app.get('profit_percentage', 0)
         final_unit_price_usd = app['unit_price_usd'] * (1 + (profit_percentage / 100))
-        price_per_unit_syp = final_unit_price_usd * current_rate
+        
+        # تطبيق الخصم
+        discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
+        price_per_unit_syp = discounted_unit_price_usd * current_rate
         
         await state.update_data({
             'final_unit_price_usd': final_unit_price_usd,
+            'discounted_unit_price_usd': discounted_unit_price_usd,
             'profit_percentage': profit_percentage
         })
+        
+        # رسالة مع إظهار الخصم إذا موجود
+        if discount > 0:
+            original_price = final_unit_price_usd * current_rate
+            price_text = f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س (بدلاً من {original_price:,.0f} ل.س)\n"
+            price_text += f"🎁 **خصم VIP {vip_level}:** {discount}%"
+        else:
+            price_text = f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س"
         
         await state.set_state(OrderStates.qty)
         
         await callback.message.answer(
             f"🏷 **الخدمة:** {app['name']}\n"
             f"📦 **أقل كمية:** {app['min_units']}\n"
-            f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س\n\n"
+            f"{price_text}\n\n"
             f"**الرجاء إدخال الكمية المطلوبة:**",
             reply_markup=get_back_keyboard(),
             parse_mode="Markdown"
@@ -304,12 +322,16 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         builder = InlineKeyboardBuilder()
         for v in variants:
             price_with_profit = v['price_usd'] * (1 + (app['profit_percentage'] / 100))
-            price_syp = price_with_profit * current_rate
+            discounted_price_usd = price_with_profit * (1 - discount/100)
+            price_syp = discounted_price_usd * current_rate
             
             if app_type == 'game':
                 button_text = f"📦 {v['quantity']} وحدة\n{price_syp:,.0f} ل.س"
             else:  # subscription
                 button_text = f"⏱️ {v['duration_days']} يوم\n{price_syp:,.0f} ل.س"
+            
+            if discount > 0:
+                button_text += f" (خصم {discount}%)"
             
             builder.row(types.InlineKeyboardButton(
                 text=button_text,
@@ -323,6 +345,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         await callback.message.edit_text(
             f"**{app['name']}**\n\n"
+            f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
             f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
             "🔸 **اختر الفئة المناسبة:**",
             reply_markup=builder.as_markup()
@@ -331,6 +354,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
 
 @router.message(OrderStates.qty)
 async def get_qty(message: types.Message, state: FSMContext, db_pool):
+    """استقبال الكمية مع تطبيق الخصم"""
     if message.text == "🔙 رجوع للقائمة":
         await state.clear()
         await message.answer("تم إلغاء الطلب.")
@@ -346,6 +370,8 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     data = await state.get_data()
     app = data['app']
     current_rate = data.get('current_rate', 115)
+    discount = data.get('discount', 0)
+    vip_level = data.get('vip_level', 0)
     
     if qty < app['min_units']:
         return await message.answer(
@@ -353,8 +379,15 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
             reply_markup=get_back_keyboard()
         )
     
-    total_usd = qty * data['final_unit_price_usd']
+    # استخدام السعر بعد الخصم
+    discounted_unit_price_usd = data.get('discounted_unit_price_usd', data.get('final_unit_price_usd'))
+    total_usd = qty * discounted_unit_price_usd
     total_syp = total_usd * current_rate
+    
+    # السعر الأصلي للعرض
+    original_unit_price_usd = data.get('final_unit_price_usd')
+    original_total_usd = qty * original_unit_price_usd
+    original_total_syp = original_total_usd * current_rate
     
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow(
@@ -377,11 +410,24 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
                 reply_markup=get_back_keyboard()
             )
     
-    await state.update_data(qty=qty, total_usd=total_usd, total_syp=total_syp)
+    await state.update_data(
+        qty=qty, 
+        total_usd=total_usd, 
+        total_syp=total_syp,
+        original_total_syp=original_total_syp
+    )
+    
+    # رسالة مع تفاصيل الخصم
+    if discount > 0:
+        saved_amount = original_total_syp - total_syp
+        price_message = f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س (بدلاً من {original_total_syp:,.0f} ل.س)\n"
+        price_message += f"🎁 **وفرت:** {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
+    else:
+        price_message = f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س"
     
     await message.answer(
         f"✅ **الكمية مقبولة**\n\n"
-        f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س\n\n"
+        f"{price_message}\n\n"
         f"**الرجاء إرسال (ID الحساب) المراد شحنه:**",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
@@ -403,6 +449,8 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         )
     
     data = await state.get_data()
+    discount = data.get('discount', 0)
+    vip_level = data.get('vip_level', 0)
     
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow(
@@ -423,12 +471,20 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     builder.row(types.InlineKeyboardButton(text="✅ تأكيد ودفع", callback_data="execute_buy"))
     builder.row(types.InlineKeyboardButton(text="🔙 إلغاء", callback_data="cancel_order"))
     
+    # رسالة التأكيد مع تفاصيل الخصم
+    if discount > 0:
+        saved_amount = data.get('original_total_syp', data['total_syp']) - data['total_syp']
+        price_detail = f"💰 **السعر الإجمالي:** {data['total_syp']:,.0f} ل.س (بدلاً من {data.get('original_total_syp', data['total_syp']):,.0f} ل.س)\n"
+        price_detail += f"🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
+    else:
+        price_detail = f"💰 **السعر الإجمالي:** {data['total_syp']:,.0f} ل.س"
+    
     msg = (
         f"📋 **تفاصيل الطلب:**\n\n"
         f"🔹 **التطبيق:** {data['app']['name']}\n"
         f"🔹 **الكمية:** {data['qty']}\n"
         f"🔹 **المستهدف:** `{target_id}`\n"
-        f"🔹 **السعر الإجمالي:** {data['total_syp']:,.0f} ل.س\n\n"
+        f"{price_detail}\n\n"
         f"💳 **سيتم خصم المبلغ من رصيدك.**\n"
         f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
     )
@@ -442,7 +498,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
 
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """تنفيذ الطلب (لجميع الأنواع)"""
+    """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
     data = await state.get_data()
     
     from datetime import datetime
@@ -450,7 +506,9 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     # جلب عدد النقاط من الإعدادات
     points = await get_points_per_order(db_pool)
-    logger.info(f"📊 نقاط الطلب: {points}")
+    discount = data.get('discount', 0)
+    vip_level = data.get('vip_level', 0)
+    logger.info(f"📊 نقاط الطلب: {points}, خصم VIP: {discount}%")
     
     async with db_pool.acquire() as conn:
         # بدء transaction لضمان تكامل البيانات
@@ -479,7 +537,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 variant['name'],
                 variant.get('quantity', 0),
                 variant.get('duration_days', 0),
-                data['final_price_usd'],
+                data['discounted_unit_price_usd'] if 'discounted_unit_price_usd' in data else data['final_price_usd'],
                 data['total_syp'],
                 data['target_id'],
                 points
@@ -511,7 +569,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data['app']['id'],
                 data['app']['name'],
                 data['qty'],
-                data['final_unit_price_usd'],
+                data['discounted_unit_price_usd'],
                 data['total_syp'],
                 data['target_id'],
                 points
@@ -536,14 +594,20 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     "UPDATE orders SET group_message_id = $1 WHERE id = $2",
                     group_msg_id, order_id
                 )
-            
     
-    # إرسال رسالة التأكيد للمستخدم
+    # رسالة التأكيد مع تفاصيل الخصم
+    if discount > 0:
+        saved_amount = data.get('original_total_syp', data['total_syp']) - data['total_syp']
+        discount_text = f"\n🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
+    else:
+        discount_text = ""
+    
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
         f"📋 **سيتم التنفيذ خلال 24 ساعة.**\n"
-        f"⭐ **نقاط مضافة:** +{points}\n\n"
+        f"⭐ **نقاط مضافة:** +{points}"
+        f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}",
         parse_mode="Markdown"
     )
