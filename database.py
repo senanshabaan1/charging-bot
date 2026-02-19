@@ -331,6 +331,10 @@ async def init_db():
 async def get_pool():
     """إنشاء مجمع اتصالات (Pool) مع ضبط المنطقة الزمنية"""
     try:
+        # تعريف دالة التهيئة لكل اتصال جديد
+        async def init_connection(conn):
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+        
         # التحقق من وجود dsn في الإعدادات
         if "dsn" in DB_CONFIG:
             pool = await asyncpg.create_pool(
@@ -339,9 +343,7 @@ async def get_pool():
                 server_settings={
                     'timezone': 'Asia/Damascus'
                 },
-                init=[  # أوامر تهيئة لكل اتصال جديد
-                    "SET TIMEZONE TO 'Asia/Damascus';",
-                ]
+                init=init_connection  # تمرير الدالة وليس القائمة
             )
             logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN مع ضبط التوقيت")
         else:
@@ -351,9 +353,7 @@ async def get_pool():
                 server_settings={
                     'timezone': 'Asia/Damascus'
                 },
-                init=[
-                    "SET TIMEZONE TO 'Asia/Damascus';",
-                ]
+                init=init_connection  # تمرير الدالة وليس القائمة
             )
             logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح مع ضبط التوقيت")
         return pool
