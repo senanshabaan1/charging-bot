@@ -10,7 +10,7 @@ from database import init_db, get_pool, fix_points_history_table, set_database_t
 from handlers import start, deposit, services, admin
 import pytz
 from datetime import datetime
-from aiogram.types import BotCommand  # أضف هذا السطر
+from aiogram.types import BotCommand
 
 logging.basicConfig(level=logging.INFO)
 
@@ -117,9 +117,12 @@ async def main():
     except Exception as e:
         logging.error(f"❌ خطأ في تحميل سعر الصرف: {e}")
     
- # إنشاء Dispatcher وتمرير db_pool
+    # إنشاء Dispatcher وتمرير db_pool
     dp = Dispatcher()
     dp["db_pool"] = db_pool
+    
+    # إنشاء البوت - يجب أن يكون هنا قبل استخدامه
+    bot = Bot(token=TOKEN)
 
     # ========== Middleware للتحقق من حالة البوت ==========
     @dp.message.middleware()
@@ -195,7 +198,7 @@ async def main():
     # إضافة مسار webhook مع تمرير البيانات
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
-        bot=bot,
+        bot=bot,  # ✅ الآن bot معرف بشكل صحيح
         **{"db_pool": db_pool}  # تمرير db_pool هنا أيضاً
     )
     webhook_requests_handler.register(app, path="/webhook")
