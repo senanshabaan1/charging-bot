@@ -8,8 +8,13 @@ from aiohttp import web
 from config import TOKEN, ADMIN_ID
 from database import init_db, get_pool, fix_points_history_table  # أضف fix_points_history_table هنا
 from handlers import start, deposit, services, admin
+import pytz
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
+
+# ضبط المنطقة الزمنية لدمشق
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 async def on_startup(bot: Bot, base_url: str, db_pool):
     """تشغيل عند بدء التشغيل - تعيين webhook"""
@@ -21,6 +26,16 @@ async def on_shutdown(bot: Bot):
     """تشغيل عند الإيقاف - حذف webhook"""
     await bot.delete_webhook()
     logging.info("✅ تم حذف webhook")
+
+async def set_timezone_for_connection(conn):
+    """ضبط المنطقة الزمنية لاتصال قاعدة البيانات"""
+    try:
+        await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+        current_time = await conn.fetchval("SELECT NOW()")
+        logging.info(f"🕒 وقت قاعدة البيانات بعد الضبط: {current_time}")
+    except Exception as e:
+        logging.error(f"⚠️ خطأ في ضبط المنطقة الزمنية: {e}")
+
 async def main():
     logging.info("🚀 بدأ تشغيل البوت...")
     
@@ -29,6 +44,12 @@ async def main():
     if not db_pool:
         logging.error("❌ فشل الاتصال بقاعدة البيانات")
         return
+    
+    # ضبط المنطقة الزمنية لكل اتصال جديد
+    async with db_pool.acquire() as conn:
+        await set_timezone_for_connection(conn)
+    
+    logging.info(f"🕒 الوقت الحالي في النظام: {datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
     
     # تهيئة قاعدة البيانات وإصلاحها
     await init_db()
@@ -110,9 +131,6 @@ async def main():
         deposit.router,
         services.router
     )
-    
-    # ... باقي الكود (إعدادات webhook) كما هو ...
-
     
     # إعدادات webhook
     PORT = int(os.environ.get('PORT', 8000))
