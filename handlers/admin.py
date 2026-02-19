@@ -1784,9 +1784,23 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             
             logger.info(f"✅ تم إضافة {points} نقاط للمستخدم {order['user_id']} من الطلب المكتمل {order_id}")
             
-            # ========== تحديث مستوى VIP ==========
+            # ========== تحديث مستوى VIP مع تصحيح ==========
             from database import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
+            
+            # 🟢🟢🟢 سطور التصحيح 🟢🟢🟢
+            logger.info(f"🔍 VIP UPDATE - User: {order['user_id']}")
+            logger.info(f"🔍 VIP INFO: {vip_info}")
+            
+            # حساب إجمالي مشتريات المستخدم للتحقق
+            total_spent = await conn.fetchval('''
+                SELECT COALESCE(SUM(total_amount_syp), 0) 
+                FROM orders 
+                WHERE user_id = $1 AND status = 'completed'
+            ''', order['user_id'])
+            
+            logger.info(f"🔍 TOTAL SPENT: {total_spent} SYP")
+            # 🟢🟢🟢 نهاية التصحيح 🟢🟢🟢
             
             # جلب معلومات VIP للعرض
             if vip_info:
@@ -1830,6 +1844,7 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
     except Exception as e:
         logger.error(f"❌ خطأ في تأكيد التنفيذ: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+
 @router.callback_query(F.data.startswith("fail_order_"))
 async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
     """تعذر تنفيذ الطلب من المجموعة - بدون إضافة نقاط"""
