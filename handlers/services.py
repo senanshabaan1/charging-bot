@@ -7,6 +7,10 @@ from config import ORDERS_GROUP, USD_TO_SYP
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 import logging
 from datetime import datetime
+import pytz
+
+# ضبط المنطقة الزمنية لدمشق
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -22,18 +26,29 @@ def get_back_keyboard():
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
     return builder.as_markup(resize_keyboard=True)
 
+def get_damascus_time():
+    """الحصول على الوقت الحالي بتوقيت دمشق"""
+    return datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')
+
 async def send_order_to_group(bot: Bot, order_data: dict):
-    """إرسال طلب التطبيق للمجموعة مع أزرار"""
+    """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
         caption = (
             "🆕 **طلب تطبيق جديد**\n\n"
             f"👤 **المستخدم:** @{order_data['username']}\n"
             f"🆔 **الآيدي:** `{order_data['user_id']}`\n"
             f"📱 **التطبيق:** {order_data['app_name']}\n"
-            f"📦 **الكمية:** {order_data['quantity']}\n"
+        )
+        
+        if 'variant_name' in order_data:
+            caption += f"📦 **الفئة:** {order_data['variant_name']}\n"
+        else:
+            caption += f"📦 **الكمية:** {order_data['quantity']}\n"
+        
+        caption += (
             f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
             f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **الوقت:** {order_data['time']}\n\n"
+            f"⏰ **الوقت:** {get_damascus_time()}\n\n"
             "🔹 **الإجراءات:**"
         )
         
@@ -64,7 +79,7 @@ async def send_order_to_group(bot: Bot, order_data: dict):
         return None
 
 async def update_order_message(bot: Bot, message_id: int, order_data: dict, status: str):
-    """تحديث رسالة الطلب في المجموعة بعد المعالجة"""
+    """تحديث رسالة الطلب في المجموعة بعد المعالجة - مع الحفاظ على الوقت الأصلي"""
     try:
         status_text = {
             "processing": "🔄 **جاري التنفيذ...**",
@@ -80,7 +95,8 @@ async def update_order_message(bot: Bot, message_id: int, order_data: dict, stat
             f"📦 **الكمية:** {order_data['quantity']}\n"
             f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
             f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **الوقت:** {order_data['time']}"
+            f"⏰ **وقت الطلب:** {order_data['time']}\n"
+            f"🔄 **آخر تحديث:** {get_damascus_time()}"
         )
         
         # أزرار جديدة بناءً على الحالة
@@ -139,7 +155,6 @@ async def show_categories(message: types.Message, db_pool):
         reply_markup=builder.as_markup()
     )
 
-# في دالة show_apps_by_category
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     """عرض التطبيقات في قسم معين - مع تمييز نوع التطبيق"""
@@ -352,6 +367,50 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         )
         await state.set_state(OrderStates.choosing_variant)
 
+@router.callback_query(F.data.startswith("var_"))
+async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """اختيار فئة فرعية (للألعاب والاشتراكات)"""
+    variant_id = int(callback.data.split("_")[1])
+    
+    from database import get_app_variant
+    variant = await get_app_variant(db_pool, variant_id)
+    
+    if not variant:
+        return await callback.answer("هذه الفئة غير متوفرة", show_alert=True)
+    
+    data = await state.get_data()
+    app = data['app']
+    current_rate = data['current_rate']
+    discount = data['discount']
+    vip_level = data['vip_level']
+    
+    # حساب السعر مع الربح والخصم
+    price_with_profit = variant['price_usd'] * (1 + (app['profit_percentage'] / 100))
+    discounted_price_usd = price_with_profit * (1 - discount/100)
+    total_syp = discounted_price_usd * current_rate
+    
+    # السعر الأصلي للعرض
+    original_price_usd = price_with_profit
+    original_total_syp = original_price_usd * current_rate
+    
+    await state.update_data({
+        'variant': dict(variant),
+        'final_price_usd': discounted_price_usd,
+        'total_syp': total_syp,
+        'original_total_syp': original_total_syp,
+        'qty': variant.get('quantity', 1)  # للتوافق
+    })
+    
+    await callback.message.answer(
+        f"📋 **تفاصيل الطلب**\n\n"
+        f"📱 **التطبيق:** {app['name']}\n"
+        f"📦 **الفئة:** {variant['name']}\n"
+        f"💰 **السعر:** {total_syp:,.0f} ل.س\n"
+        f"🎯 **يرجى إرسال ID الحساب المستهدف:**",
+        reply_markup=get_back_keyboard()
+    )
+    await state.set_state(OrderStates.target_id)
+
 @router.message(OrderStates.qty)
 async def get_qty(message: types.Message, state: FSMContext, db_pool):
     """استقبال الكمية مع تطبيق الخصم"""
@@ -482,7 +541,14 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     msg = (
         f"📋 **تفاصيل الطلب:**\n\n"
         f"🔹 **التطبيق:** {data['app']['name']}\n"
-        f"🔹 **الكمية:** {data['qty']}\n"
+    )
+    
+    if 'variant' in data:
+        msg += f"🔹 **الفئة:** {data['variant']['name']}\n"
+    else:
+        msg += f"🔹 **الكمية:** {data['qty']}\n"
+    
+    msg += (
         f"🔹 **المستهدف:** `{target_id}`\n"
         f"{price_detail}\n\n"
         f"💳 **سيتم خصم المبلغ من رصيدك.**\n"
@@ -501,7 +567,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
     data = await state.get_data()
     
-    from datetime import datetime
     from database import get_points_per_order
     
     # جلب عدد النقاط من الإعدادات
@@ -537,7 +602,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 variant['name'],
                 variant.get('quantity', 0),
                 variant.get('duration_days', 0),
-                data['discounted_unit_price_usd'] if 'discounted_unit_price_usd' in data else data['final_price_usd'],
+                data['final_price_usd'] if 'final_price_usd' in data else data['discounted_unit_price_usd'],
                 data['total_syp'],
                 data['target_id'],
                 points
@@ -550,10 +615,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'app_name': data['app']['name'],
                     'variant_name': variant['name'],
                     'quantity': variant.get('quantity', 0),
-                    'duration_days': variant.get('duration_days', 0),
                     'total_syp': data['total_syp'],
                     'target_id': data['target_id'],
-                    'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
             else:
                 # طلب عادي
@@ -583,7 +646,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'quantity': data['qty'],
                     'total_syp': data['total_syp'],
                     'target_id': data['target_id'],
-                    'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
             
             # إرسال الطلب للمجموعة
