@@ -9,6 +9,7 @@ from datetime import datetime
 import asyncio
 import logging
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from handlers.deposit import get_damascus_time
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
@@ -1540,14 +1541,17 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                 )
             ''', user_id, amount)
         
-        # إرسال إشعار للمستخدم
+        # استخدام توقيت دمشق للمستخدم
+        damascus_time = get_damascus_time()
+        
+        # إرسال إشعار للمستخدم مع توقيت دمشق
         try:
             await bot.send_message(
                 user_id,
                 f"✅ **تم تأكيد عملية الشحن بنجاح!**\n\n"
                 f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
                 f"💳 **الرصيد الحالي:** {new_balance:,.0f} ل.س\n"
-                f"📅 **التاريخ:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"📅 **التاريخ:** {damascus_time}\n\n"
                 f"🔸 **شكراً لاستخدامك خدماتنا**",
                 parse_mode="Markdown"
             )
@@ -1560,8 +1564,8 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
             # التحقق من وجود نص في الرسالة
             current_text = callback.message.text or callback.message.caption or ""
             
-            # إضافة نص التأكيد
-            new_text = current_text + "\n\n✅ **تمت الموافقة على الطلب**"
+            # إضافة نص التأكيد مع توقيت دمشق
+            new_text = current_text + f"\n\n✅ **تمت الموافقة على الطلب**\n📅 **بتاريخ:** {damascus_time}"
             
             # التحقق من نوع الرسالة (نص أو صورة)
             if callback.message.photo:
@@ -1609,38 +1613,40 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
                 )
             ''', user_id)
         
-        # إرسال إشعار للمستخدم
+        # استخدام توقيت دمشق للمستخدم
+        damascus_time = get_damascus_time()
+        
+        # إرسال إشعار للمستخدم مع توقيت دمشق
         try:
             await bot.send_message(
                 user_id,
-                "❌ **نعتذر، تم رفض طلب الشحن الخاص بك.**\n\n"
-                "🔸 **الأسباب المحتملة:**\n"
-                "• بيانات التحويل غير صحيحة\n"
-                "• لم يتم العثور على التحويل\n"
-                "• المشكلة فنية\n\n"
-                "📞 **للمساعدة تواصل مع الدعم.**",
+                f"❌ **نعتذر، تم رفض طلب الشحن الخاص بك.**\n\n"
+                f"📅 **تاريخ الرفض:** {damascus_time}\n"
+                f"🔸 **الأسباب المحتملة:**\n"
+                f"• بيانات التحويل غير صحيحة\n"
+                f"• لم يتم العثور على التحويل\n"
+                f"• المشكلة فنية\n\n"
+                f"📞 **للمساعدة تواصل مع الدعم.**",
                 parse_mode="Markdown"
             )
             logger.info(f"✅ تم إرسال رسالة الرفض للمستخدم {user_id}")
         except Exception as e:
             logger.error(f"❌ فشل إرسال رسالة الرفض للمستخدم {user_id}: {e}")
         
-        # تحديث رسالة المجموعة - نسخة محسنة للصور والنصوص
+        # تحديث رسالة المجموعة مع توقيت دمشق
         try:
             # التحقق من نوع الرسالة (صورة أو نص)
             current_text = callback.message.text or callback.message.caption or ""
             
-            # إضافة نص الرفض
-            new_text = current_text + "\n\n❌ **تم رفض الطلب**"
+            # إضافة نص الرفض مع التاريخ
+            new_text = current_text + f"\n\n❌ **تم رفض الطلب**\n📅 **بتاريخ:** {damascus_time}"
             
             if callback.message.photo:
-                # إذا كانت رسالة تحتوي على صورة
                 await callback.message.edit_caption(
                     caption=new_text,
                     reply_markup=None
                 )
             else:
-                # إذا كانت رسالة نصية عادية
                 await callback.message.edit_text(
                     text=new_text,
                     reply_markup=None
