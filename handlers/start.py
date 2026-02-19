@@ -298,6 +298,7 @@ async def cmd_start(message: types.Message, db_pool):
         welcome_text,
         reply_markup=get_main_menu_keyboard(is_admin(user_id))
     )
+
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription(callback: types.CallbackQuery, db_pool):
     """التحقق من اشتراك المستخدم بعد الانضمام للقناة"""
@@ -317,7 +318,7 @@ async def check_subscription(callback: types.CallbackQuery, db_pool):
         await cmd_start(callback.message, db_pool)
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
-        
+
 @router.message(F.text == "🔙 رجوع للقائمة")
 async def back_to_main_menu(message: types.Message, db_pool):
     """معالجة زر الرجوع للقائمة الرئيسية"""
@@ -325,13 +326,13 @@ async def back_to_main_menu(message: types.Message, db_pool):
 
 @router.message(F.text == "👤 حسابي")
 async def my_account(message: types.Message, db_pool):
-    """عرض الملف الشخصي مع أزرار النقاط والإحالة"""
+    """عرض الملف الشخصي مع أزرار النقاط والإحالة وتفاصيل VIP"""
     user_id = message.from_user.id
     
     async with db_pool.acquire() as conn:
         try:
             user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent FROM users WHERE user_id = $1",
+                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
                 user_id
             )
             if user_data and user_data['is_banned']:
@@ -344,6 +345,7 @@ async def my_account(message: types.Message, db_pool):
             first_name = user_data['first_name'] if user_data else None
             vip_level = user_data['vip_level'] if user_data else 0
             vip_discount = user_data['discount_percent'] if user_data else 0
+            total_spent = user_data['total_spent'] if user_data else 0
         except Exception as e:
             print(f"خطأ في التحقق من الحظر: {e}")
             balance = 0
@@ -353,9 +355,10 @@ async def my_account(message: types.Message, db_pool):
             first_name = None
             vip_level = 0
             vip_discount = 0
+            total_spent = 0
     
     # حساب قيمة النقاط بالسعر الحالي
-    from database import get_redemption_rate, get_exchange_rate
+    from database import get_redemption_rate, get_exchange_rate, get_next_vip_level
     redemption_rate = await get_redemption_rate(db_pool)
     exchange_rate = await get_exchange_rate(db_pool)
     
@@ -370,6 +373,17 @@ async def my_account(message: types.Message, db_pool):
     vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
     vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
     
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        next_discount = next_level_info['next_discount']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
+    
     # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -381,7 +395,7 @@ async def my_account(message: types.Message, db_pool):
         types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
     )
     
-    # رسالة الملف الشخصي
+    # رسالة الملف الشخصي مع تفاصيل VIP
     profile_text = (
         f"👤 **الملف الشخصي**\n\n"
         f"🆔 **الآيدي:** `{user_id}`\n"
@@ -389,8 +403,12 @@ async def my_account(message: types.Message, db_pool):
         f"📅 **اليوزر:** @{username or message.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n"
-        f"👑 **مستوى VIP:** {vip_icon} VIP {vip_level} (خصم {vip_discount}%)\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"👑 **نظام VIP:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
@@ -716,34 +734,54 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
-    """العودة إلى الملف الشخصي - مع سعر الصرف الحالي"""
+    """العودة إلى الملف الشخصي - مع سعر الصرف الحالي وتفاصيل VIP"""
     user_id = callback.from_user.id
     
     # جلب سعر الصرف الحالي من قاعدة البيانات
-    from database import get_exchange_rate, get_redemption_rate
+    from database import get_exchange_rate, get_redemption_rate, get_next_vip_level
     exchange_rate = await get_exchange_rate(db_pool)
     redemption_rate = await get_redemption_rate(db_pool)
     
     async with db_pool.acquire() as conn:
         try:
             user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name FROM users WHERE user_id = $1",
+                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
                 user_id
             )
             balance = user_data['balance'] if user_data else 0
             points = user_data['total_points'] if user_data else 0
             username = user_data['username'] if user_data else None
             first_name = user_data['first_name'] if user_data else None
+            vip_level = user_data['vip_level'] if user_data else 0
+            vip_discount = user_data['discount_percent'] if user_data else 0
+            total_spent = user_data['total_spent'] if user_data else 0
         except:
             balance = 0
             points = 0
             username = None
             first_name = None
+            vip_level = 0
+            vip_discount = 0
+            total_spent = 0
     
     # حساب قيمة النقاط بسعر الصرف الحالي
     points_value_usd = (points / redemption_rate) * 5
     points_value_syp = points_value_usd * exchange_rate
     base_syp = 5 * exchange_rate
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
     
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -762,7 +800,12 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"👑 **نظام VIP:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
@@ -824,12 +867,20 @@ async def show_help(message: types.Message):
         "• عرض النقاط وقيمتها\n"
         "• رابط الإحالة الخاص بك\n"
         "• سجل النقاط\n"
-        "• استرداد النقاط\n\n"
+        "• استرداد النقاط\n"
+        "• مستوى VIP والخصم\n\n"
         
         "**⭐ نظام النقاط:**\n"
         "• 5 نقاط لكل عملية شراء\n"
         "• 5 نقاط لكل إحالة ناجحة\n"
         "• استبدال 500 نقطة بـ 5$ رصيد\n\n"
+        
+        "**👑 نظام VIP:**\n"
+        "• VIP 0: 0% خصم\n"
+        "• VIP 1: 1% خصم (1000 ل.س)\n"
+        "• VIP 2: 2% خصم (2000 ل.س)\n"
+        "• VIP 3: 3% خصم (4000 ل.س)\n"
+        "• VIP 4: 5% خصم (8000 ل.س)\n\n"
         
         "**📞 للدعم:**\n"
         "• @support\n\n"
