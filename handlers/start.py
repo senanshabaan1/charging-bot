@@ -331,7 +331,7 @@ async def my_account(message: types.Message, db_pool):
     async with db_pool.acquire() as conn:
         try:
             user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name FROM users WHERE user_id = $1",
+                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent FROM users WHERE user_id = $1",
                 user_id
             )
             if user_data and user_data['is_banned']:
@@ -342,6 +342,8 @@ async def my_account(message: types.Message, db_pool):
             referral_code = user_data['referral_code'] if user_data else None
             username = user_data['username'] if user_data else None
             first_name = user_data['first_name'] if user_data else None
+            vip_level = user_data['vip_level'] if user_data else 0
+            vip_discount = user_data['discount_percent'] if user_data else 0
         except Exception as e:
             print(f"خطأ في التحقق من الحظر: {e}")
             balance = 0
@@ -349,6 +351,8 @@ async def my_account(message: types.Message, db_pool):
             referral_code = None
             username = None
             first_name = None
+            vip_level = 0
+            vip_discount = 0
     
     # حساب قيمة النقاط بالسعر الحالي
     from database import get_redemption_rate, get_exchange_rate
@@ -361,6 +365,10 @@ async def my_account(message: types.Message, db_pool):
     
     # قيمة 500 نقطة بالليرة
     base_syp = 5 * exchange_rate
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
     
     # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
