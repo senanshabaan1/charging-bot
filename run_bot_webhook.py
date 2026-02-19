@@ -125,56 +125,38 @@ async def main():
     dp["db_pool"] = db_pool
 
     
-    # ========== Middleware للتحقق من حالة البوت (معدل) ==========
-    @dp.message.middleware()
-    async def check_bot_status_middleware(handler, event, data):
-        """التحقق من حالة البوت قبل معالجة الأوامر"""
-        from database import get_bot_status, get_maintenance_message
-        
-        # جلب db_pool من الـ data
-        pool = data.get('db_pool')
-        if not pool:
-            return await handler(event, data)
-        
-        user = event.from_user
-        from config import ADMIN_ID, MODERATORS
-        
-        # تحقق من حالة البوت
-        bot_status = await get_bot_status(pool)
-        
-        # إذا البوت متوقف والمستخدم ليس مشرف
-        if not bot_status and user.id != ADMIN_ID and user.id not in MODERATORS:
-            msg = await get_maintenance_message(pool)
-            
-            if isinstance(event, types.Message):
-                await event.answer(f"🛠 {msg}")
-            elif isinstance(event, types.CallbackQuery):
-                await event.answer(msg, show_alert=True)
-            return  # منع معالجة الحدث
-        
+# ========== Middleware للتحقق من حالة البوت (معدل) ==========
+@dp.message.middleware()
+async def check_bot_status_middleware(handler, event, data):
+    # ✅ التحقق من أوامر الإلغاء أولاً - تمريرها فوراً
+    if event.text and event.text.startswith(('/cancel', '/الغاء', '/رجوع')):
         return await handler(event, data)
     
-    # نفس الميدل وير للـ callback queries
-    @dp.callback_query.middleware()
-    async def check_bot_status_callback_middleware(handler, event, data):
-        """التحقق من حالة البوت قبل معالجة الأزرار"""
-        from database import get_bot_status, get_maintenance_message
-        
-        pool = data.get('db_pool')
-        if not pool:
-            return await handler(event, data)
-        
-        user = event.from_user
-        from config import ADMIN_ID, MODERATORS
-        
-        bot_status = await get_bot_status(pool)
-        
-        if not bot_status and user.id != ADMIN_ID and user.id not in MODERATORS:
-            msg = await get_maintenance_message(pool)
-            await event.answer(msg, show_alert=True)
-            return
-        
+    """التحقق من حالة البوت قبل معالجة الأوامر"""
+    from database import get_bot_status, get_maintenance_message
+    
+    # جلب db_pool من الـ data
+    pool = data.get('db_pool')
+    if not pool:
         return await handler(event, data)
+    
+    user = event.from_user
+    from config import ADMIN_ID, MODERATORS
+    
+    # تحقق من حالة البوت
+    bot_status = await get_bot_status(pool)
+    
+    # إذا البوت متوقف والمستخدم ليس مشرف
+    if not bot_status and user.id != ADMIN_ID and user.id not in MODERATORS:
+        msg = await get_maintenance_message(pool)
+        
+        if isinstance(event, types.Message):
+            await event.answer(f"🛠 {msg}")
+        elif isinstance(event, types.CallbackQuery):
+            await event.answer(msg, show_alert=True)
+        return  # منع معالجة الحدث
+    
+    return await handler(event, data)
     # =========================================================
     
     # تسجيل الهاندلرز
