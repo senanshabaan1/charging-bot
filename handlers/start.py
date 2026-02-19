@@ -190,7 +190,7 @@ async def cmd_start(message: types.Message, db_pool):
                         points = await conn.fetchval(
                             "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
                         )
-                        points = int(points) if points else 5
+                        points = int(points) if points else 1
                         
                         # إضافة نقاط للمستخدم الذي قام بالإحالة
                         await conn.execute(
@@ -362,12 +362,12 @@ async def my_account(message: types.Message, db_pool):
     redemption_rate = await get_redemption_rate(db_pool)
     exchange_rate = await get_exchange_rate(db_pool)
     
-    # قيمة 500 نقطة = 5 دولار
-    points_value_usd = (points / redemption_rate) * 5
+    # قيمة 100 نقطة = 1 دولار
+    points_value_usd = (points / redemption_rate) 
     points_value_syp = points_value_usd * exchange_rate
     
-    # قيمة 500 نقطة بالليرة
-    base_syp = 5 * exchange_rate
+    # قيمة 100 نقطة بالليرة
+    base_syp = 1 * exchange_rate
     
     # تحديد أيقونة VIP
     vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
@@ -410,7 +410,7 @@ async def my_account(message: types.Message, db_pool):
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
-        f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
+        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
@@ -459,8 +459,8 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         except:
             points_from_referrals = 0
     
-    # حساب قيمة 5 دولار بسعر الصرف الحالي
-    five_usd_value = 5 * exchange_rate
+    # حساب قيمة 1 دولار بسعر الصرف الحالي
+    five_usd_value = 1 * exchange_rate
     
     text = (
         f"🔗 رابط الإحالة الخاص بك\n\n"
@@ -469,8 +469,8 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• عدد المحالين: {referrals_count}\n"
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
-        f"• 5 نقاط لكل مشترك جديد\n"
-        f"• كل 500 نقطة = 5$ ({five_usd_value:.0f} ل.س)\n"
+        f"• 1 نقطة لكل مشترك جديد\n"
+        f"• كل 100 نقطة = 1$ ({five_usd_value:.0f} ل.س)\n"
         f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
@@ -495,14 +495,14 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         # جلب الإعدادات
         redemption_rate = await conn.fetchval(
             "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
-        ) or '500'
+        ) or '100'
         redemption_rate = int(redemption_rate)
         
         from database import get_exchange_rate
         exchange_rate = await get_exchange_rate(db_pool)
         
-        # قيمة 500 نقطة بالليرة
-        base_syp = 5 * exchange_rate
+        # قيمة 100 نقطة بالليرة
+        base_syp = 1 * exchange_rate
         
         # جلب إجمالي النقاط المكتسبة (فقط النقاط الموجبة)
         points_earned = await conn.fetchval(
@@ -526,7 +526,7 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         ''', callback.from_user.id)
     
     # حساب القيمة بالسعر الحالي
-    points_value_usd = (current_points / redemption_rate) * 5
+    points_value_usd = (current_points / redemption_rate) 
     points_value_syp = points_value_usd * exchange_rate
     
     text = (
@@ -534,7 +534,7 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         f"**نقاطك الحالية:** {current_points}\n"
         f"**قيمتها:** {points_value_syp:.0f} ل.س\n"
         f"**سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
-        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({base_syp:.0f} ل.س)\n\n"
+        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)\n\n"
         f"📊 **إحصائيات النقاط:**\n"
         f"• إجمالي النقاط المكتسبة: {points_earned}\n"
         f"• إجمالي النقاط المستخدمة: {abs(points_used)}\n"
@@ -630,7 +630,7 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         
         redemption_rate = await conn.fetchval(
             "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
-        ) or '500'
+        ) or '100'
         redemption_rate = int(redemption_rate)
         
         from database import get_exchange_rate
@@ -642,12 +642,12 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
             show_alert=True
         )
     
-    # حساب قيمة 500 نقطة بالليرة
-    base_usd = 5
+    # حساب قيمة 100 نقطة بالليرة
+    base_usd = 1
     base_syp = base_usd * exchange_rate
     
     # حساب المبالغ الممكنة
-    max_redemptions = min(points // redemption_rate, 5)
+    max_redemptions = min(points // redemption_rate, 20)
     
     builder = InlineKeyboardBuilder()
     for i in range(1, max_redemptions + 1):
@@ -669,7 +669,7 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         f"🎁 **استرداد النقاط**\n\n"
         f"لديك {points} نقطة\n"
         f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n"
-        f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({base_syp:.0f} ل.س)\n\n"
+        f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)\n\n"
         f"اختر المبلغ الذي تريد استرداده:"
     )
     
@@ -684,7 +684,7 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         amount_syp = float(parts[2])
         exchange_rate = float(parts[3]) if len(parts) > 3 else None
         
-        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 500 * 5
+        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 100 * 1
         
         from database import create_redemption_request
         
@@ -765,9 +765,9 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
             total_spent = 0
     
     # حساب قيمة النقاط بسعر الصرف الحالي
-    points_value_usd = (points / redemption_rate) * 5
+    points_value_usd = (points / redemption_rate) 
     points_value_syp = points_value_usd * exchange_rate
-    base_syp = 5 * exchange_rate
+    base_syp = 1 * exchange_rate
     
     # تحديد أيقونة VIP
     vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
@@ -807,7 +807,7 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
-        f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
+        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
@@ -871,9 +871,9 @@ async def show_help(message: types.Message):
         "• مستوى VIP والخصم\n\n"
         
         "**⭐ نظام النقاط:**\n"
-        "• 5 نقاط لكل عملية شراء\n"
-        "• 5 نقاط لكل إحالة ناجحة\n"
-        "• استبدال 500 نقطة بـ 5$ رصيد\n\n"
+        "• 1 نقاط لكل عملية شراء\n"
+        "• 1 نقاط لكل إحالة ناجحة\n"
+        "• استبدال 100 نقطة بـ 1$ رصيد\n\n"
         
         "**👑 نظام VIP:**\n"
         "• VIP 0: 0% خصم\n"
