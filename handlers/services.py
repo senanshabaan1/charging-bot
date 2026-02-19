@@ -520,19 +520,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     group_msg_id, order_id
                 )
             
-            # إضافة النقاط للمستخدم
-            await conn.execute(
-                "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
-                points, callback.from_user.id
-            )
-            
-            # تسجيل في سجل النقاط
-            await conn.execute('''
-                INSERT INTO points_history (user_id, points, action, description, created_at)
-                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-            ''', callback.from_user.id, points, 'order', f'نقاط من طلب #{order_id}')
-            
-            logger.info(f"✅ تم إضافة {points} نقاط للمستخدم {callback.from_user.id} من الطلب {order_id}")
     
     # إرسال رسالة التأكيد للمستخدم
     await callback.message.edit_text(
