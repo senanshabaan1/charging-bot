@@ -541,7 +541,7 @@ async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
     """طلب سعر الصرف الجديد بعد التصفير"""
     await callback.message.edit_text(
         "💰 **أدخل سعر الصرف الجديد**\n"
-        "مثال: 25000\n\n"
+        "مثال: 118\n\n"
         "سيتم استخدام هذا السعر بعد تصفير البوت."
     )
     await state.set_state(AdminStates.waiting_reset_rate)
@@ -649,7 +649,7 @@ async def manage_points(callback: types.CallbackQuery, db_pool):
         f"**الإعدادات الحالية:**\n"
         f"• نقاط لكل طلب: {points_per_order or 5}\n"
         f"• نقاط لكل إحالة: {points_per_referral or 5}\n"
-        f"• {points_to_usd or 500} نقطة = 5 دولار\n\n"
+        f"• {points_to_usd or 100} نقطة = 1 دولار\n\n"
         f"**طلبات الاسترداد المعلقة:** {len(pending_redemptions)}"
     )
     
@@ -696,7 +696,7 @@ async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext)
         "⚙️ **تعديل إعدادات النقاط**\n\n"
         "أدخل القيم الجديدة بالصيغة التالية:\n"
         "`نقاط_الطلب نقاط_الإحالة نقاط_الدولار`\n\n"
-        "مثال: `5 5 500`",
+        "مثال: `1 1 100`",
         parse_mode="Markdown"
     )
     await state.set_state(AdminStates.waiting_points_settings)
@@ -1096,8 +1096,8 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
         
         f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
         f"⚙️ **إعدادات النقاط:**\n"
-        f"• 📦 نقاط الطلب: {stats.get('points_per_order', 5)}\n"
-        f"• 🔗 نقاط الإحالة: {stats.get('points_per_referral', 5)}"
+        f"• 📦 نقاط الطلب: {stats.get('points_per_order', 1)}\n"
+        f"• 🔗 نقاط الإحالة: {stats.get('points_per_referral', 1)}"
     )
     
     await callback.message.answer(stats_text, parse_mode="Markdown")
