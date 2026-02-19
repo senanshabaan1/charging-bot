@@ -1268,6 +1268,8 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
             f"💰 **الرصيد:** {user.get('balance', 0):,.0f} ل.س\n"
             f"⭐ **النقاط:** {user.get('total_points', 0)}\n"
+            f"👑 **مستوى VIP:** {user.get('vip_level', 0)} (خصم {user.get('discount_percent', 0)}%)\n"
+            f"💰 **إجمالي الإنفاق:** {user.get('total_spent', 0):,.0f} ل.س\n"
             f"🔒 **الحالة:** {'🚫 محظور' if user.get('is_banned') else '✅ نشط'}\n"
             f"📅 **تاريخ التسجيل:** {join_date}\n"
             f"⏰ **آخر نشاط:** {last_active}\n"
