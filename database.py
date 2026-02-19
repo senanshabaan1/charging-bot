@@ -1593,4 +1593,190 @@ async def fix_points_history_table(pool):
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في إصلاح جدول النقاط: {e}")
+# ============= دوال إدارة المشرفين =============
+
+async def get_all_admins(pool):
+    """جلب جميع المشرفين من قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # قائمة بجميع آيدي المشرفين
+            admin_ids = [ADMIN_ID] + MODERATORS
+            
+            if not admin_ids:
+                return []
+            
+            # جلب معلومات المشرفين من جدول users
+            admins = await conn.fetch('''
+                SELECT user_id, username, first_name, last_name, 
+                       created_at, last_activity,
+                       CASE 
+                           WHEN user_id = $1 THEN 'owner'
+                           ELSE 'admin'
+                       END as role
+                FROM users 
+                WHERE user_id = ANY($2::bigint[])
+                ORDER BY 
+                    CASE WHEN user_id = $1 THEN 0 ELSE 1 END,
+                    username
+            ''', ADMIN_ID, admin_ids)
+            
+            return admins
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب المشرفين: {e}")
+        return []
+
+async def add_admin(pool, user_id, added_by):
+    """إضافة مشرف جديد"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود المستخدم
+            user = await conn.fetchrow(
+                "SELECT user_id, username FROM users WHERE user_id = $1",
+                user_id
+            )
+            
+            if not user:
+                return False, "المستخدم غير موجود في قاعدة البيانات"
+            
+            # تحديث ملف config - هذا يتطلب إعادة تشغيل
+            from config import MODERATORS
+            if user_id in MODERATORS:
+                return False, "المستخدم مشرف بالفعل"
+            
+            # إضافة للقائمة المؤقتة
+            MODERATORS.append(user_id)
+            
+            # تسجيل العملية في جدول logs
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', added_by, 'add_admin', f'تمت إضافة المشرف {user_id} (@{user["username"]})')
+            
+            return True, "تمت إضافة المشرف بنجاح"
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة مشرف: {e}")
+        return False, str(e)
+
+async def remove_admin(pool, user_id, removed_by):
+    """إزالة مشرف"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # منع إزالة المالك
+            if user_id == ADMIN_ID:
+                return False, "لا يمكن إزالة المالك"
+            
+            # التحقق من وجوده في القائمة
+            if user_id not in MODERATORS:
+                return False, "المستخدم ليس مشرفاً"
+            
+            # جلب معلومات المستخدم للتسجيل
+            user = await conn.fetchrow(
+                "SELECT username FROM users WHERE user_id = $1",
+                user_id
+            )
+            username = user['username'] if user else 'غير معروف'
+            
+            # إزالته من القائمة
+            MODERATORS.remove(user_id)
+            
+            # تسجيل العملية
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', removed_by, 'remove_admin', f'تمت إزالة المشرف {user_id} (@{username})')
+            
+            return True, "تمت إزالة المشرف بنجاح"
+    except Exception as e:
+        logging.error(f"❌ خطأ في إزالة مشرف: {e}")
+        return False, str(e)
+
+async def get_admin_info(pool, user_id):
+    """جلب معلومات مفصلة عن مشرف"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # التحقق إذا كان المستخدم مشرفاً
+            if user_id != ADMIN_ID and user_id not in MODERATORS:
+                return None
+            
+            # معلومات المستخدم
+            user = await conn.fetchrow('''
+                SELECT user_id, username, first_name, last_name, 
+                       created_at, last_activity,
+                       total_deposits, total_orders, total_points,
+                       referral_count
+                FROM users 
+                WHERE user_id = $1
+            ''', user_id)
+            
+            if not user:
+                return None
+            
+            # آخر نشاطات المشرف
+            recent_actions = await conn.fetch('''
+                SELECT action, details, created_at
+                FROM logs
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 10
+            ''', user_id)
+            
+            # عدد العمليات التي قام بها
+            stats = await conn.fetchrow('''
+                SELECT 
+                    COUNT(*) as total_actions,
+                    COUNT(CASE WHEN action LIKE '%approve%' OR action LIKE '%موافقة%' THEN 1 END) as approvals,
+                    COUNT(CASE WHEN action LIKE '%reject%' OR action LIKE '%رفض%' THEN 1 END) as rejections,
+                    COUNT(CASE WHEN action = 'add_admin' THEN 1 END) as admins_added,
+                    COUNT(CASE WHEN action = 'remove_admin' THEN 1 END) as admins_removed
+                FROM logs
+                WHERE user_id = $1
+            ''', user_id)
+            
+            # تحديد الدور
+            role = "owner" if user_id == ADMIN_ID else "admin"
+            
+            return {
+                'user': dict(user),
+                'recent_actions': recent_actions,
+                'stats': dict(stats) if stats else {},
+                'role': role
+            }
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب معلومات المشرف {user_id}: {e}")
+        return None
+
+async def get_admin_logs(pool, limit=50):
+    """جلب سجل نشاطات المشرفين"""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            logs = await conn.fetch('''
+                SELECT l.*, u.username 
+                FROM logs l
+                LEFT JOIN users u ON l.user_id = u.user_id
+                WHERE l.action IN ('add_admin', 'remove_admin', 'approve_deposit', 'reject_deposit', 
+                                   'approve_order', 'reject_order', 'approve_redemption', 'reject_redemption')
+                ORDER BY l.created_at DESC
+                LIMIT $1
+            ''', limit)
+            
+            return logs
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب سجل النشاطات: {e}")
+        return []
+
+async def is_admin_user(pool, user_id):
+    """التحقق مما إذا كان المستخدم مشرفاً"""
+    try:
+        from config import ADMIN_ID, MODERATORS
+        return user_id == ADMIN_ID or user_id in MODERATORS
+    except Exception as e:
+        logging.error(f"❌ خطأ في التحقق من المشرف: {e}")
         return False
