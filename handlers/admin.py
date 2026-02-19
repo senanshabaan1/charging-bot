@@ -1312,14 +1312,14 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         
         # بناء رسالة المعلومات
         manual_status = " (يدوي)" if user.get('manual_vip') else ""
-	info_text = (
+        info_text = (  # <-- استخدم 8 مسافات (وليس Tab)
             f"👤 **معلومات المستخدم**\n\n"
             f"🆔 **الآيدي:** `{user['user_id']}`\n"
             f"👤 **اليوزر:** @{user['username'] or 'غير موجود'}\n"
             f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
             f"💰 **الرصيد:** {user.get('balance', 0):,.0f} ل.س\n"
             f"⭐ **النقاط:** {user.get('total_points', 0)}\n"
-            f"👑 **مستوى VIP:** {user.get('vip_level', 0)}{manual_status}\n"  # 👈 هنا
+            f"👑 **مستوى VIP:** {user.get('vip_level', 0)}{manual_status}\n"
             f"💰 **إجمالي الإنفاق:** {user.get('total_spent', 0):,.0f} ل.س\n"
             f"🔒 **الحالة:** {'🚫 محظور' if user.get('is_banned') else '✅ نشط'}\n"
             f"📅 **تاريخ التسجيل:** {join_date}\n"
