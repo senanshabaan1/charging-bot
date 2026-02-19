@@ -27,7 +27,10 @@ async def init_db():
                 referral_earnings FLOAT DEFAULT 0,
                 total_points_earned INTEGER DEFAULT 0,
                 total_points_redeemed INTEGER DEFAULT 0,
-                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                vip_level INTEGER DEFAULT 0,
+                total_spent FLOAT DEFAULT 0,
+                discount_percent INTEGER DEFAULT 0
             );
         ''')
 
