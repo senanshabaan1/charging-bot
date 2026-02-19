@@ -24,16 +24,16 @@ async def on_shutdown(bot: Bot):
 async def main():
     logging.info("🚀 بدأ تشغيل البوت...")
     
-    # تهيئة قاعدة البيانات
-    await init_db()
-    await fix_points_history_table(db_pool)
-    logging.info("✅ تم تهيئة قاعدة البيانات")
-    
-    # إنشاء مجمع الاتصالات
+    # إنشاء مجمع الاتصالات أولاً
     db_pool = await get_pool()
     if not db_pool:
         logging.error("❌ فشل الاتصال بقاعدة البيانات")
         return
+    
+    # تهيئة قاعدة البيانات وإصلاحها
+    await init_db()
+    await fix_points_history_table(db_pool)
+    logging.info("✅ تم تهيئة قاعدة البيانات")
     
     # تحميل سعر الصرف
     try:
@@ -49,6 +49,7 @@ async def main():
     # إنشاء Dispatcher وتمرير db_pool
     dp = Dispatcher()
     dp["db_pool"] = db_pool
+
     
     # ========== Middleware للتحقق من حالة البوت (معدل) ==========
     @dp.message.middleware()
