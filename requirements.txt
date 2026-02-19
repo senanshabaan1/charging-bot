@@ -7,3 +7,4 @@ aiohttp==3.9.5  # إصدار أقدم قد يكون أكثر استقراراً
 pytz==2024.2
 gunicorn==21.2.0
 # لست بحاجة لتحديد pydantic أو pydantic-core هنا لأن aiogram سيجلبها
+pytz==2024.2
