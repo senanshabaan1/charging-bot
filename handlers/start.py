@@ -81,7 +81,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
         # الحصول على حالة FSM الحالية
         current_state = await state.get_state()
         
-        # تسجيل للتصحيح (إزالة بعد التأكد)
+        # تسجيل للتصحيح
         logger.info(f"حالة FSM الحالية: {current_state}")
         
         # مسح حالة FSM
@@ -91,23 +91,24 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
         is_admin_user = is_admin(message.from_user.id)
         
         if current_state:
+            # نص عادي بدون Markdown معقد
             cancel_text = (
-                f"✅ **تم إلغاء العملية الحالية**\n\n"
+                f"✅ تم إلغاء العملية الحالية\n\n"
                 f"🕐 {current_time}\n"
-                f"🔸 الحالة السابقة: {current_state}\n"
                 f"🔸 يمكنك البدء من جديد."
             )
         else:
             cancel_text = (
-                f"👋 **أهلاً بعودتك!**\n\n"
+                f"👋 أهلاً بعودتك!\n\n"
                 f"🕐 {current_time}\n"
                 f"🔸 اختر ما تريد من القائمة."
             )
         
+        # إرسال بدون Markdown مؤقتاً
         await message.answer(
             cancel_text,
-            reply_markup=get_main_menu_keyboard(is_admin_user),
-            parse_mode="Markdown"
+            reply_markup=get_main_menu_keyboard(is_admin_user)
+            # 👈 حذفنا parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"خطأ في دالة الإلغاء: {e}")
