@@ -1592,34 +1592,65 @@ async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: B
 
 @router.callback_query(F.data.startswith("compl_order_"))
 async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """تأكيد تنفيذ الطلب من المجموعة"""
+    """تأكيد تنفيذ الطلب من المجموعة - مع إضافة النقاط"""
     try:
         order_id = int(callback.data.split("_")[2])
         
         async with db_pool.acquire() as conn:
-            order = await conn.fetchrow(
-                "SELECT user_id FROM orders WHERE id = $1",
-                order_id
-            )
+            order = await conn.fetchrow('''
+                SELECT o.*, u.user_id, u.username
+                FROM orders o
+                JOIN users u ON o.user_id = u.user_id
+                WHERE o.id = $1
+            ''', order_id)
             
             if order:
+                # جلب عدد النقاط من الإعدادات
+                from database import get_points_per_order
+                points = await get_points_per_order(db_pool)
+                
                 # تحديث حالة الطلب إلى completed
                 await conn.execute(
                     "UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
                     order_id
                 )
                 
+                # ========== إضافة النقاط للمستخدم هنا ==========
+                # تحديث نقاط المستخدم
+                await conn.execute(
+                    "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
+                    points, order['user_id']
+                )
+                
+                # تحديث نقاط الطلب في جدول orders
+                await conn.execute(
+                    "UPDATE orders SET points_earned = $1 WHERE id = $2",
+                    points, order_id
+                )
+                
+                # تسجيل في سجل النقاط
+                await conn.execute('''
+                    INSERT INTO points_history (user_id, points, action, description, created_at)
+                    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
+                
+                logger.info(f"✅ تم إضافة {points} نقاط للمستخدم {order['user_id']} من الطلب المكتمل {order_id}")
+                # ==============================================
+                
                 # إرسال إشعار للمستخدم
                 try:
                     await bot.send_message(
                         order['user_id'],
-                        f"✅ تم تنفيذ طلبك #{order_id} بنجاح!\n\n"
+                        f"✅ **تم تنفيذ طلبك #{order_id} بنجاح!**\n\n"
+                        f"📱 التطبيق: {order['app_name']}\n"
+                        f"⭐ نقاط مكتسبة: +{points}\n"
+                        f"💰 رصيد النقاط الجديد: {order['total_points'] + points if order.get('total_points') else points}\n\n"
                         f"شكراً لاستخدامك خدماتنا"
                     )
                 except Exception as e:
                     logger.error(f"❌ فشل إرسال رسالة للمستخدم: {e}")
                 
-                # إخفاء رسالة المجموعة بإزالة الأزرار وإضافة نص التنفيذ
+                # إخفاء رسالة المجموعة
                 await callback.message.edit_text(
                     callback.message.text.replace("🔄 **جاري التنفيذ...**", "") + "\n\n✅ **تم التنفيذ بنجاح**",
                     reply_markup=None
@@ -1635,7 +1666,7 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
 
 @router.callback_query(F.data.startswith("fail_order_"))
 async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """تعذر تنفيذ الطلب من المجموعة"""
+    """تعذر تنفيذ الطلب من المجموعة - بدون إضافة نقاط"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -1646,7 +1677,7 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
             )
             
             if order:
-                # إعادة الرصيد للمستخدم (النقاط تبقى للمستخدم لأنها أضيفت عند الطلب)
+                # إعادة الرصيد للمستخدم (النقاط ما تضاف)
                 await conn.execute(
                     "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
                     order['total_amount_syp'], order['user_id']
@@ -1662,9 +1693,9 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
                 try:
                     await bot.send_message(
                         order['user_id'],
-                        f"❌ تعذر تنفيذ طلبك #{order_id}\n\n"
+                        f"❌ **تعذر تنفيذ طلبك #{order_id}**\n\n"
                         f"💰 تم إعادة {order['total_amount_syp']:,.0f} ل.س لرصيدك\n"
-                        f"⭐ النقاط محفوظة في رصيدك\n\n"
+                        f"⭐ لم تتم إضافة نقاط لهذا الطلب\n\n"
                         f"نعتذر عن الإزعاج، يرجى المحاولة لاحقاً"
                     )
                 except Exception as e:
