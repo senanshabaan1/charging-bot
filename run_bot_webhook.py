@@ -26,6 +26,7 @@ async def main():
     
     # تهيئة قاعدة البيانات
     await init_db()
+    await fix_points_history_table(db_pool)
     logging.info("✅ تم تهيئة قاعدة البيانات")
     
     # إنشاء مجمع الاتصالات
