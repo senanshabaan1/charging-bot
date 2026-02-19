@@ -10,14 +10,37 @@ from database import init_db, get_pool, fix_points_history_table, set_database_t
 from handlers import start, deposit, services, admin
 import pytz
 from datetime import datetime
+from aiogram.types import BotCommand  # أضف هذا السطر
 
 logging.basicConfig(level=logging.INFO)
 
 # ضبط المنطقة الزمنية لدمشق
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
+async def set_bot_commands(bot: Bot):
+    """تعيين أوامر البوت في القائمة الجانبية"""
+    commands = [
+        BotCommand(command="start", description="🚀 بدء استخدام البوت"),
+        BotCommand(command="cancel", description="❌ إلغاء العملية الحالية"),
+        BotCommand(command="الغاء", description="🔙 إلغاء العملية"),
+        BotCommand(command="services", description="📱 خدمات الشحن"),
+        BotCommand(command="deposit", description="💰 شحن المحفظة"),
+        BotCommand(command="profile", description="👤 ملفي الشخصي"),
+        BotCommand(command="balance", description="💳 رصيدي"),
+        BotCommand(command="points", description="⭐ نقاطي"),
+        BotCommand(command="referral", description="🔗 رابط الإحالة"),
+        BotCommand(command="help", description="❓ مساعدة"),
+    ]
+    
+    await bot.set_my_commands(commands)
+    logging.info("✅ تم تعيين أوامر البوت في القائمة الجانبية")
+
 async def on_startup(bot: Bot, base_url: str, db_pool):
-    """تشغيل عند بدء التشغيل - تعيين webhook"""
+    """تشغيل عند بدء التشغيل - تعيين webhook والأوامر"""
+    # تعيين الأوامر في القائمة الجانبية
+    await set_bot_commands(bot)
+    
+    # تعيين webhook
     await bot.set_webhook(f"{base_url}/webhook")
     logging.info(f"✅ تم تعيين webhook: {base_url}/webhook")
     logging.info("✅ البوت جاهز لاستقبال التحديثات")
