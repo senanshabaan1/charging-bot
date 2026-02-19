@@ -1798,4 +1798,26 @@ async def is_admin_user(pool, user_id):
         return user_id == ADMIN_ID or user_id in MODERATORS
     except Exception as e:
         logging.error(f"❌ خطأ في التحقق من المشرف: {e}")
+async def fix_manual_vip_for_existing_users(pool):
+    """تحديث المستخدمين اليدويين القدامى - يشغل مرة واحدة"""
+    try:
+        async with pool.acquire() as conn:
+            # افترض أن أي مستخدم مستوى أعلى من 4 هو يدوي
+            await conn.execute('''
+                UPDATE users 
+                SET manual_vip = TRUE 
+                WHERE vip_level >= 5 AND (manual_vip IS NULL OR manual_vip = FALSE)
+            ''')
+            
+            # أو ممكن تحديث مستويات محددة يدوياً
+            # await conn.execute('''
+            #     UPDATE users 
+            #     SET manual_vip = TRUE 
+            #     WHERE user_id IN (8227444931, 123456789, 987654321)  -- ضيف الآيديهن
+            # ''')
+            
+            logging.info("✅ تم تحديث المستخدمين اليدويين القدامى")
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث المستخدمين القدامى: {e}")
+
         return False
