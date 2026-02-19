@@ -1310,14 +1310,15 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         last_active = user['last_activity'].strftime("%Y-%m-%d %H:%M") if user.get('last_activity') else "غير معروف"
         
         # بناء رسالة المعلومات
-        info_text = (
+        manual_status = " (يدوي)" if user.get('manual_vip') else ""
+	info_text = (
             f"👤 **معلومات المستخدم**\n\n"
             f"🆔 **الآيدي:** `{user['user_id']}`\n"
             f"👤 **اليوزر:** @{user['username'] or 'غير موجود'}\n"
             f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
             f"💰 **الرصيد:** {user.get('balance', 0):,.0f} ل.س\n"
             f"⭐ **النقاط:** {user.get('total_points', 0)}\n"
-            f"👑 **مستوى VIP:** {user.get('vip_level', 0)} (خصم {user.get('discount_percent', 0)}%)\n"
+            f"👑 **مستوى VIP:** {user.get('vip_level', 0)}{manual_status}\n"  # 👈 هنا
             f"💰 **إجمالي الإنفاق:** {user.get('total_spent', 0):,.0f} ل.س\n"
             f"🔒 **الحالة:** {'🚫 محظور' if user.get('is_banned') else '✅ نشط'}\n"
             f"📅 **تاريخ التسجيل:** {join_date}\n"
@@ -2486,21 +2487,22 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
 
 @router.callback_query(F.data.startswith("set_vip_"))
 async def set_vip_level(callback: types.CallbackQuery, db_pool):
-    """تحديد مستوى VIP للمستخدم"""
+    """تحديد مستوى VIP للمستخدم - يدوي"""
     parts = callback.data.split("_")
     user_id = int(parts[2])
     level = int(parts[3])
     discount = int(parts[4])
     
     async with db_pool.acquire() as conn:
-        # تحديث مستوى VIP والخصم
+        # تحديث مستوى VIP والخصم مع تعليمه كـ "يدوي"
         await conn.execute('''
             UPDATE users 
-            SET vip_level = $1, discount_percent = $2 
+            SET vip_level = $1, 
+                discount_percent = $2,
+                manual_vip = TRUE  -- ✅ نخزن أنه يدوي
             WHERE user_id = $3
         ''', level, discount, user_id)
         
-        # جلب معلومات المستخدم
         user = await conn.fetchrow(
             "SELECT username, first_name FROM users WHERE user_id = $1",
             user_id
@@ -2508,26 +2510,25 @@ async def set_vip_level(callback: types.CallbackQuery, db_pool):
     
     username = user['username'] or user['first_name'] or str(user_id)
     
-    # إرسال تأكيد
     await callback.message.edit_text(
-        f"✅ **تم تحديث مستوى VIP بنجاح**\n\n"
+        f"✅ **تم رفع المستوى يدوياً!**\n\n"
         f"👤 المستخدم: @{username}\n"
         f"🆔 الآيدي: `{user_id}`\n"
         f"👑 المستوى الجديد: VIP {level}\n"
-        f"💰 نسبة الخصم: {discount}%"
+        f"💰 نسبة الخصم: {discount}%\n\n"
+        f"⚠️ هذا المستوى يدوي ولن يتغير تلقائياً."
     )
     
     # إرسال إشعار للمستخدم
     try:
         vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
         icon = vip_icons[level] if level < len(vip_icons) else "⭐"
-        
         await callback.bot.send_message(
             user_id,
-            f"🎉 **تم ترقية مستواك في البوت!**\n\n"
+            f"🎉 **تم ترقية مستواك في البوت يدوياً!**\n\n"
             f"{icon} مستواك الجديد: VIP {level}\n"
             f"💰 نسبة الخصم: {discount}%\n\n"
-            f"شكراً لاستخدامك خدماتنا!"
+            f"✨ هذا المستوى خاص ولن يتغير تلقائياً."
         )
     except:
         pass
@@ -2570,7 +2571,8 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
             # تحديث الخصم فقط (المستوى يبقى كما هو)
             await conn.execute('''
                 UPDATE users 
-                SET discount_percent = $1 
+                SET discount_percent = $1,
+		    manual_vip = TRUE  -- ✅ نخزن أنه يدوي 
                 WHERE user_id = $2
             ''', discount, user_id)
             
