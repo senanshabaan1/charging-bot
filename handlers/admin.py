@@ -1362,14 +1362,15 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
                 callback_data=f"add_points_{user['user_id']}"
             )
         )
-       		 # ===== زر جديد لرفع مستوى VIP =====
-	builder.row(
-    	    types.InlineKeyboardButton(
-        	text="👑 رفع مستوى VIP",
-       		callback_data=f"upgrade_vip_{user['user_id']}"
-	    )
-	)
-		# =================================
+        # ===== زر جديد لرفع مستوى VIP =====
+        builder.row(
+            types.InlineKeyboardButton(
+                text="👑 رفع مستوى VIP",
+                callback_data=f"upgrade_vip_{user['user_id']}"
+            )
+        )
+        # =================================
+
         await message.answer(
             info_text,
             reply_markup=builder.as_markup(),
