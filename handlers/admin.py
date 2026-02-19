@@ -66,26 +66,40 @@ async def admin_panel(message: types.Message, db_pool):
             types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
             types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")
         ],
-        # الصف الرابع - أزرار المنتجات
+        # الصف الرابع - إحصائيات المستخدمين
+        [
+            types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
+            types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")
+        ],
+        # الصف الخامس
+        [
+            types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
+            types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points")
+        ],
+        # الصف السادس
+        [
+            types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats")
+        ],
+        # الصف السابع - أزرار المنتجات
         [
             types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
             types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product")
         ],
-        # الصف الخامس
+        # الصف الثامن
         [
             types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
             types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products")
         ],
-        # الصف السادس - أزرار سيرياتل
+        # الصف التاسع - أزرار سيرياتل
         [
             types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
             types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot")
         ],
-        # الصف السابع - زر التصفير
+        # الصف العاشر - زر التصفير
         [
             types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot")
         ],
-        # الصف الثامن
+        # الصف الحادي عشر
         [
             types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance")
         ],
@@ -1087,6 +1101,135 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
     )
     
     await callback.message.answer(stats_text, parse_mode="Markdown")
+    
+@router.callback_query(F.data == "top_deposits")
+async def show_top_deposits(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين إيداعاً"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_top_users_by_deposits
+    users = await get_top_users_by_deposits(db_pool, 15)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "💳 **أكثر المستخدمين إيداعاً**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
+        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
+        text += f"{i}. {vip_icon} {username}\n   💰 {user['total_deposits']:,.0f} ل.س\n"
+    
+    await callback.message.answer(text, parse_mode="Markdown")
+
+@router.callback_query(F.data == "top_orders")
+async def show_top_orders(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين طلبات"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_top_users_by_orders
+    users = await get_top_users_by_orders(db_pool, 15)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "🛒 **أكثر المستخدمين طلبات**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
+        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
+        text += f"{i}. {vip_icon} {username}\n   📦 {user['total_orders']} طلب\n"
+    
+    await callback.message.answer(text, parse_mode="Markdown")
+
+@router.callback_query(F.data == "top_referrals")
+async def show_top_referrals(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين إحالة"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_top_users_by_referrals
+    users = await get_top_users_by_referrals(db_pool, 15)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "🔗 **أكثر المستخدمين إحالة**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
+        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
+        text += f"{i}. {vip_icon} {username}\n   👥 {user['referral_count']} إحالة | 💰 {user['referral_earnings']:,.0f} ل.س\n"
+    
+    await callback.message.answer(text, parse_mode="Markdown")
+
+@router.callback_query(F.data == "top_points")
+async def show_top_points(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين نقاط"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_top_users_by_points
+    users = await get_top_users_by_points(db_pool, 15)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "⭐ **أكثر المستخدمين نقاط**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
+        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
+        text += f"{i}. {vip_icon} {username}\n   ⭐ {user['total_points']} نقطة\n"
+    
+    await callback.message.answer(text, parse_mode="Markdown")
+
+@router.callback_query(F.data == "vip_stats")
+async def show_vip_stats(callback: types.CallbackQuery, db_pool):
+    """عرض إحصائيات VIP"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        # عدد المستخدمين في كل مستوى
+        vip_counts = await conn.fetch('''
+            SELECT vip_level, COUNT(*) as count 
+            FROM users 
+            GROUP BY vip_level 
+            ORDER BY vip_level
+        ''')
+        
+        # إجمالي الإنفاق في كل مستوى
+        vip_spent = await conn.fetch('''
+            SELECT vip_level, SUM(total_spent) as total 
+            FROM users 
+            WHERE vip_level > 0 
+            GROUP BY vip_level 
+            ORDER BY vip_level
+        ''')
+    
+    vip_names = ["VIP 0 🟢", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡", "VIP 4 🔴", "VIP 5 💎"]
+    
+    text = "👥 **إحصائيات VIP**\n\n"
+    
+    # عرض عدد المستخدمين
+    text += "**عدد المستخدمين:**\n"
+    for row in vip_counts:
+        level = row['vip_level']
+        if level <= 5:
+            text += f"• {vip_names[level]}: {row['count']} مستخدم\n"
+    
+    # عرض إجمالي الإنفاق
+    if vip_spent:
+        text += "\n**إجمالي الإنفاق:**\n"
+        for row in vip_spent:
+            level = row['vip_level']
+            if level <= 5:
+                text += f"• {vip_names[level]}: {row['total']:,.0f} ل.س\n"
+    
+    await callback.message.answer(text, parse_mode="Markdown")
 
 # معلومات مستخدم
 @router.callback_query(F.data == "user_info")
