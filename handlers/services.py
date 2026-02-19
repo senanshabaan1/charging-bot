@@ -139,6 +139,7 @@ async def show_categories(message: types.Message, db_pool):
         reply_markup=builder.as_markup()
     )
 
+# في دالة show_apps_by_category
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     """عرض التطبيقات في قسم معين - مع تمييز نوع التطبيق"""
@@ -154,9 +155,13 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             cat_id
         )
         
-        # جلب سعر الصرف الحالي من قاعدة البيانات
-        from database import get_exchange_rate
+        # جلب سعر الصرف الحالي
+        from database import get_exchange_rate, get_user_vip
         current_rate = await get_exchange_rate(db_pool)
+        
+        # جلب مستوى VIP للمستخدم
+        user_vip = await get_user_vip(db_pool, callback.from_user.id)
+        discount = user_vip.get('discount_percent', 0)
     
     if not apps:
         await callback.answer("لا توجد تطبيقات في هذا القسم حالياً", show_alert=True)
@@ -171,23 +176,30 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             icon = "🎮"
         elif app['type'] == 'subscription':
             icon = "📅"
-        else:  # service أو أي نوع آخر
+        else:  # service
             icon = "📱"
         
-        # حساب السعر بالسعر الحالي
+        # حساب السعر مع الخصم
         profit_percentage = app.get('profit_percentage', 0)
         final_price_usd = app['unit_price_usd'] * (1 + (profit_percentage / 100))
-        price_syp = final_price_usd * current_rate
         
-        # نص الزر
-        button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
+        # تطبيق الخصم
+        discounted_price_usd = final_price_usd * (1 - discount/100)
+        price_syp = discounted_price_usd * current_rate
+        
+        # عرض السعر مع إشارة الخصم
+        if discount > 0:
+            original_price = final_price_usd * current_rate
+            button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
+        else:
+            button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
         
         buttons.append(types.InlineKeyboardButton(
             text=button_text, 
             callback_data=f"buy_{app['id']}_{app['type']}"
         ))
     
-    # ترتيب الأزرار في صفوف (2 أزرار في كل صف)
+    # ترتيب الأزرار
     for i in range(0, len(buttons), 2):
         if i + 1 < len(buttons):
             builder.row(buttons[i], buttons[i + 1])
@@ -199,8 +211,13 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_categories"
     ))
     
+    # إظهار مستوى المستخدم
+    vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
+    vip_text = vip_icons[user_vip['vip_level']] if user_vip['vip_level'] <= 5 else "VIP 0 🟢"
+    
     await callback.message.edit_text(
         f"📱 **{category['display_name']}**\n\n"
+        f"👤 مستواك: {vip_text} (خصم {discount}%)\n"
         f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
         "🔸 اختر التطبيق المطلوب:", 
         reply_markup=builder.as_markup()
