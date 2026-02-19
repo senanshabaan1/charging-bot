@@ -147,7 +147,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
             f"{nums_text}\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية (12 رقم):**\n"
+            f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على الرقم لنسخه*",
             reply_markup=get_back_keyboard(),
             parse_mode="Markdown"
@@ -300,7 +300,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
     await message.answer(
         "✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         "⏳ **بانتظار موافقة الإدارة.**\n"
-        "📋 **سيتم الرد خلال 24 ساعة.**",
+        "📋 **الوقت المتوقع 5 دقائق.**",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
@@ -351,7 +351,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
     await message.answer(
         "✅ **تم إرسال لقطة الشاشة بنجاح!**\n\n"
         "⏳ **بانتظار موافقة الإدارة.**\n"
-        "📋 **سيتم الرد خلال 24 ساعة.**",
+        "📋 **الوقت المتوقع 5 دقائق.**",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
