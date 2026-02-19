@@ -38,9 +38,14 @@ class AdminStates(StatesGroup):
     waiting_new_syriatel_numbers = State()
     waiting_reset_confirm = State()
     waiting_reset_rate = State()
+    waiting_admin_id = State()           # لإضافة مشرف جديد
+    waiting_admin_info = State()          # للبحث عن معلومات مشرف
+    waiting_admin_remove = State()        # لتأكيد إزالة مشرف
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
+
+# في handlers/admin.py - أضف في دالة admin_panel بعد الأزرار الموجودة
 
 @router.message(Command("admin"))
 async def admin_panel(message: types.Message, db_pool):
@@ -104,6 +109,10 @@ async def admin_panel(message: types.Message, db_pool):
         [
             types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance")
         ],
+        # ===== الصف الجديد - إدارة المشرفين =====
+        [
+            types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
+        ]
     ]
     
     await message.answer(
@@ -1936,3 +1945,472 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
     except Exception as e:
         logger.error(f"❌ خطأ في تعذر التنفيذ: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+# ============= دوال إدارة المشرفين =============
+
+async def get_all_admins(pool):
+    """جلب جميع المشرفين من قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            # جلب المشرفين الأساسيين من config
+            from config import ADMIN_ID, MODERATORS
+            admin_ids = [ADMIN_ID] + MODORATORS
+            
+            # جلب معلومات المشرفين من جدول users
+            admins = await conn.fetch('''
+                SELECT user_id, username, first_name, last_name, 
+                       created_at, last_activity, 
+                       CASE 
+                           WHEN user_id = $1 THEN 'owner'
+                           ELSE 'admin'
+                       END as role
+                FROM users 
+                WHERE user_id = ANY($2::bigint[])
+                ORDER BY 
+                    CASE WHEN user_id = $1 THEN 0 ELSE 1 END,
+                    username
+            ''', ADMIN_ID, admin_ids)
+            
+            return admins
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب المشرفين: {e}")
+        return []
+
+async def add_admin(pool, user_id, added_by):
+    """إضافة مشرف جديد"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود المستخدم
+            user = await conn.fetchrow(
+                "SELECT user_id FROM users WHERE user_id = $1",
+                user_id
+            )
+            
+            if not user:
+                return False, "المستخدم غير موجود في قاعدة البيانات"
+            
+            # تحديث ملف config - هذا يحتاج إعادة تشغيل
+            # هنضيف للمتغير MODERATORS في config
+            from config import MODERATORS
+            if user_id in MODERATORS:
+                return False, "المستخدم مشرف بالفعل"
+            
+            # هنضيف للقائمة مؤقتاً، وبعد إعادة التشغيل راح يثبت
+            MODERATORS.append(user_id)
+            
+            # تسجيل العملية
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', added_by, 'add_admin', f'تمت إضافة المشرف {user_id}')
+            
+            return True, "تمت إضافة المشرف بنجاح"
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة مشرف: {e}")
+        return False, str(e)
+
+async def remove_admin(pool, user_id, removed_by):
+    """إزالة مشرف"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # منع إزالة المالك
+            if user_id == ADMIN_ID:
+                return False, "لا يمكن إزالة المالك"
+            
+            # التحقق من وجوده في القائمة
+            if user_id not in MODERATORS:
+                return False, "المستخدم ليس مشرفاً"
+            
+            # إزالته من القائمة
+            MODERATORS.remove(user_id)
+            
+            # تسجيل العملية
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', removed_by, 'remove_admin', f'تمت إزالة المشرف {user_id}')
+            
+            return True, "تمت إزالة المشرف بنجاح"
+    except Exception as e:
+        logging.error(f"❌ خطأ في إزالة مشرف: {e}")
+        return False, str(e)
+
+async def get_admin_info(pool, user_id):
+    """جلب معلومات مفصلة عن مشرف"""
+    try:
+        async with pool.acquire() as conn:
+            # معلومات المستخدم
+            user = await conn.fetchrow('''
+                SELECT user_id, username, first_name, last_name, 
+                       created_at, last_activity,
+                       total_deposits, total_orders, total_points,
+                       referral_count
+                FROM users 
+                WHERE user_id = $1
+            ''', user_id)
+            
+            if not user:
+                return None
+            
+            # آخر نشاطات المشرف
+            recent_actions = await conn.fetch('''
+                SELECT action, details, created_at
+                FROM logs
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 10
+            ''', user_id)
+            
+            # عدد العمليات التي قام بها
+            stats = await conn.fetchrow('''
+                SELECT 
+                    COUNT(*) as total_actions,
+                    COUNT(CASE WHEN action LIKE '%approve%' THEN 1 END) as approvals,
+                    COUNT(CASE WHEN action LIKE '%reject%' THEN 1 END) as rejections
+                FROM logs
+                WHERE user_id = $1
+            ''', user_id)
+            
+            return {
+                'user': dict(user),
+                'recent_actions': recent_actions,
+                'stats': dict(stats) if stats else {}
+            }
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب معلومات المشرف {user_id}: {e}")
+        return None
+# ============= إدارة المشرفين =============
+
+@router.callback_query(F.data == "manage_admins")
+async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
+    """قائمة إدارة المشرفين"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_all_admins
+    
+    admins = await get_all_admins(db_pool)
+    
+    # تجهيز قائمة المشرفين
+    admins_text = "👑 **قائمة المشرفين**\n\n"
+    
+    for admin in admins:
+        role_icon = "👑" if admin['role'] == 'owner' else "🛡️"
+        username = f"@{admin['username']}" if admin['username'] else f"ID: {admin['user_id']}"
+        name = admin['first_name'] or ""
+        
+        admins_text += f"{role_icon} {username}\n"
+        admins_text += f"   🆔 `{admin['user_id']}`\n"
+        admins_text += f"   📝 {name}\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="➕ إضافة مشرف", callback_data="add_admin"),
+        types.InlineKeyboardButton(text="❌ إزالة مشرف", callback_data="remove_admin")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="📋 معلومات مشرف", callback_data="admin_info"),
+        types.InlineKeyboardButton(text="📊 سجل النشاطات", callback_data="admin_logs")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin_panel")
+    )
+    
+    await callback.message.edit_text(
+        admins_text,
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "add_admin")
+async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إضافة مشرف جديد"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "👤 **إضافة مشرف جديد**\n\n"
+        "أدخل الآيدي (ID) الخاص بالمستخدم الذي تريد إضافته كمشرف:\n\n"
+        "💡 *يمكن للمستخدم الحصول على آيديه عبر إرسال /id للبوت*"
+    )
+    await state.set_state(AdminStates.waiting_admin_id)
+
+@router.message(AdminStates.waiting_admin_id)
+async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
+    """تأكيد إضافة مشرف"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        new_admin_id = int(message.text.strip())
+        
+        from database import add_admin, get_user_by_id
+        
+        # التحقق من وجود المستخدم
+        user = await get_user_by_id(db_pool, new_admin_id)
+        
+        if not user:
+            return await message.answer(
+                "❌ المستخدم غير موجود في قاعدة البيانات.\n"
+                "يجب على المستخدم استخدام البوت مرة واحدة على الأقل."
+            )
+        
+        # إضافة المشرف
+        success, msg = await add_admin(db_pool, new_admin_id, message.from_user.id)
+        
+        if success:
+            await message.answer(
+                f"✅ **تمت إضافة المشرف بنجاح!**\n\n"
+                f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
+                f"🆔 الآيدي: `{new_admin_id}`\n\n"
+                f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل الصلاحيات."
+            )
+            
+            # إرسال إشعار للمشرف الجديد
+            try:
+                await message.bot.send_message(
+                    new_admin_id,
+                    f"🎉 **مبروك! تمت إضافتك كمشرف في البوت**\n\n"
+                    f"🔸 يمكنك الآن استخدام لوحة التحكم عبر إرسال /admin\n"
+                    f"👤 تمت الإضافة بواسطة: @{message.from_user.username}"
+                )
+            except:
+                pass
+        else:
+            await message.answer(f"❌ {msg}")
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط)")
+    except Exception as e:
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+@router.callback_query(F.data == "remove_admin")
+async def remove_admin_list(callback: types.CallbackQuery, db_pool):
+    """عرض قائمة المشرفين للإزالة"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from config import ADMIN_ID, MODERATORS
+    
+    builder = InlineKeyboardBuilder()
+    
+    for admin_id in MODERATORS:
+        async with db_pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT username, first_name FROM users WHERE user_id = $1",
+                admin_id
+            )
+        
+        name = user['username'] or user['first_name'] or str(admin_id)
+        builder.row(types.InlineKeyboardButton(
+            text=f"❌ {name}",
+            callback_data=f"remove_admin_{admin_id}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data="manage_admins"
+    ))
+    
+    await callback.message.edit_text(
+        "🗑️ **اختر المشرف الذي تريد إزالته:**",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("remove_admin_"))
+async def remove_admin_confirm(callback: types.CallbackQuery, db_pool):
+    """تأكيد إزالة مشرف"""
+    admin_id = int(callback.data.split("_")[2])
+    
+    from config import ADMIN_ID
+    
+    if admin_id == ADMIN_ID:
+        return await callback.answer("لا يمكن إزالة المالك!", show_alert=True)
+    
+    from database import remove_admin
+    
+    success, msg = await remove_admin(db_pool, admin_id, callback.from_user.id)
+    
+    if success:
+        await callback.message.edit_text(
+            f"✅ **تمت إزالة المشرف بنجاح**\n\n"
+            f"🆔 الآيدي: `{admin_id}`\n\n"
+            f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل التغييرات."
+        )
+        
+        # إشعار المشرف الذي تمت إزالته
+        try:
+            await callback.bot.send_message(
+                admin_id,
+                f"⚠️ **تمت إزالتك من قائمة المشرفين**\n\n"
+                f"لم تعد تملك صلاحيات الإدارة في البوت.\n"
+                f"تمت الإزالة بواسطة: @{callback.from_user.username}"
+            )
+        except:
+            pass
+    else:
+        await callback.answer(f"❌ {msg}", show_alert=True)
+
+@router.callback_query(F.data == "admin_info")
+async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء البحث عن معلومات مشرف"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "🔍 **معلومات مشرف**\n\n"
+        "أدخل الآيدي (ID) الخاص بالمشرف:\n\n"
+        "💡 *يمكنك إدخال آيدي المستخدم أو اليوزر نيم*"
+    )
+    await state.set_state(AdminStates.waiting_admin_info)
+
+@router.message(AdminStates.waiting_admin_info)
+async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
+    """عرض معلومات المشرف"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    search_term = message.text.strip()
+    
+    from database import get_admin_info
+    
+    # محاولة تحويل النص إلى رقم إذا كان آيدي
+    try:
+        user_id = int(search_term)
+    except ValueError:
+        # البحث باليوزر نيم
+        async with db_pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT user_id FROM users WHERE username = $1",
+                search_term.replace('@', '')
+            )
+            if user:
+                user_id = user['user_id']
+            else:
+                return await message.answer("❌ المستخدم غير موجود")
+    
+    info = await get_admin_info(db_pool, user_id)
+    
+    if not info:
+        return await message.answer("❌ المستخدم غير موجود أو ليس مشرفاً")
+    
+    user = info['user']
+    stats = info['stats']
+    
+    # تنسيق الوقت
+    from database import format_local_time
+    join_date = format_local_time(user['created_at'])
+    last_active = format_local_time(user['last_activity'])
+    
+    # تحديد الدور
+    from config import ADMIN_ID
+    role = "👑 المالك" if user_id == ADMIN_ID else "🛡️ مشرف"
+    
+    text = (
+        f"**{role}**\n\n"
+        f"🆔 **الآيدي:** `{user['user_id']}`\n"
+        f"👤 **اليوزر:** @{user['username'] or 'غير معروف'}\n"
+        f"📝 **الاسم:** {user['first_name'] or ''} {user['last_name'] or ''}\n"
+        f"📅 **تاريخ التسجيل:** {join_date}\n"
+        f"⏰ **آخر نشاط:** {last_active}\n\n"
+        
+        f"📊 **إحصائيات:**\n"
+        f"• إجمالي العمليات: {stats.get('total_actions', 0)}\n"
+        f"• ✅ موافقات: {stats.get('approvals', 0)}\n"
+        f"• ❌ رفض: {stats.get('rejections', 0)}\n\n"
+        
+        f"💰 **حساب المستخدم:**\n"
+        f"• إجمالي الإيداعات: {user['total_deposits']:,.0f} ل.س\n"
+        f"• عدد الطلبات: {user['total_orders']}\n"
+        f"• النقاط: {user['total_points']}\n"
+        f"• الإحالات: {user['referral_count']}\n\n"
+    )
+    
+    if info['recent_actions']:
+        text += "📋 **آخر النشاطات:**\n"
+        for action in info['recent_actions'][:5]:
+            action_time = format_local_time(action['created_at'])
+            text += f"• {action['action']}: {action['details']}\n"
+            text += f"  🕐 {action_time}\n"
+    
+    await message.answer(text, parse_mode="Markdown")
+    await state.clear()
+
+@router.callback_query(F.data == "admin_logs")
+async def show_admin_logs(callback: types.CallbackQuery, db_pool):
+    """عرض سجل نشاطات المشرفين"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        logs = await conn.fetch('''
+            SELECT l.*, u.username 
+            FROM logs l
+            LEFT JOIN users u ON l.user_id = u.user_id
+            ORDER BY l.created_at DESC
+            LIMIT 30
+        ''')
+    
+    if not logs:
+        return await callback.answer("لا توجد نشاطات مسجلة", show_alert=True)
+    
+    text = "📋 **سجل نشاطات المشرفين**\n\n"
+    
+    from database import format_local_time
+    
+    for log in logs:
+        log_time = format_local_time(log['created_at'])
+        username = f"@{log['username']}" if log['username'] else f"ID: {log['user_id']}"
+        
+        text += f"👤 {username}\n"
+        text += f"🔹 {log['action']}: {log['details']}\n"
+        text += f"🕐 {log_time}\n\n"
+    
+    # تقطيع النص إذا كان طويلاً
+    if len(text) > 4000:
+        text = text[:4000] + "...\n(هناك المزيد من السجلات)"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data="manage_admins"
+    ))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "back_to_admin_panel")
+async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
+    """العودة للوحة التحكم الرئيسية"""
+    from database import get_bot_status
+    
+    bot_status = await get_bot_status(db_pool)
+    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
+    
+    kb = [
+        [
+            types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
+            types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")
+        ],
+        [
+            types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
+            types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")
+        ],
+        [
+            types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
+            types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")
+        ],
+        [
+            types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
+        ]
+    ]
+    
+    await callback.message.edit_text(
+        f"🛠 **لوحة تحكم الإدارة**\n\n"
+        f"حالة البوت: {status_text}\n\n"
+        f"🔸 **اختر الإجراء المطلوب:**",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb),
+        parse_mode="Markdown"
+    )
