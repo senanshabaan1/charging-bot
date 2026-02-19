@@ -382,6 +382,7 @@ async def my_account(message: types.Message, db_pool):
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
         f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n"
+        f"👑 **مستوى VIP:** {vip_icon} VIP {vip_level} (خصم {vip_discount}%)\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
