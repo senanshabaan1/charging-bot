@@ -19,6 +19,7 @@ router = Router()
 
 class ReportStates(StatesGroup):
     waiting_report_period = State()
+    waiting_report_time = State()  # 👈 أضفنا هذه الحالة
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
