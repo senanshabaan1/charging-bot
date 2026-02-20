@@ -21,6 +21,18 @@ class ReportStates(StatesGroup):
     waiting_report_period = State()
     waiting_report_time = State()  # 👈 أضفنا هذه الحالة
 
+def remove_timezone_from_df(df):
+    """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""
+    if df.empty:
+        return df
+    
+    for col in df.columns:
+        # التحقق إذا كان العمود من نوع datetime
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            # إزالة الـ timezone إذا كان موجوداً
+            df[col] = pd.to_datetime(df[col]).dt.tz_localize(None)
+    return df
+
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
 
@@ -28,7 +40,6 @@ async def generate_excel_report(db_pool, period='all'):
     """توليد تقرير Excel شامل"""
     try:
         output = BytesIO()
-        
         
         async with db_pool.acquire() as conn:
             # تأكد من ضبط المنطقة الزمنية للاتصال
@@ -48,8 +59,8 @@ async def generate_excel_report(db_pool, period='all'):
                 ORDER BY created_at DESC
             '''))
             
-            # 2. تقرير الإيداعات (مع شرط التاريخ)
-            deposits_query = f'''
+            # 2. تقرير الإيداعات
+            deposits_query = '''
                 SELECT 
                     id, user_id, username, method, amount, amount_syp,
                     status, created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
@@ -61,30 +72,28 @@ async def generate_excel_report(db_pool, period='all'):
             deposits_query += " ORDER BY created_at DESC"
             deposits_df = pd.DataFrame(await conn.fetch(deposits_query))
             
-            # 3. تقرير الطلبات (مع شرط التاريخ)
-            orders_query = f'''
+            # 3. تقرير الطلبات
+            orders_query = '''
                 SELECT 
                     o.id, o.user_id, o.username, 
                     COALESCE(a.name, o.app_name) as app_name, 
                     o.quantity, o.total_amount_syp,
                     o.points_earned, o.status, o.target_id,
-                    o.created_at as order_created_at,      -- 👈 حددناها بوضوح
-                    o.updated_at as order_updated_at,      -- 👈 حددناها بوضوح
-                    a.created_at as app_created_at         -- 👈 إذا احتجتها
+                    o.created_at as order_created_at,
+                    o.updated_at as order_updated_at
                 FROM orders o
                 LEFT JOIN applications a ON o.app_id = a.id
-
             '''
             if period == 'day':
                 orders_query += " WHERE DATE(o.created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
             orders_query += " ORDER BY o.created_at DESC"
             orders_df = pd.DataFrame(await conn.fetch(orders_query))
             
-            # 4. تقرير النقاط (مع شرط التاريخ)
-            points_query = f'''
+            # 4. تقرير النقاط
+            points_query = '''
                 SELECT 
                     id, user_id, points, action, description, 
-                    created_at as point_created_at          -- 👈 حددها
+                    created_at as point_created_at
                 FROM points_history 
             '''
             if period == 'day':
@@ -92,12 +101,12 @@ async def generate_excel_report(db_pool, period='all'):
             points_query += " ORDER BY point_created_at DESC LIMIT 1000"
             points_df = pd.DataFrame(await conn.fetch(points_query))
             
-            # 5. تقرير استرداد النقاط (مع شرط التاريخ)
-            redemptions_query = f'''
+            # 5. تقرير استرداد النقاط
+            redemptions_query = '''
                 SELECT 
                     id, user_id, username, points, amount_usd, amount_syp,
-                    created_at as redemption_created_at,    -- 👈 حددها
-                    updated_at as redemption_updated_at     -- 👈 حددها
+                    created_at as redemption_created_at,
+                    updated_at as redemption_updated_at
                 FROM redemption_requests 
             '''
             if period == 'day':
@@ -105,7 +114,7 @@ async def generate_excel_report(db_pool, period='all'):
             redemptions_query += " ORDER BY redemption_created_at DESC"
             redemptions_df = pd.DataFrame(await conn.fetch(redemptions_query))
             
-            # 6. إحصائيات عامة (مع مراعاة التاريخ)
+            # 6. إحصائيات عامة
             if period == 'day':
                 stats = await conn.fetchrow('''
                     SELECT 
@@ -132,6 +141,30 @@ async def generate_excel_report(db_pool, period='all'):
                         (SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE status = 'completed') as total_order_amount,
                         (SELECT COALESCE(SUM(points_earned), 0) FROM orders) as total_points_given
                 ''')
+            
+            # فحص إذا كانت لا توجد بيانات لليوم (للتقرير اليومي)
+            if period == 'day' and stats['total_orders'] == 0 and stats['total_deposits'] == 0:
+                logger.info("📊 لا توجد بيانات لليوم - سيتم إنشاء تقرير فارغ")
+            
+            # ===== إزالة الـ timezone من جميع الـ DataFrames =====
+            def remove_timezone_from_df(df):
+                """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""
+                if df.empty:
+                    return df
+                
+                for col in df.columns:
+                    # التحقق إذا كان العمود من نوع datetime
+                    if pd.api.types.is_datetime64_any_dtype(df[col]):
+                        # إزالة الـ timezone إذا كان موجوداً
+                        df[col] = pd.to_datetime(df[col]).dt.tz_localize(None)
+                return df
+            
+            users_df = remove_timezone_from_df(users_df)
+            deposits_df = remove_timezone_from_df(deposits_df)
+            orders_df = remove_timezone_from_df(orders_df)
+            points_df = remove_timezone_from_df(points_df)
+            redemptions_df = remove_timezone_from_df(redemptions_df)
+            # ===================================================
             
             # إنشاء ملف Excel مع عدة sheets
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -179,7 +212,6 @@ async def generate_excel_report(db_pool, period='all'):
         return output
     except Exception as e:
         logger.error(f"❌ خطأ في توليد التقرير: {e}")
-        # طباعة التفاصيل كاملة للتصحيح
         import traceback
         traceback.print_exc()
         return None
