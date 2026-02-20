@@ -168,20 +168,34 @@ async def generate_excel_report(db_pool, period='all'):
 async def send_daily_report(bot: Bot, db_pool):
     """إرسال التقرير اليومي للمشرفين"""
     try:
+        # جلب إعدادات التقارير
+        from database import get_report_settings
+        settings = await get_report_settings(db_pool)
+        
+        # التحقق إذا كان التقرير مفعل
+        if settings.get('daily_report_enabled') != 'true':
+            logging.info("📊 التقرير اليومي معطل")
+            return
+        
         # توليد التقرير اليومي
         excel_file = await generate_excel_report(db_pool, 'day')
         
         if excel_file:
             from config import ADMIN_ID, MODERATORS
-            admin_ids = [ADMIN_ID] + MODERATORS
+            
+            # تحديد المستلمين حسب الإعدادات
+            recipients = []
+            if settings.get('report_recipients') == 'owner_only':
+                recipients = [ADMIN_ID]  # المالك فقط
+            else:
+                recipients = [ADMIN_ID] + MODERATORS  # جميع المشرفين
             
             # تنسيق التاريخ
             today = datetime.now().strftime('%Y-%m-%d')
             
-            for admin_id in admin_ids:
+            for admin_id in recipients:
                 if admin_id:
                     try:
-                        # تحويل BytesIO إلى BufferedInputFile
                         file = types.BufferedInputFile(
                             file=excel_file.getvalue(),
                             filename=f'report_{today}.xlsx'
@@ -477,26 +491,157 @@ async def backup_database(callback: types.CallbackQuery, db_pool):
         await callback.message.edit_text("❌ فشل في إنشاء النسخة الاحتياطية")
 
 @router.callback_query(F.data == "report_settings")
-async def report_settings(callback: types.CallbackQuery):
+async def report_settings(callback: types.CallbackQuery, db_pool):
     """إعدادات التقارير"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    from database import get_report_settings
+    settings = await get_report_settings(db_pool)
+    
+    # تحديد حالة التفعيل
+    enabled_status = "✅ مفعل" if settings.get('daily_report_enabled') == 'true' else "❌ معطل"
+    
+    # تحديد المستلمين
+    recipients_text = "👑 المالك فقط" if settings.get('report_recipients') == 'owner_only' else "👥 جميع المشرفين"
+    
     builder = InlineKeyboardBuilder()
     builder.row(
-        types.InlineKeyboardButton(text="✅ تفعيل التقرير اليومي", callback_data="toggle_daily"),
-        types.InlineKeyboardButton(text="⏰ تغيير وقت التقرير", callback_data="change_time")
+        types.InlineKeyboardButton(
+            text="🔁 تبديل التفعيل", 
+            callback_data="toggle_daily_report"
+        )
     )
     builder.row(
-        types.InlineKeyboardButton(text="👥 إرسال للمشرفين", callback_data="report_recipients"),
-        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="reports_menu")
+        types.InlineKeyboardButton(
+            text="⏰ تغيير وقت التقرير", 
+            callback_data="change_report_time"
+        )
+    )
+    builder.row(
+        types.InlineKeyboardButton(
+            text="👤 تغيير المستلمين", 
+            callback_data="change_recipients"
+        )
+    )
+    builder.row(
+        types.InlineKeyboardButton(
+            text="🔙 رجوع", 
+            callback_data="reports_menu"
+        )
     )
     
     await callback.message.edit_text(
-        "⚙️ **إعدادات التقارير**\n\n"
-        "• التقرير اليومي: ✅ مفعل\n"
-        "• وقت الإرسال: 00:00\n"
-        "• المستلمون: جميع المشرفين\n\n"
-        "اختر الإجراء المطلوب:",
+        f"⚙️ **إعدادات التقارير**\n\n"
+        f"• حالة التقرير اليومي: {enabled_status}\n"
+        f"• وقت الإرسال: {settings.get('report_time', '00:00')}\n"
+        f"• المستلمون: {recipients_text}\n\n"
+        f"اختر الإجراء المطلوب:",
         reply_markup=builder.as_markup()
     )
+
+@router.callback_query(F.data == "toggle_daily_report")
+async def toggle_daily_report(callback: types.CallbackQuery, db_pool):
+    """تبديل تفعيل التقرير اليومي"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_report_settings, update_report_setting
+    settings = await get_report_settings(db_pool)
+    
+    current = settings.get('daily_report_enabled', 'true')
+    new_value = 'false' if current == 'true' else 'true'
+    
+    await update_report_setting(db_pool, 'daily_report_enabled', new_value)
+    
+    # إعادة فتح قائمة الإعدادات
+    await report_settings(callback, db_pool)
+
+@router.callback_query(F.data == "change_report_time")
+async def change_report_time_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تغيير وقت التقرير"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "⏰ **تغيير وقت التقرير اليومي**\n\n"
+        "أدخل الوقت الجديد بصيغة HH:MM (مثال: 23:30)\n\n"
+        "⏱️ الوقت الحالي: 00:00\n\n"
+        "❌ للإلغاء أرسل /cancel"
+    )
+    await state.set_state(ReportStates.waiting_report_time)
+
+@router.message(ReportStates.waiting_report_time)
+async def change_report_time_final(message: types.Message, state: FSMContext, db_pool):
+    """حفظ وقت التقرير الجديد"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من صيغة الوقت
+    import re
+    time_pattern = r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$'
+    
+    if not re.match(time_pattern, message.text.strip()):
+        await message.answer(
+            "❌ صيغة غير صحيحة!\n"
+            "الرجاء إدخال الوقت بصيغة HH:MM (مثال: 14:30)\n"
+            "أو أرسل /cancel للإلغاء"
+        )
+        return
+    
+    from database import update_report_setting
+    await update_report_setting(db_pool, 'report_time', message.text.strip())
+    
+    await message.answer(f"✅ تم تحديث وقت التقرير إلى {message.text}")
+    await state.clear()
+
+@router.callback_query(F.data == "change_recipients")
+async def change_recipients(callback: types.CallbackQuery, db_pool):
+    """تغيير مستلمي التقارير"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_report_settings, update_report_setting
+    settings = await get_report_settings(db_pool)
+    current = settings.get('report_recipients', 'owner_only')
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(
+            text="👑 المالك فقط" + (" ✅" if current == 'owner_only' else ""),
+            callback_data="set_recipients_owner_only"
+        )
+    )
+    builder.row(
+        types.InlineKeyboardButton(
+            text="👥 جميع المشرفين" + (" ✅" if current == 'all_admins' else ""),
+            callback_data="set_recipients_all_admins"
+        )
+    )
+    builder.row(
+        types.InlineKeyboardButton(
+            text="🔙 رجوع",
+            callback_data="report_settings"
+        )
+    )
+    
+    await callback.message.edit_text(
+        "👤 **اختر مستلمي التقارير:**\n\n"
+        "• المالك فقط: التقرير يرسل للمالك فقط\n"
+        "• جميع المشرفين: يرسل لكل المشرفين",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("set_recipients_"))
+async def set_recipients(callback: types.CallbackQuery, db_pool):
+    """تحديد مستلمي التقارير"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    recipient_type = callback.data.replace("set_recipients_", "")
+    
+    from database import update_report_setting
+    await update_report_setting(db_pool, 'report_recipients', recipient_type)
+    
+    await callback.answer(f"✅ تم تحديث المستلمين")
+    await report_settings(callback, db_pool)
