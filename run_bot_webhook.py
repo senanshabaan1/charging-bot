@@ -203,7 +203,8 @@ async def main():
         admin.router,
         start.router,
         deposit.router,
-        services.router
+        services.router,
+        reports.router
     )
     
     # إعدادات webhook
