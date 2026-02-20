@@ -14,29 +14,21 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 MODERATORS = [int(x) for x in os.getenv("MODERATORS", "").split(",") if x]
 
 # ====== قسم قاعدة البيانات المعدل لـ Supabase ======
-# كلمة المرور الجديدة تحتوي على ! (علامة تعجب)
-DB_PASSWORD = "3xQx4Ve3!123"
-ENCODED_PASSWORD = quote_plus(DB_PASSWORD)  # ترميز الرموز الخاصة
+# الأولوية لـ DATABASE_URL من متغيرات البيئة
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# رابط Supabase المباشر
-SUPABASE_URL = f"postgresql://postgres:{ENCODED_PASSWORD}@db.rrxmjbcqffhvxohgpgbb.supabase.co:5432/postgres"
-
-# الأولوية لـ DATABASE_URL من متغيرات البيئة (إن وجد)
-# إذا ما في DATABASE_URL، استخدم رابط Supabase
-DATABASE_URL = os.getenv("DATABASE_URL", SUPABASE_URL)
-
-print(f"🔍 DATABASE_URL found: {'Yes' if os.getenv('DATABASE_URL') else 'No (using Supabase)'}")  # للتأكد
+print(f"🔍 DATABASE_URL found: {'Yes' if DATABASE_URL else 'No'}")
 
 if DATABASE_URL:
     # تحليل رابط PostgreSQL
     try:
-        # محاولة تحليل الرابط
-        match = re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
+        # نقبل الرابط ببداية postgresql:// أو postgres://
+        match = re.match(r'postgres(?:ql)?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
         if match:
             user, password, host, port, database = match.groups()
             DB_CONFIG = {
                 "host": host,
-                "port": port,
+                "port": int(port),
                 "database": database,
                 "user": user,
                 "password": password
@@ -50,21 +42,22 @@ if DATABASE_URL:
             }
     except Exception as e:
         print(f"⚠️ Error parsing DATABASE_URL: {e}, using fallback config")
+        # بيانات Supabase من متغيرات البيئة الفردية
         DB_CONFIG = {
-            "host": "db.rrxmjbcqffhvxohgpgbb.supabase.co",
-            "port": "5432",
-            "database": "postgres",
-            "user": "postgres",
-            "password": "3xQx4Ve3!123"  # استخدام كلمة المرور الأصلية
+            "host": os.getenv("DB_HOST", "aws-1-ap-northeast-1.pooler.supabase.com"),
+            "port": int(os.getenv("DB_PORT", "6543")),
+            "database": os.getenv("DB_NAME", "postgres"),
+            "user": os.getenv("DB_USER", "postgres"),
+            "password": os.getenv("DB_PASSWORD", "3xQx4Ve3!123")
         }
 else:
     print("⚠️ No DATABASE_URL found, using local config")
     DB_CONFIG = {
-        "host": os.getenv("DB_HOST", "localhost"),
-        "port": os.getenv("DB_PORT", "5432"),
-        "database": os.getenv("DB_NAME", "charging_bot"),
+        "host": os.getenv("DB_HOST", "aws-1-ap-northeast-1.pooler.supabase.com"),
+        "port": int(os.getenv("DB_PORT", "6543")),
+        "database": os.getenv("DB_NAME", "postgres"),
         "user": os.getenv("DB_USER", "postgres"),
-        "password": os.getenv("DB_PASSWORD", "")
+        "password": os.getenv("DB_PASSWORD", "3xQx4Ve3!123")
     }
 # =======================================
 
