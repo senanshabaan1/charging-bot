@@ -11,6 +11,8 @@ from handlers import start, deposit, services, admin
 import pytz
 from datetime import datetime
 from aiogram.types import BotCommand
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from handlers.reports import send_daily_report
 
 logging.basicConfig(level=logging.INFO)
 
@@ -123,6 +125,22 @@ async def main():
     
     # إنشاء البوت - يجب أن يكون هنا قبل استخدامه
     bot = Bot(token=TOKEN)
+    # ===== إضافة جدولة التقرير اليومي =====
+    scheduler = AsyncIOScheduler(timezone='Asia/Damascus')
+    
+    # جدولة التقرير اليومي الساعة 12 منتصف الليل
+    scheduler.add_job(
+        send_daily_report,
+        'cron',
+        hour=0,
+        minute=0,
+        args=[bot, db_pool],
+        id='daily_report'
+    )
+    
+    scheduler.start()
+    logging.info("✅ تم تفعيل التقرير اليومي (الساعة 12 ليلاً)")
+    # ======================================
 
     # ========== Middleware للتحقق من حالة البوت ==========
     @dp.message.middleware()
