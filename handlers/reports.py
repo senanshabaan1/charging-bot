@@ -72,8 +72,9 @@ async def generate_excel_report(db_pool, period='all'):
                     COALESCE(a.name, o.app_name) as app_name, 
                     o.quantity, o.total_amount_syp,
                     o.points_earned, o.status, o.target_id,
-                    o.created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
-                    o.updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
+                    o.created_at as order_created_at,      -- 👈 حددناها بوضوح
+                    o.updated_at as order_updated_at,      -- 👈 حددناها بوضوح
+                    a.created_at as app_created_at         -- 👈 إذا احتجتها
                 FROM orders o
                 LEFT JOIN applications a ON o.app_id = a.id
                 WHERE 1=1 {date_condition}
@@ -85,7 +86,7 @@ async def generate_excel_report(db_pool, period='all'):
             points_query = f'''
                 SELECT 
                     id, user_id, points, action, description, 
-                    created_at AT TIME ZONE 'Asia/Damascus' as created_at
+                    created_at as point_created_at          -- 👈 حددها
                 FROM points_history 
                 WHERE 1=1 {date_condition}
                 ORDER BY created_at DESC
@@ -97,8 +98,8 @@ async def generate_excel_report(db_pool, period='all'):
             redemptions_query = f'''
                 SELECT 
                     id, user_id, username, points, amount_usd, amount_syp,
-                    status, created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
-                    updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
+                    created_at as redemption_created_at,    -- 👈 حددها
+                    updated_at as redemption_updated_at     -- 👈 حددها
                 FROM redemption_requests 
                 WHERE 1=1 {date_condition}
                 ORDER BY created_at DESC
