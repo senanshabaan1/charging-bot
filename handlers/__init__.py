@@ -3,5 +3,12 @@ from .start import router as start_router
 from .services import router as services_router
 from .deposit import router as deposit_router
 from .admin import router as admin_router
+from .reports import router as reports_router
 
-__all__ = ['start_router', 'services_router', 'deposit_router', 'admin_router']
+___all__ = [
+    'start_router', 
+    'services_router', 
+    'deposit_router', 
+    'admin_router',
+    'reports_router'  # 👈 وأضف هنا كمان
+]
