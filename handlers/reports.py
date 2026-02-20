@@ -365,46 +365,103 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح"""
+    """تقرير الأرباح (حسب سعر التطبيق ونسبة الربح)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    await callback.message.edit_text("⏳ جاري توليد تقرير الأرباح...")
+    await callback.message.edit_text("⏳ جاري حساب الأرباح...")
     
     async with db_pool.acquire() as conn:
-        # إحصائيات الأرباح
-        profits = await conn.fetchrow('''
+        # 1. حساب أرباح كل تطبيق على حدة
+        apps_profits = await conn.fetch('''
             SELECT 
-                COALESCE(SUM(total_amount_syp), 0) as total_orders_value,
-                COALESCE(SUM(CASE WHEN status = 'completed' THEN total_amount_syp END), 0) as completed_orders_value,
-                COUNT(*) as total_orders,
-                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders
-            FROM orders
+                a.name as app_name,
+                a.unit_price_usd as cost_price_usd,           -- سعر التكلفة (اللي انت دافعه)
+                a.profit_percentage,                           -- نسبة الربح
+                COUNT(o.id) as sales_count,                    -- عدد المبيعات
+                COALESCE(SUM(o.quantity), 0) as total_units,   -- إجمالي الوحدات المباعة
+                COALESCE(SUM(o.total_amount_syp), 0) as total_revenue_syp,  -- إجمالي الإيرادات بالليرة
+                
+                -- سعر البيع بالدولار = سعر التكلفة × (1 + نسبة الربح/100)
+                (a.unit_price_usd * (1 + a.profit_percentage / 100)) as selling_price_usd,
+                
+                -- الربح لكل وحدة بالدولار = سعر البيع - سعر التكلفة
+                (a.unit_price_usd * (1 + a.profit_percentage / 100) - a.unit_price_usd) as profit_per_unit_usd,
+                
+                -- إجمالي الربح بالدولار = ربح الوحدة × عدد الوحدات
+                (a.unit_price_usd * (1 + a.profit_percentage / 100) - a.unit_price_usd) * COALESCE(SUM(o.quantity), 0) as total_profit_usd
+                
+            FROM applications a
+            LEFT JOIN orders o ON a.id = o.app_id AND o.status = 'completed'
+            GROUP BY a.id, a.name, a.unit_price_usd, a.profit_percentage
+            HAVING COUNT(o.id) > 0
+            ORDER BY total_profit_usd DESC
         ''')
         
-        deposits = await conn.fetchrow('''
+        # 2. إحصائيات عامة
+        totals = await conn.fetchrow('''
             SELECT 
-                COALESCE(SUM(amount_syp), 0) as total_deposits,
-                COUNT(*) as deposit_count
-            FROM deposit_requests
-            WHERE status = 'approved'
+                COUNT(DISTINCT o.app_id) as apps_with_sales,
+                COUNT(o.id) as total_sales,
+                COALESCE(SUM(o.quantity), 0) as total_units_sold,
+                COALESCE(SUM(o.total_amount_syp), 0) as total_revenue_syp,
+                
+                -- إجمالي الربح بالدولار (بنفس المعادلة)
+                SUM(
+                    (a.unit_price_usd * (1 + a.profit_percentage / 100) - a.unit_price_usd) * o.quantity
+                ) as total_profit_usd
+                
+            FROM orders o
+            JOIN applications a ON o.app_id = a.id
+            WHERE o.status = 'completed'
         ''')
         
-        # حساب الأرباح الصافية
-        net_profit = profits['completed_orders_value'] - deposits['total_deposits']
+        # 3. جلب سعر الصرف الحالي
+        from database import get_exchange_rate
+        exchange_rate = await get_exchange_rate(db_pool)
+    
+    # بناء نص التقرير
+    text = "💰 **تقرير الأرباح التفصيلي**\n\n"
+    
+    if apps_profits:
+        # عرض أرباح كل تطبيق
+        for app in apps_profits:
+            cost_usd = app['cost_price_usd']
+            profit_percent = app['profit_percentage']
+            selling_usd = app['selling_price_usd']
+            profit_per_unit_usd = app['profit_per_unit_usd']
+            total_profit_usd = app['total_profit_usd']
+            total_profit_syp = total_profit_usd * exchange_rate
+            sales = app['sales_count']
+            units = app['total_units']
+            
+            text += (
+                f"📱 **{app['app_name']}**\n"
+                f"• سعر التكلفة: ${cost_usd:.3f}\n"
+                f"• نسبة الربح: {profit_percent}%\n"
+                f"• سعر البيع: ${selling_usd:.3f}\n"
+                f"• ربح الوحدة: ${profit_per_unit_usd:.3f}\n"
+                f"• المبيعات: {sales} (إجمالي {units} وحدة)\n"
+                f"• إجمالي الربح: ${total_profit_usd:.2f} ({total_profit_syp:,.0f} ل.س)\n\n"
+            )
         
-    text = (
-        f"💰 **تقرير الأرباح**\n\n"
-        f"📊 **الطلبات:**\n"
-        f"• إجمالي الطلبات: {profits['total_orders']}\n"
-        f"• الطلبات المكتملة: {profits['completed_orders']}\n"
-        f"• قيمة الطلبات الإجمالية: {profits['total_orders_value']:,.0f} ل.س\n"
-        f"• قيمة المكتملة: {profits['completed_orders_value']:,.0f} ل.س\n\n"
-        f"💳 **الإيداعات:**\n"
-        f"• عدد الإيداعات: {deposits['deposit_count']}\n"
-        f"• قيمة الإيداعات: {deposits['total_deposits']:,.0f} ل.س\n\n"
-        f"💵 **صافي الأرباح:** {net_profit:,.0f} ل.س"
-    )
+        # عرض الإجماليات
+        if totals:
+            total_profit_usd = totals['total_profit_usd'] or 0
+            total_profit_syp = total_profit_usd * exchange_rate
+            total_revenue_syp = totals['total_revenue_syp'] or 0
+            
+            text += (
+                f"📊 **الإجمالي الكلي**\n"
+                f"• التطبيقات المباعة: {totals['apps_with_sales']}\n"
+                f"• إجمالي المبيعات: {totals['total_sales']}\n"
+                f"• إجمالي الوحدات: {totals['total_units_sold']}\n"
+                f"• إجمالي الإيرادات: {total_revenue_syp:,.0f} ل.س\n"
+                f"• **إجمالي الأرباح: ${total_profit_usd:.2f} ({total_profit_syp:,.0f} ل.س)**\n"
+                f"• سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n"
+            )
+    else:
+        text += "لا توجد مبيعات مكتملة بعد."
     
     await callback.message.edit_text(text)
 
