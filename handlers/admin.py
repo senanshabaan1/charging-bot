@@ -108,16 +108,17 @@ async def admin_panel(message: types.Message, db_pool):
         ],
         # الصف العاشر - زر التصفير
         [
-            types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot")
+            types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
+            types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
         ],
         # الصف الحادي عشر
         [
             types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance")
         ],
         # ===== الصف الجديد - إدارة المشرفين =====
-        [
-            types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
-        ]
+          [
+            types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status")
+        ],
     ]
     
     await message.answer(
@@ -524,7 +525,128 @@ async def list_products(callback: types.CallbackQuery, db_pool):
         )
     
     await callback.message.edit_text(text, parse_mode="Markdown")
+# ============= إدارة حالة التطبيقات (تفعيل/إيقاف) =============
 
+@router.callback_query(F.data == "manage_apps_status")
+async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
+    """قائمة إدارة حالة التطبيقات"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    # جلب جميع الأقسام
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+    
+    builder = InlineKeyboardBuilder()
+    
+    # زر لكل قسم
+    for cat in categories:
+        builder.row(types.InlineKeyboardButton(
+            text=f"{cat['icon']} {cat['display_name']}",
+            callback_data=f"app_status_cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data="back_to_admin"
+    ))
+    
+    await callback.message.edit_text(
+        "📱 **إدارة حالة التطبيقات**\n\n"
+        "اختر القسم لعرض التطبيقات والتحكم بحالتها:\n"
+        "• ✅ نشط\n"
+        "• ❌ غير نشط",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("app_status_cat_"))
+async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
+    """عرض تطبيقات قسم معين للتحكم بحالتها"""
+    cat_id = int(callback.data.split("_")[3])
+    
+    async with db_pool.acquire() as conn:
+        # جلب معلومات القسم
+        category = await conn.fetchrow(
+            "SELECT * FROM categories WHERE id = $1",
+            cat_id
+        )
+        
+        # جلب تطبيقات القسم
+        apps = await conn.fetch('''
+            SELECT * FROM applications 
+            WHERE category_id = $1 
+            ORDER BY is_active DESC, name
+        ''', cat_id)
+    
+    if not apps:
+        return await callback.answer("لا توجد تطبيقات في هذا القسم", show_alert=True)
+    
+    text = f"{category['icon']} **{category['display_name']}**\n\n"
+    text += "اختر التطبيق لتغيير حالته:\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    
+    for app in apps:
+        status_icon = "✅" if app['is_active'] else "❌"
+        button_text = f"{status_icon} {app['name']}"
+        
+        builder.row(types.InlineKeyboardButton(
+            text=button_text,
+            callback_data=f"toggle_app_{app['id']}_{'1' if app['is_active'] else '0'}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للأقسام",
+        callback_data="manage_apps_status"
+    ))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("toggle_app_"))
+async def toggle_app_status(callback: types.CallbackQuery, db_pool):
+    """تغيير حالة التطبيق (تفعيل/إيقاف)"""
+    parts = callback.data.split("_")
+    app_id = int(parts[2])
+    current_status = bool(int(parts[3]))
+    new_status = not current_status
+    
+    async with db_pool.acquire() as conn:
+        # تحديث حالة التطبيق
+        await conn.execute('''
+            UPDATE applications 
+            SET is_active = $1 
+            WHERE id = $2
+        ''', new_status, app_id)
+        
+        # جلب معلومات التطبيق
+        app = await conn.fetchrow(
+            "SELECT name, is_active FROM applications WHERE id = $1",
+            app_id
+        )
+    
+    status_text = "✅ **مفعل**" if new_status else "❌ **معطل**"
+    
+    # رسالة تأكيد
+    await callback.answer(f"تم تغيير حالة {app['name']} إلى {status_text}")
+    
+    # العودة لقائمة التطبيقات في نفس القسم
+    # نستخرج cat_id من callback data السابق أو نجلبها من قاعدة البيانات
+    async with db_pool.acquire() as conn:
+        app_info = await conn.fetchrow(
+            "SELECT category_id FROM applications WHERE id = $1",
+            app_id
+        )
+    
+    # إعادة عرض القائمة
+    await show_apps_for_status(
+        types.CallbackQuery(
+            id=callback.id,
+            from_user=callback.from_user,
+            message=callback.message,
+            data=f"app_status_cat_{app_info['category_id']}"
+        ), 
+        db_pool
+    )
 # ============= تصفير البوت =============
 @router.callback_query(F.data == "reset_bot")
 async def reset_bot_start(callback: types.CallbackQuery, state: FSMContext):
