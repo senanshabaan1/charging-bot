@@ -371,8 +371,12 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text("⏳ جاري حساب الأرباح...")
     
+    # ✅ أولاً: جلب سعر الصرف
+    from database import get_exchange_rate
+    exchange_rate = await get_exchange_rate(db_pool)
+    
     async with db_pool.acquire() as conn:
-        # 1. أرباح كل تطبيق مع تفصيل الخصومات
+        # 1. أرباح كل تطبيق
         apps_profits = await conn.fetch('''
             SELECT 
                 a.name as app_name,
@@ -382,7 +386,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
                 COALESCE(SUM(o.quantity), 0) as total_units,
                 COALESCE(SUM(o.total_amount_syp), 0) as total_revenue_syp,
                 
-                -- السعر قبل الخصم (سعر التكلفة + الربح)
+                -- السعر قبل الخصم
                 (a.unit_price_usd * (1 + a.profit_percentage / 100)) as price_before_discount_usd,
                 
                 -- الربح المتوقع قبل الخصم
@@ -420,7 +424,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             WHERE o.status = 'completed'
             GROUP BY u.vip_level
             ORDER BY u.vip_level
-        ''', exchange_rate)  # $1 = exchange_rate
+        ''', exchange_rate)  # ✅ exchange_rate معرف الآن
         
         # 3. إحصائيات عامة
         totals = await conn.fetchrow('''
@@ -448,8 +452,8 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             FROM orders o
             JOIN applications a ON o.app_id = a.id
             WHERE o.status = 'completed'
-        ''', exchange_rate)
-        
+        ''', exchange_rate)  # ✅ exchange_rate معرف الآن
+                
         # 4. جلب سعر الصرف
         from database import get_exchange_rate
         exchange_rate = await get_exchange_rate(db_pool)
