@@ -29,11 +29,6 @@ async def generate_excel_report(db_pool, period='all'):
     try:
         output = BytesIO()
         
-        # تحديد شرط التاريخ إذا كان تقرير يومي - مع ضبط المنطقة الزمنية
-        date_condition = ""
-        if period == 'day':
-            # استخدام CURRENT_DATE مع ضبط المنطقة الزمنية لدمشق
-            date_condition = "AND DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
         
         async with db_pool.acquire() as conn:
             # تأكد من ضبط المنطقة الزمنية للاتصال
@@ -60,9 +55,10 @@ async def generate_excel_report(db_pool, period='all'):
                     status, created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
                     updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
                 FROM deposit_requests 
-                WHERE 1=1 {date_condition}
-                ORDER BY created_at DESC
             '''
+            if period == 'day':
+                deposits_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            deposits_query += " ORDER BY created_at DESC"
             deposits_df = pd.DataFrame(await conn.fetch(deposits_query))
             
             # 3. تقرير الطلبات (مع شرط التاريخ)
@@ -77,9 +73,11 @@ async def generate_excel_report(db_pool, period='all'):
                     a.created_at as app_created_at         -- 👈 إذا احتجتها
                 FROM orders o
                 LEFT JOIN applications a ON o.app_id = a.id
-                WHERE 1=1 {date_condition}
-                ORDER BY o.created_at DESC
+
             '''
+            if period == 'day':
+                orders_query += " WHERE DATE(o.created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            orders_query += " ORDER BY o.created_at DESC"
             orders_df = pd.DataFrame(await conn.fetch(orders_query))
             
             # 4. تقرير النقاط (مع شرط التاريخ)
@@ -88,10 +86,10 @@ async def generate_excel_report(db_pool, period='all'):
                     id, user_id, points, action, description, 
                     created_at as point_created_at          -- 👈 حددها
                 FROM points_history 
-                WHERE 1=1 {date_condition}
-                ORDER BY point_created_at DESC
-                LIMIT 1000
             '''
+            if period == 'day':
+                points_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            points_query += " ORDER BY point_created_at DESC LIMIT 1000"
             points_df = pd.DataFrame(await conn.fetch(points_query))
             
             # 5. تقرير استرداد النقاط (مع شرط التاريخ)
@@ -101,9 +99,10 @@ async def generate_excel_report(db_pool, period='all'):
                     created_at as redemption_created_at,    -- 👈 حددها
                     updated_at as redemption_updated_at     -- 👈 حددها
                 FROM redemption_requests 
-                WHERE 1=1 {date_condition}
-                ORDER BY redemption_created_at DESC
             '''
+            if period == 'day':
+                redemptions_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            redemptions_query += " ORDER BY redemption_created_at DESC"
             redemptions_df = pd.DataFrame(await conn.fetch(redemptions_query))
             
             # 6. إحصائيات عامة (مع مراعاة التاريخ)
