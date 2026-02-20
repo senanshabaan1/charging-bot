@@ -202,6 +202,26 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ''')
+	# جدول إعدادات التقارير
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS report_settings (
+                id SERIAL PRIMARY KEY,
+                setting_key TEXT UNIQUE,
+                setting_value TEXT,
+                description TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+           # إضافة الإعدادات الافتراضية
+        await conn.execute('''
+            INSERT INTO report_settings (setting_key, setting_value, description) 
+            VALUES 
+                ('daily_report_enabled', 'true', 'تفعيل التقرير اليومي'),
+                ('report_time', '00:00', 'وقت إرسال التقرير'),
+                ('report_recipients', 'owner_only', 'مستلمو التقرير (all_admins/owner_only)')
+            ON CONFLICT (setting_key) DO NOTHING;
+        ''')
 
         # إضافة قسم تطبيقات الدردشة فقط إذا لم تكن هناك أقسام
         existing_cats = await conn.fetchval("SELECT COUNT(*) FROM categories")
@@ -1820,4 +1840,37 @@ async def fix_manual_vip_for_existing_users(pool):
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث المستخدمين القدامى: {e}")
 
+# ============= دوال إعدادات التقارير =============
+
+async def get_report_settings(pool):
+    """جلب إعدادات التقارير"""
+    try:
+        async with pool.acquire() as conn:
+            settings = {}
+            rows = await conn.fetch("SELECT setting_key, setting_value FROM report_settings")
+            for row in rows:
+                settings[row['setting_key']] = row['setting_value']
+            return settings
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب إعدادات التقارير: {e}")
+        return {
+            'daily_report_enabled': 'true',
+            'report_time': '00:00',
+            'report_recipients': 'owner_only'
+        }
+
+async def update_report_setting(pool, key, value):
+    """تحديث إعداد تقرير"""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO report_settings (setting_key, setting_value, updated_at)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (setting_key) DO UPDATE 
+                SET setting_value = $2, updated_at = CURRENT_TIMESTAMP
+            ''', key, value)
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث إعداد التقرير {key}: {e}")
+     
         return False
