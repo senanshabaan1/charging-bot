@@ -2,6 +2,7 @@
 import os
 from dotenv import load_dotenv
 import re
+from urllib.parse import quote_plus
 
 # تحميل المتغيرات من ملف .env (للتشغيل المحلي فقط)
 if os.path.exists('.env'):
@@ -12,17 +13,24 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 MODERATORS = [int(x) for x in os.getenv("MODERATORS", "").split(",") if x]
 
-# ====== قسم قاعدة البيانات المعدل ======
-# الأولوية لـ DATABASE_URL (من Render)
-DATABASE_URL = os.getenv("DATABASE_URL")
+# ====== قسم قاعدة البيانات المعدل لـ Supabase ======
+# كلمة المرور الجديدة تحتوي على ! (علامة تعجب)
+DB_PASSWORD = "3xQx4Ve3!123"
+ENCODED_PASSWORD = quote_plus(DB_PASSWORD)  # ترميز الرموز الخاصة
 
-print(f"🔍 DATABASE_URL found: {'Yes' if DATABASE_URL else 'No'}")  # للتأكد
+# رابط Supabase المباشر
+SUPABASE_URL = f"postgresql://postgres:{ENCODED_PASSWORD}@db.rrxmjbcqffhvxohgpgbb.supabase.co:5432/postgres"
+
+# الأولوية لـ DATABASE_URL من متغيرات البيئة (إن وجد)
+# إذا ما في DATABASE_URL، استخدم رابط Supabase
+DATABASE_URL = os.getenv("DATABASE_URL", SUPABASE_URL)
+
+print(f"🔍 DATABASE_URL found: {'Yes' if os.getenv('DATABASE_URL') else 'No (using Supabase)'}")  # للتأكد
 
 if DATABASE_URL:
-    # تحليل رابط PostgreSQL من Render
+    # تحليل رابط PostgreSQL
     try:
-        # مثال: postgresql://user:password@host:port/dbname
-        import re
+        # محاولة تحليل الرابط
         match = re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
         if match:
             user, password, host, port, database = match.groups()
@@ -33,7 +41,7 @@ if DATABASE_URL:
                 "user": user,
                 "password": password
             }
-            print(f"✅ Using Render database: {host}/{database}")
+            print(f"✅ Using Supabase database: {host}/{database}")
         else:
             # إذا ما انطابق النمط، استخدم الرابط مباشرة
             print("⚠️ DATABASE_URL format not recognized, using as dsn")
@@ -43,11 +51,11 @@ if DATABASE_URL:
     except Exception as e:
         print(f"⚠️ Error parsing DATABASE_URL: {e}, using fallback config")
         DB_CONFIG = {
-            "host": os.getenv("DB_HOST", "localhost"),
-            "port": os.getenv("DB_PORT", "5432"),
-            "database": os.getenv("DB_NAME", "charging_bot"),
-            "user": os.getenv("DB_USER", "postgres"),
-            "password": os.getenv("DB_PASSWORD", "")
+            "host": "db.rrxmjbcqffhvxohgpgbb.supabase.co",
+            "port": "5432",
+            "database": "postgres",
+            "user": "postgres",
+            "password": "3xQx4Ve3!123"  # استخدام كلمة المرور الأصلية
         }
 else:
     print("⚠️ No DATABASE_URL found, using local config")
