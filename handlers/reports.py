@@ -29,12 +29,16 @@ async def generate_excel_report(db_pool, period='all'):
     try:
         output = BytesIO()
         
-        # تحديد شرط التاريخ إذا كان تقرير يومي
+        # تحديد شرط التاريخ إذا كان تقرير يومي - مع ضبط المنطقة الزمنية
         date_condition = ""
         if period == 'day':
-            date_condition = "AND DATE(created_at) = CURRENT_DATE"
+            # استخدام CURRENT_DATE مع ضبط المنطقة الزمنية لدمشق
+            date_condition = "AND DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
         
         async with db_pool.acquire() as conn:
+            # تأكد من ضبط المنطقة الزمنية للاتصال
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
             # 1. تقرير المستخدمين
             users_df = pd.DataFrame(await conn.fetch('''
                 SELECT 
@@ -42,73 +46,84 @@ async def generate_excel_report(db_pool, period='all'):
                     balance, total_points, vip_level, discount_percent,
                     total_deposits, total_orders, total_spent,
                     referral_count, referral_earnings,
-                    created_at, last_activity, is_banned
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
+                    last_activity AT TIME ZONE 'Asia/Damascus' as last_activity, 
+                    is_banned
                 FROM users 
                 ORDER BY created_at DESC
             '''))
             
             # 2. تقرير الإيداعات (مع شرط التاريخ)
-            deposits_df = pd.DataFrame(await conn.fetch(f'''
+            deposits_query = f'''
                 SELECT 
                     id, user_id, username, method, amount, amount_syp,
-                    status, created_at, updated_at
+                    status, created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
+                    updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
                 FROM deposit_requests 
                 WHERE 1=1 {date_condition}
                 ORDER BY created_at DESC
-            '''))
+            '''
+            deposits_df = pd.DataFrame(await conn.fetch(deposits_query))
             
             # 3. تقرير الطلبات (مع شرط التاريخ)
-            orders_df = pd.DataFrame(await conn.fetch(f'''
+            orders_query = f'''
                 SELECT 
                     o.id, o.user_id, o.username, 
-                    a.name as app_name, o.quantity, o.total_amount_syp,
+                    COALESCE(a.name, o.app_name) as app_name, 
+                    o.quantity, o.total_amount_syp,
                     o.points_earned, o.status, o.target_id,
-                    o.created_at, o.updated_at
+                    o.created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
+                    o.updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
                 FROM orders o
                 LEFT JOIN applications a ON o.app_id = a.id
                 WHERE 1=1 {date_condition}
                 ORDER BY o.created_at DESC
-            '''))
+            '''
+            orders_df = pd.DataFrame(await conn.fetch(orders_query))
             
             # 4. تقرير النقاط (مع شرط التاريخ)
-            points_df = pd.DataFrame(await conn.fetch(f'''
+            points_query = f'''
                 SELECT 
-                    id, user_id, points, action, description, created_at
+                    id, user_id, points, action, description, 
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history 
                 WHERE 1=1 {date_condition}
                 ORDER BY created_at DESC
                 LIMIT 1000
-            '''))
+            '''
+            points_df = pd.DataFrame(await conn.fetch(points_query))
             
             # 5. تقرير استرداد النقاط (مع شرط التاريخ)
-            redemptions_df = pd.DataFrame(await conn.fetch(f'''
+            redemptions_query = f'''
                 SELECT 
                     id, user_id, username, points, amount_usd, amount_syp,
-                    status, created_at, updated_at
+                    status, created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
+                    updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
                 FROM redemption_requests 
                 WHERE 1=1 {date_condition}
                 ORDER BY created_at DESC
-            '''))
+            '''
+            redemptions_df = pd.DataFrame(await conn.fetch(redemptions_query))
             
             # 6. إحصائيات عامة (مع مراعاة التاريخ)
             if period == 'day':
                 stats = await conn.fetchrow('''
                     SELECT 
                         (SELECT COUNT(*) FROM users) as total_users,
-                        (SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE) as new_users_today,
+                        (SELECT COUNT(*) FROM users WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as new_users_today,
                         (SELECT COALESCE(SUM(balance), 0) FROM users) as total_balance,
                         (SELECT COALESCE(SUM(total_points), 0) FROM users) as total_points,
-                        (SELECT COUNT(*) FROM deposit_requests WHERE DATE(created_at) = CURRENT_DATE) as total_deposits,
-                        (SELECT COALESCE(SUM(amount_syp), 0) FROM deposit_requests WHERE status = 'approved' AND DATE(created_at) = CURRENT_DATE) as total_deposit_amount,
-                        (SELECT COUNT(*) FROM orders WHERE DATE(created_at) = CURRENT_DATE) as total_orders,
-                        (SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE status = 'completed' AND DATE(created_at) = CURRENT_DATE) as total_order_amount,
-                        (SELECT COALESCE(SUM(points_earned), 0) FROM orders WHERE DATE(created_at) = CURRENT_DATE) as total_points_given
+                        (SELECT COUNT(*) FROM deposit_requests WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_deposits,
+                        (SELECT COALESCE(SUM(amount_syp), 0) FROM deposit_requests WHERE status = 'approved' AND DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_deposit_amount,
+                        (SELECT COUNT(*) FROM orders WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_orders,
+                        (SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE status = 'completed' AND DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_order_amount,
+                        (SELECT COALESCE(SUM(points_earned), 0) FROM orders WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_points_given
                 ''')
             else:
                 stats = await conn.fetchrow('''
                     SELECT 
                         (SELECT COUNT(*) FROM users) as total_users,
-                        (SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE) as new_users_today,
+                        (SELECT COUNT(*) FROM users WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as new_users_today,
                         (SELECT COALESCE(SUM(balance), 0) FROM users) as total_balance,
                         (SELECT COALESCE(SUM(total_points), 0) FROM users) as total_points,
                         (SELECT COUNT(*) FROM deposit_requests) as total_deposits,
@@ -164,6 +179,9 @@ async def generate_excel_report(db_pool, period='all'):
         return output
     except Exception as e:
         logger.error(f"❌ خطأ في توليد التقرير: {e}")
+        # طباعة التفاصيل كاملة للتصحيح
+        import traceback
+        traceback.print_exc()
         return None
 
 async def send_daily_report(bot: Bot, db_pool):
@@ -288,23 +306,30 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text("⏳ جاري توليد التقرير اليومي...")
     
-    excel_file = await generate_excel_report(db_pool, 'day')
-    
-    if excel_file:
-        today = datetime.now().strftime('%Y-%m-%d')
+    try:
+        excel_file = await generate_excel_report(db_pool, 'day')
         
-        file = types.BufferedInputFile(
-            file=excel_file.getvalue(),
-            filename=f'daily_report_{today}.xlsx'
-        )
-        
-        await callback.message.answer_document(
-            document=file,
-            caption=f"📅 **التقرير اليومي**\n"
-                   f"📆 {today}"
-        )
-    else:
-        await callback.message.edit_text("❌ فشل في توليد التقرير")
+        if excel_file:
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            file = types.BufferedInputFile(
+                file=excel_file.getvalue(),
+                filename=f'daily_report_{today}.xlsx'
+            )
+            
+            await callback.message.answer_document(
+                document=file,
+                caption=f"📅 **التقرير اليومي**\n"
+                       f"📆 {today}"
+            )
+        else:
+            await callback.message.edit_text(
+                "❌ فشل في توليد التقرير\n"
+                "تحقق من السجلات (logs) لمعرفة التفاصيل."
+            )
+    except Exception as e:
+        logger.error(f"❌ خطأ في daily_report: {e}")
+        await callback.message.edit_text(f"❌ خطأ: {str(e)}")
 
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
