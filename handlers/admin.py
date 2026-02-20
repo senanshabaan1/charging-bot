@@ -88,7 +88,8 @@ async def admin_panel(message: types.Message, db_pool):
         ],
         # الصف السادس
         [
-            types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats")
+            types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
+            types.InlineKeyboardButton(text="📊 تقارير ونسخ احتياطي", callback_data="reports_menu")
         ],
         # الصف السابع - أزرار المنتجات
         [
