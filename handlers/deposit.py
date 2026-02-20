@@ -6,6 +6,11 @@ from config import SYRIATEL_NUMS, SHAM_CASH_NUM, SHAM_CASH_NUM_USD, USDT_BEP20_W
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 import asyncio
 import logging
+import pytz
+from datetime import datetime
+
+# ضبط المنطقة الزمنية لدمشق
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -19,6 +24,10 @@ def get_back_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
     return builder.as_markup(resize_keyboard=True)
+
+def get_damascus_time():
+    """الحصول على الوقت الحالي بتوقيت دمشق"""
+    return datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 @router.message(F.text == "💰 شحن المحفظة")
 async def choose_meth(message: types.Message):
@@ -48,9 +57,12 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     method = callback.data
     
     # جلب سعر الصرف الحالي من قاعدة البيانات
-    from database import get_exchange_rate
+    from database import get_exchange_rate, get_syriatel_numbers
     current_rate = await get_exchange_rate(db_pool)
     logger.info(f"💰 سعر الصرف الحالي للشحن: {current_rate}")
+    
+    # جلب أرقام سيرياتل من قاعدة البيانات
+    syriatel_nums = await get_syriatel_numbers(db_pool)
     
     if method == "m_sham_syp":
         method_name = "شام كاش (ل.س)"
@@ -60,7 +72,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
         wallet = SHAM_CASH_NUM_USD
     elif method == "m_syr":
         method_name = "سيرياتل كاش"
-        wallet = SYRIATEL_NUMS[0] if SYRIATEL_NUMS else "غير محدد"
+        wallet = syriatel_nums[0] if syriatel_nums else "غير محدد"
     elif method == "m_usdt":
         method_name = "USDT BEP20"
         wallet = USDT_BEP20_WALLET
@@ -72,7 +84,8 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
         method=method,
         method_name=method_name,
         wallet=wallet,
-        current_rate=current_rate
+        current_rate=current_rate,
+        syriatel_nums=syriatel_nums
     )
     
     await state.set_state(DepStates.waiting_amount)
@@ -123,15 +136,18 @@ async def get_amount(message: types.Message, state: FSMContext):
     )
     
     if data['method'] == "m_syr":
-        # عرض أرقام سيرياتل كاش مع إمكانية النسخ
+        # جلب أرقام سيرياتل
+        syriatel_nums = data.get('syriatel_nums', ["74091109", "63826779"])
+        
+        # بناء نص الأرقام
         nums_text = ""
-        for i, num in enumerate(SYRIATEL_NUMS, 1):
+        for i, num in enumerate(syriatel_nums, 1):
             nums_text += f"📞 **رقم {i}:** `{num}`\n"
         
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
             f"{nums_text}\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية (12 رقم):**\n"
+            f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على الرقم لنسخه*",
             reply_markup=get_back_keyboard(),
             parse_mode="Markdown"
@@ -139,11 +155,15 @@ async def get_amount(message: types.Message, state: FSMContext):
         await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] in ["m_sham_syp", "m_sham_usd"]:
+        # تحديد نوع العملة
+        currency = "ل.س" if data['method'] == "m_sham_syp" else "$"
+        
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"👛 **إلى المحفظة:**\n`{data['wallet']}`\n\n"
+            f"👛 **إلى محفظة شام كاش ({currency}):**\n"
+            f"`{data['wallet']}`\n\n"
             f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
-            f"💡 *اضغط على المحفظة لنسخها*",
+            f"💡 *اضغط على رقم المحفظة لنسخه*",
             reply_markup=get_back_keyboard(),
             parse_mode="Markdown"
         )
@@ -152,7 +172,8 @@ async def get_amount(message: types.Message, state: FSMContext):
     elif data['method'] == "m_usdt":
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"👛 **إلى العنوان (BEP20):**\n`{data['wallet']}`\n\n"
+            f"👛 **إلى عنوان USDT (BEP20):**\n"
+            f"`{data['wallet']}`\n\n"
             f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
             f"💡 *اضغط على العنوان لنسخه*",
             reply_markup=get_back_keyboard(),
@@ -161,7 +182,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         await state.set_state(DepStates.waiting_photo)
 
 async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id: str = None):
-    """إرسال طلب الشحن للمجموعة مع أزرار"""
+    """إرسال طلب الشحن للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
         user_info = f"👤 المستخدم: @{data.get('username', 'غير معروف')}\n"
         user_info += f"🆔 الآيدي: `{data['user_id']}`\n"
@@ -173,14 +194,16 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
         
         tx_info_text = f"🔢 رقم العملية: `{tx_info}`\n" if tx_info else ""
         
-        from datetime import datetime
+        # استخدام توقيت دمشق
+        current_time = get_damascus_time()
+        
         caption = (
             "🆕 **طلب شحن جديد**\n\n"
             f"{user_info}"
             f"{amount_info}"
             f"{method_info}"
             f"{tx_info_text}"
-            f"⏰ الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"⏰ الوقت: {current_time}\n\n"
             "🔹 **الإجراءات:**"
         )
         
@@ -237,7 +260,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             parse_mode="Markdown"
         )
     
-    from datetime import datetime
     async with db_pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
@@ -265,7 +287,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             'display_amount': data['display_amount'],
             'amount_syp': data['amount_syp'],
             'method_name': data['method_name'],
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
         group_msg_id = await send_to_group(bot, channel_data, tx)
@@ -279,7 +300,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
     await message.answer(
         "✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         "⏳ **بانتظار موافقة الإدارة.**\n"
-        "📋 **سيتم الرد خلال 24 ساعة.**",
+        "📋 **الوقت المتوقع 5 دقائق.**",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
@@ -289,7 +310,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_pool):
     data = await state.get_data()
     
-    from datetime import datetime
     async with db_pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
@@ -318,7 +338,6 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
             'display_amount': data['display_amount'],
             'amount_syp': data['amount_syp'],
             'method_name': data['method_name'],
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
         group_msg_id = await send_to_group(bot, channel_data, photo_file_id=message.photo[-1].file_id)
@@ -332,7 +351,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
     await message.answer(
         "✅ **تم إرسال لقطة الشاشة بنجاح!**\n\n"
         "⏳ **بانتظار موافقة الإدارة.**\n"
-        "📋 **سيتم الرد خلال 24 ساعة.**",
+        "📋 **الوقت المتوقع 5 دقائق.**",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )

@@ -1,7 +1,11 @@
 # database.py
 import asyncpg
 import logging
+import pytz
+from datetime import datetime
 from config import DB_CONFIG
+
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 async def init_db():
     """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
@@ -27,7 +31,10 @@ async def init_db():
                 referral_earnings FLOAT DEFAULT 0,
                 total_points_earned INTEGER DEFAULT 0,
                 total_points_redeemed INTEGER DEFAULT 0,
-                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                vip_level INTEGER DEFAULT 0,
+                total_spent FLOAT DEFAULT 0,
+                discount_percent INTEGER DEFAULT 0
             );
         ''')
 
@@ -159,6 +166,32 @@ async def init_db():
             );
         ''')
 
+        # جدول مستويات VIP
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS vip_levels (
+                level INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                min_spent FLOAT NOT NULL,
+                discount_percent INTEGER NOT NULL,
+                icon TEXT DEFAULT '⭐'
+            );
+        ''')
+
+        # إضافة المستويات الافتراضية
+        await conn.execute('''
+            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
+                VALUES 
+                    (0, 'VIP 0', 0, 0, '🟢'),
+                    (1, 'VIP 1', 1000, 1, '🔵'),
+                    (2, 'VIP 2', 2000, 2, '🟣'),
+                    (3, 'VIP 3', 4000, 3, '🟡'),
+                    (4, 'VIP 4', 8000, 5, '🔴')
+                ON CONFLICT (level) DO UPDATE SET 
+                    min_spent = EXCLUDED.min_spent,
+                    discount_percent = EXCLUDED.discount_percent,
+                    icon = EXCLUDED.icon;
+        ''')
+
         # جدول السجلات
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS logs (
@@ -186,14 +219,20 @@ async def init_db():
             VALUES 
                 ('bot_status', 'running', 'حالة البوت (running/stopped)'),
                 ('maintenance_message', 'البوت قيد الصيانة حالياً، يرجى المحاولة لاحقاً', 'رسالة الصيانة'),
-                ('points_per_order', '5', 'نقاط لكل عملية شراء'),
-                ('points_per_deposit', '5', 'نقاط لكل عملية شحن'),
-                ('points_per_referral', '5', 'نقاط لكل عملية من خلال الإحالة'),
-                ('redemption_rate', '500', 'عدد النقاط مقابل 5 دولار'),
+                ('points_per_order', '1', 'نقاط لكل عملية شراء'),
+                ('points_per_referral', '1', 'نقاط لكل عملية من خلال الإحالة'),
+                ('redemption_rate', '100', 'عدد النقاط مقابل 1 دولار'),
                 ('last_restart', CURRENT_TIMESTAMP::TEXT, 'آخر تشغيل للبوت')
             ON CONFLICT (key) DO NOTHING;
         ''')
-
+       
+        # ===== إضافة مفتاح أرقام سيرياتل إلى قاعدة البيانات =====
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value, description) 
+            VALUES ('syriatel_nums', '74091109,63826779', 'أرقام سيرياتل كاش')
+            ON CONFLICT (key) DO NOTHING;
+        ''')
+        
         # إضافة الأعمدة إذا لم تكن موجودة (للتحديثات)
         tables_columns = {
             'applications': [
@@ -264,21 +303,65 @@ async def init_db():
         except Exception as e:
             logging.warning(f"⚠️ لم يتم إنشاء أكواد الإحالة للمستخدمين الحاليين: {e}")
 
+        # ========== إضافة أعمدة VIP إذا لم تكن موجودة (للتحديثات) ==========
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS vip_level INTEGER DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود vip_level")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود vip_level: {e}")
+
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS total_spent FLOAT DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود total_spent")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود total_spent: {e}")
+
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS discount_percent INTEGER DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود discount_percent")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
+        # ===============================================================
+        # ===== كود إضافة manual_vip =====
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
+            logging.info("✅ تم إضافة عمود manual_vip")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود manual_vip: {e}")
+
         await conn.close()
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح.")
     except Exception as e:
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
 
 async def get_pool():
-    """إنشاء مجمع اتصالات (Pool)"""
+    """إنشاء مجمع اتصالات (Pool) مع ضبط المنطقة الزمنية"""
     try:
+        # تعريف دالة التهيئة لكل اتصال جديد
+        async def init_connection(conn):
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+        
         # التحقق من وجود dsn في الإعدادات
         if "dsn" in DB_CONFIG:
-            pool = await asyncpg.create_pool(dsn=DB_CONFIG["dsn"])
-            logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN")
+            pool = await asyncpg.create_pool(
+                dsn=DB_CONFIG["dsn"],
+                command_timeout=60,
+                server_settings={
+                    'timezone': 'Asia/Damascus'
+                },
+                init=init_connection  # تمرير الدالة وليس القائمة
+            )
+            logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN مع ضبط التوقيت")
         else:
-            pool = await asyncpg.create_pool(**DB_CONFIG)
-            logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح")
+            pool = await asyncpg.create_pool(
+                **DB_CONFIG,
+                command_timeout=60,
+                server_settings={
+                    'timezone': 'Asia/Damascus'
+                },
+                init=init_connection  # تمرير الدالة وليس القائمة
+            )
+            logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح مع ضبط التوقيت")
         return pool
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
@@ -293,6 +376,84 @@ async def test_connection():
         return True
     except Exception as e:
         logging.error(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
+        return False
+
+# ============= دوال ضبط المنطقة الزمنية =============
+
+async def set_database_timezone(pool):
+    """ضبط المنطقة الزمنية لقاعدة البيانات لجميع الاتصالات"""
+    try:
+        async with pool.acquire() as conn:
+            # ضبط المنطقة الزمنية للاتصال الحالي
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # التحقق من الوقت بعد الضبط
+            db_time = await conn.fetchval("SELECT NOW()")
+            
+            # جلب الوقت الحقيقي من قاعدة البيانات (بدون تحويل)
+            db_time_utc = await conn.fetchval("SELECT NOW() AT TIME ZONE 'UTC'")
+            
+            logging.info(f"🕒 وقت DB بعد الضبط (Asia/Damascus): {db_time}")
+            logging.info(f"🕒 وقت DB بصيغة UTC: {db_time_utc}")
+            
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في ضبط توقيت قاعدة البيانات: {e}")
+        return False
+
+def format_local_time(dt):
+    """تنسيق الوقت حسب توقيت دمشق للعرض"""
+    if dt is None:
+        return "غير معروف"
+    
+    if isinstance(dt, str):
+        try:
+            # محاولة تحويل النص إلى datetime
+            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+        except:
+            return dt
+    
+    # إذا كان الوقت بدون منطقة زمنية، نضيف UTC
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    
+    # نحول إلى توقيت دمشق
+    local_dt = dt.astimezone(DAMASCUS_TZ)
+    return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+async def update_old_records_timezone(pool):
+    """تحديث السجلات القديمة إلى التوقيت الصحيح (مرة واحدة)"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود سجلات قديمة
+            tables = ['users', 'deposit_requests', 'orders', 'points_history', 'redemption_requests']
+            
+            for table in tables:
+                try:
+                    # تحديث created_at إذا كان موجوداً
+                    await conn.execute(f"""
+                        UPDATE {table} 
+                        SET created_at = created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Damascus'
+                        WHERE created_at IS NOT NULL
+                          AND EXTRACT(HOUR FROM created_at) < 3  -- تقريباً السجلات الليلية
+                    """)
+                    
+                    # تحديث updated_at إذا كان موجوداً
+                    if table in ['deposit_requests', 'orders', 'redemption_requests']:
+                        await conn.execute(f"""
+                            UPDATE {table} 
+                            SET updated_at = updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Damascus'
+                            WHERE updated_at IS NOT NULL
+                              AND EXTRACT(HOUR FROM updated_at) < 3
+                        """)
+                    
+                    logging.info(f"✅ تم تحديث توقيت الجدول {table}")
+                except Exception as e:
+                    logging.warning(f"⚠️ خطأ في تحديث الجدول {table}: {e}")
+            
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث السجلات القديمة: {e}")
         return False
 
 # ============= دوال حالة البوت =============
@@ -437,7 +598,7 @@ async def process_referral(pool, referred_user_id, referrer_code):
                 points = await conn.fetchval(
                     "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
                 )
-                points = int(points) if points else 5
+                points = int(points) if points else 1
                 
                 # إضافة نقاط للمستخدم الذي قام بالإحالة
                 await add_points(pool, referrer['user_id'], points, 'referral', 
@@ -472,8 +633,9 @@ async def get_points_history(pool, user_id, limit=10):
     """جلب سجل نقاط المستخدم"""
     try:
         async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             history = await conn.fetch('''
-                SELECT points, action, description, created_at
+                SELECT points, action, description, created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -509,6 +671,7 @@ async def create_redemption_request(pool, user_id, username, points, amount_usd,
     except Exception as e:
         logging.error(f"❌ خطأ في إنشاء طلب استرداد نقاط: {e}")
         return None, str(e)
+
 async def approve_redemption(pool, request_id, admin_id):
     """الموافقة على طلب استرداد نقاط"""
     try:
@@ -580,12 +743,12 @@ async def calculate_points_value(pool, points):
             # جلب سعر الصرف الحالي
             exchange_rate = await get_exchange_rate(pool)
             
-            # جلب معدل الاسترداد (كم نقطة مقابل 5 دولار)
+            # جلب معدل الاسترداد (كم نقطة مقابل 1 دولار)
             redemption_rate = await get_redemption_rate(pool)
             
             # حساب قيمة النقاط
-            # مثال: 500 نقطة = 5 دولار
-            usd_value = (points / redemption_rate) * 5
+            # مثال: 100 نقطة = 1 دولار
+            usd_value = (points / redemption_rate) 
             syp_value = usd_value * exchange_rate
             
             return {
@@ -598,6 +761,188 @@ async def calculate_points_value(pool, points):
     except Exception as e:
         logging.error(f"❌ خطأ في حساب قيمة النقاط: {e}")
         return None
+
+# ============= دوال VIP =============
+
+async def get_vip_levels(pool):
+    """جلب جميع مستويات VIP"""
+    try:
+        async with pool.acquire() as conn:
+            levels = await conn.fetch('''
+                SELECT * FROM vip_levels ORDER BY level
+            ''')
+            return levels
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب مستويات VIP: {e}")
+        return []
+
+async def get_user_vip(pool, user_id):
+    """جلب مستوى VIP للمستخدم"""
+    try:
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow('''
+                SELECT vip_level, total_spent, discount_percent 
+                FROM users WHERE user_id = $1
+            ''', user_id)
+            return user or {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب مستوى VIP للمستخدم {user_id}: {e}")
+        return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
+
+async def update_user_vip(pool, user_id):
+    """تحديث مستوى VIP للمستخدم - مع الحفاظ على المستويات اليدوية"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق أولاً إذا كان المستخدم يدوياً
+            user = await conn.fetchrow(
+                "SELECT manual_vip, vip_level, discount_percent FROM users WHERE user_id = $1",
+                user_id
+            )
+            
+            # إذا كان المستخدم يدوياً، لا تغير مستواه
+            if user and user['manual_vip']:
+                logging.info(f"👑 المستخدم {user_id} لديه مستوى يدوي VIP {user['vip_level']} - لم يتم التحديث")
+                return {
+                    'level': user['vip_level'],
+                    'discount': user['discount_percent'],
+                    'total_spent': 0,
+                    'next_level': None,
+                    'manual': True
+                }
+            
+            # حساب إجمالي مشتريات المستخدم
+            total_spent = await conn.fetchval('''
+                SELECT COALESCE(SUM(total_amount_syp), 0) 
+                FROM orders 
+                WHERE user_id = $1 AND status = 'completed'
+            ''', user_id) or 0
+            
+            # تحديد المستوى والخصم بناءً على المشتريات
+            level = 0
+            discount = 0
+            
+            if total_spent >= 8000:
+                level = 4
+                discount = 5
+            elif total_spent >= 4000:
+                level = 3
+                discount = 3
+            elif total_spent >= 2000:
+                level = 2
+                discount = 2
+            elif total_spent >= 1000:
+                level = 1
+                discount = 1
+            
+            # تحديث المستخدم (فقط إذا لم يكن يدوياً)
+            await conn.execute('''
+                UPDATE users 
+                SET vip_level = $1, 
+                    total_spent = $2, 
+                    discount_percent = $3,
+                    manual_vip = FALSE
+                WHERE user_id = $4 AND (manual_vip IS NULL OR manual_vip = FALSE)
+            ''', level, total_spent, discount, user_id)
+            
+            logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (تلقائي)")
+            
+            return {
+                'level': level,
+                'discount': discount,
+                'total_spent': total_spent,
+                'next_level': get_next_vip_level(total_spent),
+                'manual': False
+            }
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
+        return None
+
+def get_next_vip_level(total_spent):
+    """حساب المستوى التالي والمبلغ المتبقي"""
+    levels = [
+        (1000, 1, "VIP 1 🔵 (خصم 1%)"),
+        (2000, 2, "VIP 2 🟣 (خصم 2%)"),
+        (4000, 3, "VIP 3 🟡 (خصم 3%)"),
+        (8000, 4, "VIP 4 🔴 (خصم 5%)")
+    ]
+    
+    for required, level, name in levels:
+        if total_spent < required:
+            remaining = required - total_spent
+            return {
+                'next_level': level,
+                'next_level_name': name,
+                'remaining': remaining,
+                'next_discount': level  # الخصم الجديد
+            }
+    
+    # إذا وصل للمستوى الرابع
+    return {
+        'next_level': 4,
+        'next_level_name': "VIP 4 🔴 (الأقصى)",
+        'remaining': 0,
+        'next_discount': 5
+    }
+
+async def get_top_users_by_deposits(pool, limit=10):
+    """أكثر المستخدمين إيداعاً"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, total_deposits, vip_level 
+                FROM users 
+                ORDER BY total_deposits DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين إيداعاً: {e}")
+        return []
+
+async def get_top_users_by_orders(pool, limit=10):
+    """أكثر المستخدمين طلبات"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, total_orders, vip_level 
+                FROM users 
+                ORDER BY total_orders DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين طلبات: {e}")
+        return []
+
+async def get_top_users_by_referrals(pool, limit=10):
+    """أكثر المستخدمين إحالة"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, referral_count, referral_earnings, vip_level 
+                FROM users 
+                ORDER BY referral_count DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين إحالة: {e}")
+        return []
+
+async def get_top_users_by_points(pool, limit=10):
+    """أكثر المستخدمين نقاط"""
+    try:
+        async with pool.acquire() as conn:
+            users = await conn.fetch('''
+                SELECT user_id, username, total_points, vip_level 
+                FROM users 
+                ORDER BY total_points DESC 
+                LIMIT $1
+            ''', limit)
+            return users
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أكثر المستخدمين نقاط: {e}")
+        return []
 
 # ============= دوال الفئات الفرعية =============
 
@@ -631,15 +976,22 @@ async def get_app_variant(pool, variant_id):
 # ============= دوال الإحصائيات =============
 
 async def get_user_profile(pool, user_id):
-    """جلب معلومات الملف الشخصي للمستخدم بشكل كامل"""
+    """جلب معلومات الملف الشخصي للمستخدم بشكل كامل مع توقيت محلي"""
     try:
         async with pool.acquire() as conn:
-            # معلومات المستخدم الأساسية
+            # ضبط التوقيت لكل استعلام
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # معلومات المستخدم الأساسية مع تحويل التوقيت
             user = await conn.fetchrow('''
-                SELECT user_id, username, first_name, last_name, balance, is_banned, 
-                       created_at, total_deposits, total_orders, total_points,
-                       referral_code, referred_by, referral_count, referral_earnings,
-                       total_points_earned, total_points_redeemed, last_activity
+                SELECT 
+                    user_id, username, first_name, last_name, balance, is_banned, 
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at,
+                    total_deposits, total_orders, total_points,
+                    referral_code, referred_by, referral_count, referral_earnings,
+                    total_points_earned, total_points_redeemed, 
+                    last_activity AT TIME ZONE 'Asia/Damascus' as last_activity,
+                    vip_level, total_spent, discount_percent
                 FROM users 
                 WHERE user_id = $1
             ''', user_id)
@@ -680,9 +1032,11 @@ async def get_user_profile(pool, user_id):
                 WHERE referred_by = $1
             ''', user_id)
             
-            # آخر 5 طلبات
+            # آخر 5 طلبات مع توقيت محلي
             recent_orders = await conn.fetch('''
-                SELECT app_name, variant_name, quantity, total_amount_syp, status, created_at
+                SELECT 
+                    app_name, variant_name, quantity, total_amount_syp, status, 
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM orders
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -706,9 +1060,12 @@ async def get_user_full_stats(pool, user_id):
     return await get_user_profile(pool, user_id)
 
 async def get_bot_stats(pool):
-    """جلب إحصائيات البوت"""
+    """جلب إحصائيات البوت مع توقيت محلي"""
     try:
         async with pool.acquire() as conn:
+            # ضبط التوقيت
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
             users_stats = await conn.fetchrow('''
                 SELECT 
                     COUNT(*) as total_users,
@@ -763,15 +1120,15 @@ async def get_bot_stats(pool):
             # جلب إعدادات النقاط
             points_per_order = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_order'"
-            ) or 5
+            ) or 1
             
             points_per_deposit = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_deposit'"
-            ) or 5
+            ) or 1
             
             points_per_referral = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
-            ) or 5
+            ) or 1
             
             return {
                 'users': dict(users_stats) if users_stats else {},
@@ -1047,10 +1404,10 @@ async def get_points_per_order(pool):
             points = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_order'"
             )
-            return int(points) if points else 5
+            return int(points) if points else 1
     except Exception as e:
         logging.error(f"❌ خطأ في جلب نقاط الطلب: {e}")
-        return 5
+        return 1
 
 async def get_points_per_deposit(pool):
     """جلب عدد النقاط لكل عملية شحن من الإعدادات"""
@@ -1059,10 +1416,10 @@ async def get_points_per_deposit(pool):
             points = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_deposit'"
             )
-            return int(points) if points else 5
+            return int(points) if points else 1
     except Exception as e:
         logging.error(f"❌ خطأ في جلب نقاط الشحن: {e}")
-        return 5
+        return 1
 
 async def get_points_per_referral(pool):
     """جلب عدد النقاط لكل إحالة من الإعدادات"""
@@ -1071,17 +1428,18 @@ async def get_points_per_referral(pool):
             points = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
             )
-            return int(points) if points else 5
+            return int(points) if points else 1
     except Exception as e:
         logging.error(f"❌ خطأ في جلب نقاط الإحالة: {e}")
-        return 5
+        return 1
 
 async def get_user_points_history(pool, user_id, limit=20):
     """جلب سجل نقاط المستخدم مع تفاصيل أكثر"""
     try:
         async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             history = await conn.fetch('''
-                SELECT points, action, description, created_at
+                SELECT points, action, description, created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -1122,6 +1480,7 @@ async def get_user_referral_info(pool, user_id):
     """جلب معلومات الإحالة للمستخدم"""
     try:
         async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             info = await conn.fetchrow('''
                 SELECT referral_code, referral_count, referral_earnings, referred_by
                 FROM users WHERE user_id = $1
@@ -1130,7 +1489,7 @@ async def get_user_referral_info(pool, user_id):
             if info:
                 # جلب قائمة المحالين
                 referrals = await conn.fetch('''
-                    SELECT user_id, username, created_at
+                    SELECT user_id, username, created_at AT TIME ZONE 'Asia/Damascus' as created_at
                     FROM users WHERE referred_by = $1
                     ORDER BY created_at DESC
                     LIMIT 10
@@ -1149,16 +1508,16 @@ async def get_user_referral_info(pool, user_id):
         return None
 
 async def get_redemption_rate(pool):
-    """جلب معدل استرداد النقاط (كم نقطة مقابل 5 دولار)"""
+    """جلب معدل استرداد النقاط (كم نقطة مقابل 1 دولار)"""
     try:
         async with pool.acquire() as conn:
             rate = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
             )
-            return int(rate) if rate else 500
+            return int(rate) if rate else 100
     except Exception as e:
         logging.error(f"❌ خطأ في جلب معدل الاسترداد: {e}")
-        return 500
+        return 100
 
 # ============= دوال سعر الصرف =============
 
@@ -1169,10 +1528,10 @@ async def get_exchange_rate(pool):
             rate = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'usd_to_syp'"
             )
-            return float(rate) if rate else 25000
+            return float(rate) if rate else 118
     except Exception as e:
         logging.error(f"❌ خطأ في جلب سعر الصرف: {e}")
-        return 25000
+        return 118
 
 async def set_exchange_rate(pool, rate):
     """تحديث سعر الصرف في قاعدة البيانات"""
@@ -1187,4 +1546,278 @@ async def set_exchange_rate(pool, rate):
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث سعر الصرف: {e}")
+        return False
+
+async def get_syriatel_numbers(pool):
+    """جلب أرقام سيرياتل من قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            numbers_str = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'syriatel_nums'"
+            )
+            if numbers_str:
+                return numbers_str.split(',')
+            else:
+                default_nums = ["74091109", "63826779"]
+                await conn.execute('''
+                    INSERT INTO bot_settings (key, value, description) 
+                    VALUES ('syriatel_nums', $1, 'أرقام سيرياتل كاش')
+                    ON CONFLICT (key) DO UPDATE SET value = $1
+                ''', ','.join(default_nums))
+                return default_nums
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب أرقام سيرياتل: {e}")
+        return ["74091109", "63826779"]
+
+async def set_syriatel_numbers(pool, numbers):
+    """حفظ أرقام سيرياتل في قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            numbers_str = ','.join(numbers)
+            await conn.execute('''
+                INSERT INTO bot_settings (key, value, description) 
+                VALUES ('syriatel_nums', $1, 'أرقام سيرياتل كاش')
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            ''', numbers_str)
+            logging.info(f"✅ تم تحديث أرقام سيرياتل: {numbers_str}")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في حفظ أرقام سيرياتل: {e}")
+        return False
+
+async def fix_points_history_table(pool):
+    """إصلاح جدول النقاط للتأكد من وجود الأعمدة المطلوبة"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود الأعمدة وإضافتها إذا لزم الأمر
+            await conn.execute('ALTER TABLE points_history ADD COLUMN IF NOT EXISTS action TEXT')
+            await conn.execute('ALTER TABLE points_history ADD COLUMN IF NOT EXISTS description TEXT')
+            logging.info("✅ تم التأكد من وجود أعمدة points_history")
+            
+            # إضافة إعدادات النقاط إذا لم تكن موجودة
+            settings = [
+                ('points_per_referral', '1'),
+                ('points_per_order', '1'),
+                ('redemption_rate', '100'),
+            ]
+            
+            for key, value in settings:
+                await conn.execute('''
+                    INSERT INTO bot_settings (key, value, description) 
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (key) DO UPDATE SET value = $2
+                ''', key, value, f'نقاط {key}')
+            
+            logging.info("✅ تم التأكد من وجود إعدادات النقاط")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في إصلاح جدول النقاط: {e}")
+# ============= دوال إدارة المشرفين =============
+
+async def get_all_admins(pool):
+    """جلب جميع المشرفين من قاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # قائمة بجميع آيدي المشرفين
+            admin_ids = [ADMIN_ID] + MODERATORS
+            
+            if not admin_ids:
+                return []
+            
+            # جلب معلومات المشرفين من جدول users
+            admins = await conn.fetch('''
+                SELECT user_id, username, first_name, last_name, 
+                       created_at, last_activity,
+                       CASE 
+                           WHEN user_id = $1 THEN 'owner'
+                           ELSE 'admin'
+                       END as role
+                FROM users 
+                WHERE user_id = ANY($2::bigint[])
+                ORDER BY 
+                    CASE WHEN user_id = $1 THEN 0 ELSE 1 END,
+                    username
+            ''', ADMIN_ID, admin_ids)
+            
+            return admins
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب المشرفين: {e}")
+        return []
+
+async def add_admin(pool, user_id, added_by):
+    """إضافة مشرف جديد"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود المستخدم
+            user = await conn.fetchrow(
+                "SELECT user_id, username FROM users WHERE user_id = $1",
+                user_id
+            )
+            
+            if not user:
+                return False, "المستخدم غير موجود في قاعدة البيانات"
+            
+            # تحديث ملف config - هذا يتطلب إعادة تشغيل
+            from config import MODERATORS
+            if user_id in MODERATORS:
+                return False, "المستخدم مشرف بالفعل"
+            
+            # إضافة للقائمة المؤقتة
+            MODERATORS.append(user_id)
+            
+            # تسجيل العملية في جدول logs
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', added_by, 'add_admin', f'تمت إضافة المشرف {user_id} (@{user["username"]})')
+            
+            return True, "تمت إضافة المشرف بنجاح"
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة مشرف: {e}")
+        return False, str(e)
+
+async def remove_admin(pool, user_id, removed_by):
+    """إزالة مشرف"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # منع إزالة المالك
+            if user_id == ADMIN_ID:
+                return False, "لا يمكن إزالة المالك"
+            
+            # التحقق من وجوده في القائمة
+            if user_id not in MODERATORS:
+                return False, "المستخدم ليس مشرفاً"
+            
+            # جلب معلومات المستخدم للتسجيل
+            user = await conn.fetchrow(
+                "SELECT username FROM users WHERE user_id = $1",
+                user_id
+            )
+            username = user['username'] if user else 'غير معروف'
+            
+            # إزالته من القائمة
+            MODERATORS.remove(user_id)
+            
+            # تسجيل العملية
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', removed_by, 'remove_admin', f'تمت إزالة المشرف {user_id} (@{username})')
+            
+            return True, "تمت إزالة المشرف بنجاح"
+    except Exception as e:
+        logging.error(f"❌ خطأ في إزالة مشرف: {e}")
+        return False, str(e)
+
+async def get_admin_info(pool, user_id):
+    """جلب معلومات مفصلة عن مشرف"""
+    try:
+        async with pool.acquire() as conn:
+            from config import ADMIN_ID, MODERATORS
+            
+            # التحقق إذا كان المستخدم مشرفاً
+            if user_id != ADMIN_ID and user_id not in MODERATORS:
+                return None
+            
+            # معلومات المستخدم
+            user = await conn.fetchrow('''
+                SELECT user_id, username, first_name, last_name, 
+                       created_at, last_activity,
+                       total_deposits, total_orders, total_points,
+                       referral_count
+                FROM users 
+                WHERE user_id = $1
+            ''', user_id)
+            
+            if not user:
+                return None
+            
+            # آخر نشاطات المشرف
+            recent_actions = await conn.fetch('''
+                SELECT action, details, created_at
+                FROM logs
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 10
+            ''', user_id)
+            
+            # عدد العمليات التي قام بها
+            stats = await conn.fetchrow('''
+                SELECT 
+                    COUNT(*) as total_actions,
+                    COUNT(CASE WHEN action LIKE '%approve%' OR action LIKE '%موافقة%' THEN 1 END) as approvals,
+                    COUNT(CASE WHEN action LIKE '%reject%' OR action LIKE '%رفض%' THEN 1 END) as rejections,
+                    COUNT(CASE WHEN action = 'add_admin' THEN 1 END) as admins_added,
+                    COUNT(CASE WHEN action = 'remove_admin' THEN 1 END) as admins_removed
+                FROM logs
+                WHERE user_id = $1
+            ''', user_id)
+            
+            # تحديد الدور
+            role = "owner" if user_id == ADMIN_ID else "admin"
+            
+            return {
+                'user': dict(user),
+                'recent_actions': recent_actions,
+                'stats': dict(stats) if stats else {},
+                'role': role
+            }
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب معلومات المشرف {user_id}: {e}")
+        return None
+
+async def get_admin_logs(pool, limit=50):
+    """جلب سجل نشاطات المشرفين"""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            logs = await conn.fetch('''
+                SELECT l.*, u.username 
+                FROM logs l
+                LEFT JOIN users u ON l.user_id = u.user_id
+                WHERE l.action IN ('add_admin', 'remove_admin', 'approve_deposit', 'reject_deposit', 
+                                   'approve_order', 'reject_order', 'approve_redemption', 'reject_redemption')
+                ORDER BY l.created_at DESC
+                LIMIT $1
+            ''', limit)
+            
+            return logs
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب سجل النشاطات: {e}")
+        return []
+
+async def is_admin_user(pool, user_id):
+    """التحقق مما إذا كان المستخدم مشرفاً"""
+    try:
+        from config import ADMIN_ID, MODERATORS
+        return user_id == ADMIN_ID or user_id in MODERATORS
+    except Exception as e:
+        logging.error(f"❌ خطأ في التحقق من المشرف: {e}")
+async def fix_manual_vip_for_existing_users(pool):
+    """تحديث المستخدمين اليدويين القدامى - يشغل مرة واحدة"""
+    try:
+        async with pool.acquire() as conn:
+            # افترض أن أي مستخدم مستوى أعلى من 4 هو يدوي
+            await conn.execute('''
+                UPDATE users 
+                SET manual_vip = TRUE 
+                WHERE vip_level >= 5 AND (manual_vip IS NULL OR manual_vip = FALSE)
+            ''')
+            
+            # أو ممكن تحديث مستويات محددة يدوياً
+            # await conn.execute('''
+            #     UPDATE users 
+            #     SET manual_vip = TRUE 
+            #     WHERE user_id IN (8227444931, 123456789, 987654321)  -- ضيف الآيديهن
+            # ''')
+            
+            logging.info("✅ تم تحديث المستخدمين اليدويين القدامى")
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث المستخدمين القدامى: {e}")
+
         return False

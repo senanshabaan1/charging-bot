@@ -1,13 +1,16 @@
 # handlers/start.py
 from aiogram import Router, types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command  # أضف Command هنا
+from aiogram.fsm.context import FSMContext  # أضف FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from config import ADMIN_ID, MODERATORS, USD_TO_SYP
 import logging
 from datetime import datetime
+import pytz  # أضف pytz
 
 logger = logging.getLogger(__name__)
 router = Router()
+
 async def notify_admins(bot, message_text, db_pool=None):
     """إرسال إشعار لجميع المشرفين - مع التأكد من عدم التكرار"""
     from config import ADMIN_ID, MODERATORS
@@ -30,6 +33,7 @@ async def notify_admins(bot, message_text, db_pool=None):
     
     logger.info(f"✅ تم إرسال إشعار لـ {sent_count} مشرف")
     return sent_count
+
 # دالة التحقق من المشرفين
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -55,11 +59,64 @@ def get_back_keyboard():
     """إنشاء زر رجوع فقط"""
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
+    builder.row(types.KeyboardButton(text="/رجوع"))  # أضف هذا السطر كخيار إضافي
     return builder.as_markup(resize_keyboard=True)
+# ========== أضف الكود الجديد هنا ==========
+
+@router.message(Command("cancel"))
+@router.message(Command("الغاء"))
+@router.message(Command("رجوع"))
+@router.message(F.text == "/cancel")
+@router.message(F.text == "/الغاء")
+@router.message(F.text == "/رجوع")
+async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
+    """
+    إلغاء أي عملية حالية والعودة للقائمة الرئيسية
+    """
+    try:
+        # ضبط المنطقة الزمنية لدمشق
+        damascus_tz = pytz.timezone('Asia/Damascus')
+        current_time = datetime.now(damascus_tz).strftime('%H:%M:%S')
+        
+        # الحصول على حالة FSM الحالية
+        current_state = await state.get_state()
+        
+        # تسجيل للتصحيح
+        logger.info(f"حالة FSM الحالية: {current_state}")
+        
+        # مسح حالة FSM
+        await state.clear()
+        
+        # التحقق من إذا كان المستخدم مشرف
+        is_admin_user = is_admin(message.from_user.id)
+        
+        if current_state:
+            # نص عادي بدون Markdown معقد
+            cancel_text = (
+                f"✅ تم إلغاء العملية الحالية\n\n"
+                f"🕐 {current_time}\n"
+                f"🔸 يمكنك البدء من جديد."
+            )
+        else:
+            cancel_text = (
+                f"👋 أهلاً بعودتك!\n\n"
+                f"🕐 {current_time}\n"
+                f"🔸 اختر ما تريد من القائمة."
+            )
+        
+        # إرسال بدون Markdown مؤقتاً
+        await message.answer(
+            cancel_text,
+            reply_markup=get_main_menu_keyboard(is_admin_user)
+            # 👈 حذفنا parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"خطأ في دالة الإلغاء: {e}")
+        await message.answer("حدث خطأ، حاول مرة أخرى.")
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, db_pool):
-    """معالج أمر /start مع دعم الإحالات"""
+    """معالج أمر /start مع دعم الإحالات والتحقق من اشتراك القناة"""
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name or ""
@@ -74,6 +131,39 @@ async def cmd_start(message: types.Message, db_pool):
     is_banned = False
     total_points = 0
     is_new_user = False
+    
+    # ========== التحقق من اشتراك القناة ==========
+    channel_username = "@LINKcharger22"  # اسم القناة بدون https
+    try:
+        member = await message.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        is_member = member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        # إذا كان البوت ليس مشرفاً في القناة أو القناة خاصة، قد يحدث خطأ
+        print(f"⚠️ خطأ في التحقق من القناة: {e}")
+        # نعطي المستخدم فرصة، أو نطلب منه الاشتراك بطريقة أخرى
+        is_member = False  # للأمان نعتبره غير مشترك
+    
+    if not is_member:
+        # المستخدم غير مشترك، نطلب منه الاشتراك
+        join_button = InlineKeyboardBuilder()
+        join_button.row(types.InlineKeyboardButton(
+            text="📢 انضم إلى القناة",
+            url="https://t.me/LINKcharger22"
+        ))
+        join_button.row(types.InlineKeyboardButton(
+            text="✅ تحقق من الاشتراك",
+            callback_data="check_subscription"
+        ))
+        
+        await message.answer(
+            "❌ **عذراً، يجب الاشتراك في قناتنا أولاً لاستخدام البوت.**\n\n"
+            "📢 **قناة البوت:** @LINKcharger22\n\n"
+            "🔹 بعد الاشتراك، اضغط على زر 'تحقق من الاشتراك'.",
+            reply_markup=join_button.as_markup(),
+            parse_mode="Markdown"
+        )
+        return  # نوقف التنفيذ هنا
+    # =============================================
     
     async with db_pool.acquire() as conn:
         # التحقق من وجود المستخدم
@@ -112,6 +202,7 @@ async def cmd_start(message: types.Message, db_pool):
             except Exception as e:
                 print(f"خطأ في إنشاء كود إحالة: {e}")
             
+            # ========== نص الترحيب للمستخدم الجديد ==========
             welcome_text = (
                 "🎉 أهلاً بك في LINK 🔗 BOT لخدمات الشحن!\n\n"
                 "🌟 تم إنشاء حسابك بنجاح\n\n"
@@ -122,6 +213,7 @@ async def cmd_start(message: types.Message, db_pool):
                 "• 🔗 دعوة أصدقائك وكسب نقاط إضافية\n\n"
                 "🔹 لبدء الاستخدام، اختر من القائمة أدناه."
             )
+            # ===============================================
             
             # ========== معالجة الإحالة للمستخدم الجديد ==========
             if referral_code:
@@ -153,7 +245,7 @@ async def cmd_start(message: types.Message, db_pool):
                         points = await conn.fetchval(
                             "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
                         )
-                        points = int(points) if points else 5
+                        points = int(points) if points else 1
                         
                         # إضافة نقاط للمستخدم الذي قام بالإحالة
                         await conn.execute(
@@ -238,6 +330,7 @@ async def cmd_start(message: types.Message, db_pool):
             except:
                 total_points = 0
             
+            # ========== نص الترحيب للمستخدم العائد ==========
             welcome_text = (
                 f"👋 أهلاً بعودتك {first_name or ''}!\n\n"
                 f"📊 ملخص حسابك:\n"
@@ -245,6 +338,7 @@ async def cmd_start(message: types.Message, db_pool):
                 f"⭐ النقاط: {total_points}\n\n"
                 "🔸 اختر ما تريد من القائمة."
             )
+            # ================================================
     
     # التحقق من الحظر - بعد كل العمليات
     if is_banned:
@@ -260,6 +354,26 @@ async def cmd_start(message: types.Message, db_pool):
         reply_markup=get_main_menu_keyboard(is_admin(user_id))
     )
 
+@router.callback_query(F.data == "check_subscription")
+async def check_subscription(callback: types.CallbackQuery, db_pool):
+    """التحقق من اشتراك المستخدم بعد الانضمام للقناة"""
+    user_id = callback.from_user.id
+    channel_username = "@LINKcharger22"
+    
+    try:
+        member = await callback.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        is_member = member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        print(f"⚠️ خطأ في التحقق من القناة: {e}")
+        is_member = False
+    
+    if is_member:
+        # المستخدم مشترك الآن، نرسل له الترحيب وندعو الدالة الأصلية
+        await callback.message.delete()
+        await cmd_start(callback.message, db_pool)
+    else:
+        await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
+
 @router.message(F.text == "🔙 رجوع للقائمة")
 async def back_to_main_menu(message: types.Message, db_pool):
     """معالجة زر الرجوع للقائمة الرئيسية"""
@@ -267,13 +381,13 @@ async def back_to_main_menu(message: types.Message, db_pool):
 
 @router.message(F.text == "👤 حسابي")
 async def my_account(message: types.Message, db_pool):
-    """عرض الملف الشخصي مع أزرار النقاط والإحالة"""
+    """عرض الملف الشخصي مع أزرار النقاط والإحالة وتفاصيل VIP"""
     user_id = message.from_user.id
     
     async with db_pool.acquire() as conn:
         try:
             user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name FROM users WHERE user_id = $1",
+                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
                 user_id
             )
             if user_data and user_data['is_banned']:
@@ -284,6 +398,9 @@ async def my_account(message: types.Message, db_pool):
             referral_code = user_data['referral_code'] if user_data else None
             username = user_data['username'] if user_data else None
             first_name = user_data['first_name'] if user_data else None
+            vip_level = user_data['vip_level'] if user_data else 0
+            vip_discount = user_data['discount_percent'] if user_data else 0
+            total_spent = user_data['total_spent'] if user_data else 0
         except Exception as e:
             print(f"خطأ في التحقق من الحظر: {e}")
             balance = 0
@@ -291,18 +408,36 @@ async def my_account(message: types.Message, db_pool):
             referral_code = None
             username = None
             first_name = None
+            vip_level = 0
+            vip_discount = 0
+            total_spent = 0
     
     # حساب قيمة النقاط بالسعر الحالي
-    from database import get_redemption_rate, get_exchange_rate
+    from database import get_redemption_rate, get_exchange_rate, get_next_vip_level
     redemption_rate = await get_redemption_rate(db_pool)
     exchange_rate = await get_exchange_rate(db_pool)
     
-    # قيمة 500 نقطة = 5 دولار
-    points_value_usd = (points / redemption_rate) * 5
+    # قيمة 100 نقطة = 1 دولار
+    points_value_usd = (points / redemption_rate) 
     points_value_syp = points_value_usd * exchange_rate
     
-    # قيمة 500 نقطة بالليرة
-    base_syp = 5 * exchange_rate  # 5 * 110 = 550 ل.س
+    # قيمة 100 نقطة بالليرة
+    base_syp = 1 * exchange_rate
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        next_discount = next_level_info['next_discount']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
     
     # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
@@ -315,7 +450,7 @@ async def my_account(message: types.Message, db_pool):
         types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
     )
     
-    # رسالة الملف الشخصي
+    # رسالة الملف الشخصي مع تفاصيل VIP
     profile_text = (
         f"👤 **الملف الشخصي**\n\n"
         f"🆔 **الآيدي:** `{user_id}`\n"
@@ -323,9 +458,14 @@ async def my_account(message: types.Message, db_pool):
         f"📅 **اليوزر:** @{username or message.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value_syp:,.0f} ل.س\n"
-        f"💱 **سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"🎁 **كل {redemption_rate} نقطة = 5$** ({base_syp:,.0f} ل.س)\n\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"👑 **نظام VIP:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
+        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
@@ -334,10 +474,14 @@ async def my_account(message: types.Message, db_pool):
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
+
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
-    """عرض رابط الإحالة"""
-    from database import generate_referral_code
+    """عرض رابط الإحالة مع سعر الصرف الحالي"""
+    from database import generate_referral_code, get_exchange_rate
+    
+    # جلب سعر الصرف الحالي من قاعدة البيانات
+    exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
         try:
@@ -370,6 +514,9 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         except:
             points_from_referrals = 0
     
+    # حساب قيمة 1 دولار بسعر الصرف الحالي
+    five_usd_value = 1 * exchange_rate
+    
     text = (
         f"🔗 رابط الإحالة الخاص بك\n\n"
         f"{link}\n\n"
@@ -377,8 +524,9 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• عدد المحالين: {referrals_count}\n"
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
-        f"• 5 نقاط لكل مشترك جديد\n"
-        f"• كل 500 نقطة = 5$ ({500 * USD_TO_SYP:,.0f} ل.س)\n\n"
+        f"• 1 نقطة لكل مشترك جديد\n"
+        f"• كل 100 نقطة = 1$ ({five_usd_value:.0f} ل.س)\n"
+        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
@@ -402,13 +550,14 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         # جلب الإعدادات
         redemption_rate = await conn.fetchval(
             "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
-        ) or '500'
+        ) or '100'
         redemption_rate = int(redemption_rate)
         
         from database import get_exchange_rate
         exchange_rate = await get_exchange_rate(db_pool)
-                # قيمة 500 نقطة بالليرة
-        base_syp = 5 * exchange_rate  # 5 * 110 = 550 ل.س
+        
+        # قيمة 100 نقطة بالليرة
+        base_syp = 1 * exchange_rate
         
         # جلب إجمالي النقاط المكتسبة (فقط النقاط الموجبة)
         points_earned = await conn.fetchval(
@@ -432,15 +581,15 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         ''', callback.from_user.id)
     
     # حساب القيمة بالسعر الحالي
-    points_value_usd = (current_points / redemption_rate) * 5
+    points_value_usd = (current_points / redemption_rate) 
     points_value_syp = points_value_usd * exchange_rate
     
     text = (
         f"⭐ **رصيد النقاط**\n\n"
         f"**نقاطك الحالية:** {current_points}\n"
-        f"**قيمتها:** {points_value_syp:,.0f} ل.س\n"
-        f"**سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n\n"
+        f"**قيمتها:** {points_value_syp:.0f} ل.س\n"
+        f"**سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"**معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)\n\n"
         f"📊 **إحصائيات النقاط:**\n"
         f"• إجمالي النقاط المكتسبة: {points_earned}\n"
         f"• إجمالي النقاط المستخدمة: {abs(points_used)}\n"
@@ -461,6 +610,7 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
 @router.callback_query(F.data == "points_history_simple")
 async def points_history_simple(callback: types.CallbackQuery, db_pool):
     """عرض سجل النقاط"""
@@ -535,7 +685,7 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         
         redemption_rate = await conn.fetchval(
             "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
-        ) or '500'
+        ) or '100'
         redemption_rate = int(redemption_rate)
         
         from database import get_exchange_rate
@@ -547,21 +697,21 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
             show_alert=True
         )
     
-    # حساب قيمة 500 نقطة بالليرة
-    base_usd = 5  # 5 دولار لكل 500 نقطة
-    base_syp = base_usd * exchange_rate  # 5 * 110 = 550 ل.س
+    # حساب قيمة 100 نقطة بالليرة
+    base_usd = 1
+    base_syp = base_usd * exchange_rate
     
     # حساب المبالغ الممكنة
-    max_redemptions = min(points // redemption_rate, 5)
+    max_redemptions = min(points // redemption_rate, 20)
     
     builder = InlineKeyboardBuilder()
     for i in range(1, max_redemptions + 1):
         points_needed = i * redemption_rate
-        syp_amount = i * base_syp  # i * 550 ل.س
-        usd_amount = i * base_usd  # i * 5 دولار
+        syp_amount = i * base_syp
+        usd_amount = i * base_usd
         
         builder.row(types.InlineKeyboardButton(
-            text=f"{usd_amount}$ ({syp_amount:,.0f} ل.س) - {points_needed} نقطة",
+            text=f"{usd_amount}$ ({syp_amount:.0f} ل.س) - {points_needed} نقطة",
             callback_data=f"redeem_{points_needed}_{syp_amount}_{exchange_rate}"
         ))
     
@@ -573,8 +723,8 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     text = (
         f"🎁 **استرداد النقاط**\n\n"
         f"لديك {points} نقطة\n"
-        f"💰 **سعر الصرف الحالي:** {exchange_rate:,.0f} ل.س = 1$\n"
-        f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 5$ ({base_syp:,.0f} ل.س)\n\n"
+        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)\n\n"
         f"اختر المبلغ الذي تريد استرداده:"
     )
     
@@ -589,7 +739,7 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         amount_syp = float(parts[2])
         exchange_rate = float(parts[3]) if len(parts) > 3 else None
         
-        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 500 * 5
+        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 100 * 1
         
         from database import create_redemption_request
         
@@ -608,8 +758,8 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
             await callback.message.edit_text(
                 f"✅ **تم إرسال طلب الاسترداد بنجاح!**\n\n"
                 f"⭐ النقاط: {points}\n"
-                f"💰 المبلغ: {amount_syp:,.0f} ل.س\n"
-                f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n\n"
+                f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س = 1$\n\n"
                 f"⏳ في انتظار موافقة الإدارة.\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
@@ -621,8 +771,8 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 f"👤 المستخدم: @{callback.from_user.username or 'غير معروف'}\n"
                 f"🆔 الآيدي: `{callback.from_user.id}`\n"
                 f"⭐ النقاط: {points}\n"
-                f"💰 المبلغ: {amount_syp:,.0f} ل.س\n"
-                f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س\n"
+                f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
             
@@ -639,27 +789,54 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
-    """العودة إلى الملف الشخصي"""
-    # إنشاء رسالة جديدة بدلاً من تعديل القديمة
+    """العودة إلى الملف الشخصي - مع سعر الصرف الحالي وتفاصيل VIP"""
     user_id = callback.from_user.id
+    
+    # جلب سعر الصرف الحالي من قاعدة البيانات
+    from database import get_exchange_rate, get_redemption_rate, get_next_vip_level
+    exchange_rate = await get_exchange_rate(db_pool)
+    redemption_rate = await get_redemption_rate(db_pool)
     
     async with db_pool.acquire() as conn:
         try:
             user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name FROM users WHERE user_id = $1",
+                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
                 user_id
             )
             balance = user_data['balance'] if user_data else 0
             points = user_data['total_points'] if user_data else 0
             username = user_data['username'] if user_data else None
             first_name = user_data['first_name'] if user_data else None
+            vip_level = user_data['vip_level'] if user_data else 0
+            vip_discount = user_data['discount_percent'] if user_data else 0
+            total_spent = user_data['total_spent'] if user_data else 0
         except:
             balance = 0
             points = 0
             username = None
             first_name = None
+            vip_level = 0
+            vip_discount = 0
+            total_spent = 0
     
-    points_value = (points / 500) * 5 * USD_TO_SYP
+    # حساب قيمة النقاط بسعر الصرف الحالي
+    points_value_usd = (points / redemption_rate) 
+    points_value_syp = points_value_usd * exchange_rate
+    base_syp = 1 * exchange_rate
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
     
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -678,7 +855,14 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value:,.0f} ل.س\n\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"👑 **نظام VIP:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
+        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
@@ -738,12 +922,20 @@ async def show_help(message: types.Message):
         "• عرض النقاط وقيمتها\n"
         "• رابط الإحالة الخاص بك\n"
         "• سجل النقاط\n"
-        "• استرداد النقاط\n\n"
+        "• استرداد النقاط\n"
+        "• مستوى VIP والخصم\n\n"
         
         "**⭐ نظام النقاط:**\n"
-        "• 5 نقاط لكل عملية شراء\n"
-        "• 5 نقاط لكل إحالة ناجحة\n"
-        "• استبدال 500 نقطة بـ 5$ رصيد\n\n"
+        "• 1 نقاط لكل عملية شراء\n"
+        "• 1 نقاط لكل إحالة ناجحة\n"
+        "• استبدال 100 نقطة بـ 1$ رصيد\n\n"
+        
+        "**👑 نظام VIP:**\n"
+        "• VIP 0: 0% خصم\n"
+        "• VIP 1: 1% خصم (1000 ل.س)\n"
+        "• VIP 2: 2% خصم (2000 ل.س)\n"
+        "• VIP 3: 3% خصم (4000 ل.س)\n"
+        "• VIP 4: 5% خصم (8000 ل.س)\n\n"
         
         "**📞 للدعم:**\n"
         "• @support\n\n"
