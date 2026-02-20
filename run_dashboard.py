@@ -7,6 +7,7 @@ from config import DB_CONFIG, WEB_USERNAME, WEB_PASSWORD
 import config
 from functools import wraps
 from datetime import datetime
+import urllib.parse
 
 # إنشاء تطبيق Flask
 app = Flask(__name__)
@@ -24,12 +25,37 @@ def health():
     return 'OK', 200
 
 def get_db_connection():
-    """إنشاء اتصال بقاعدة البيانات"""
+    """إنشاء اتصال بقاعدة البيانات - متوافق مع Supabase"""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        # 1. محاولة استخدام DATABASE_URL من متغيرات البيئة أولاً
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
+            # تعديل الرابط إذا كان يبدأ بـ postgres://
+            if database_url.startswith('postgres://'):
+                database_url = database_url.replace('postgres://', 'postgresql://', 1)
+            
+            print(f"🔗 Connecting to Supabase via DATABASE_URL")
+            conn = psycopg2.connect(database_url)
+            print("✅ Connected successfully")
+            return conn
+        
+        # 2. استخدام DB_CONFIG من config.py
+        print(f"🔗 Connecting to Supabase via DB_CONFIG: {DB_CONFIG.get('host', 'unknown')}")
+        conn = psycopg2.connect(
+            host=DB_CONFIG.get("host"),
+            port=DB_CONFIG.get("port", 6543),
+            database=DB_CONFIG.get("database", "postgres"),
+            user=DB_CONFIG.get("user", "postgres"),
+            password=DB_CONFIG.get("password")
+        )
+        print("✅ Connected successfully")
         return conn
+        
+    except psycopg2.OperationalError as e:
+        print(f"❌ Database connection failed: {e}")
+        return None
     except Exception as e:
-        print(f"Error connecting to DB: {e}")
+        print(f"❌ Unexpected error: {e}")
         return None
 
 def login_required(f):
@@ -82,7 +108,7 @@ def index():
     cur.execute('SELECT COUNT(*) FROM users')
     total_users = cur.fetchone()[0] or 0
 
-    cur.execute('SELECT SUM(balance) FROM users')
+    cur.execute('SELECT COALESCE(SUM(balance), 0) FROM users')
     total_balances = cur.fetchone()[0] or 0
 
     cur.execute("SELECT COUNT(*) FROM deposit_requests WHERE status = 'pending'")
@@ -137,16 +163,16 @@ def index():
             ORDER BY o.created_at DESC
         """)
         pending_orders = cur.fetchall()
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ Error fetching pending orders: {e}")
 
     # جلب سعر الصرف من قاعدة البيانات
     try:
         cur.execute("SELECT value FROM bot_settings WHERE key = 'usd_to_syp'")
         rate_row = cur.fetchone()
-        current_rate = float(rate_row[0]) if rate_row else 25000
+        current_rate = float(rate_row[0]) if rate_row else 118
     except:
-        current_rate = 25000
+        current_rate = 118
 
     cur.close()
     conn.close()
@@ -257,7 +283,7 @@ def applications_management():
     cur = conn.cursor()
     
     # جلب الأقسام
-    cur.execute("SELECT id, name, display_name, icon FROM categories ORDER BY sort_order")
+    cur.execute("SELECT id, name, display_name, icon, sort_order FROM categories ORDER BY sort_order")
     categories = cur.fetchall()
     
     # جلب التطبيقات مع أقسامها
@@ -625,6 +651,7 @@ def get_user_info(user_id):
         })
     
     return jsonify({'error': 'User not found'})
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     port = int(os.environ.get('PORT', 5000))
