@@ -14,6 +14,8 @@ from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from handlers.reports import send_daily_report
 
+scheduler = None  # متغير عام للـ scheduler
+
 logging.basicConfig(level=logging.INFO)
 
 # ضبط المنطقة الزمنية لدمشق
@@ -62,6 +64,7 @@ async def set_timezone_for_connection(conn):
 
 async def main():
     logging.info("🚀 بدأ تشغيل البوت...")
+    global scheduler  # استخدم المتغير العام
     
     # إنشاء مجمع الاتصالات أولاً
     db_pool = await get_pool()
@@ -125,21 +128,29 @@ async def main():
     
     # إنشاء البوت - يجب أن يكون هنا قبل استخدامه
     bot = Bot(token=TOKEN)
-    # ===== إضافة جدولة التقرير اليومي =====
+    
+    # ===== إضافة جدولة التقرير اليومي (بعد تعريف bot) =====
+    from database import get_report_settings
+    
+    # جلب إعدادات الوقت من قاعدة البيانات
+    settings = await get_report_settings(db_pool)
+    report_time = settings.get('report_time', '00:00')
+    hour, minute = map(int, report_time.split(':'))
+    
     scheduler = AsyncIOScheduler(timezone='Asia/Damascus')
     
-    # جدولة التقرير اليومي الساعة 12 منتصف الليل
     scheduler.add_job(
         send_daily_report,
         'cron',
-        hour=0,
-        minute=0,
+        hour=hour,
+        minute=minute,
         args=[bot, db_pool],
-        id='daily_report'
+        id='daily_report',
+        replace_existing=True
     )
     
     scheduler.start()
-    logging.info("✅ تم تفعيل التقرير اليومي (الساعة 12 ليلاً)")
+    logging.info(f"✅ تم تفعيل التقرير اليومي (الساعة {report_time})")
     # ======================================
 
     # ========== Middleware للتحقق من حالة البوت ==========
@@ -217,8 +228,8 @@ async def main():
     # إضافة مسار webhook مع تمرير البيانات
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
-        bot=bot,  # ✅ الآن bot معرف بشكل صحيح
-        **{"db_pool": db_pool}  # تمرير db_pool هنا أيضاً
+        bot=bot,
+        **{"db_pool": db_pool}
     )
     webhook_requests_handler.register(app, path="/webhook")
     
