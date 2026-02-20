@@ -89,7 +89,7 @@ async def generate_excel_report(db_pool, period='all'):
                     created_at as point_created_at          -- 👈 حددها
                 FROM points_history 
                 WHERE 1=1 {date_condition}
-                ORDER BY created_at DESC
+                ORDER BY point_created_at DESC
                 LIMIT 1000
             '''
             points_df = pd.DataFrame(await conn.fetch(points_query))
@@ -102,7 +102,7 @@ async def generate_excel_report(db_pool, period='all'):
                     updated_at as redemption_updated_at     -- 👈 حددها
                 FROM redemption_requests 
                 WHERE 1=1 {date_condition}
-                ORDER BY created_at DESC
+                ORDER BY redemption_created_at DESC
             '''
             redemptions_df = pd.DataFrame(await conn.fetch(redemptions_query))
             
