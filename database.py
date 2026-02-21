@@ -1916,7 +1916,10 @@ async def update_report_setting(pool, key, value):
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث إعداد التقرير {key}: {e}")
+        return False  # 👈 هذا السطر يجب أن يكون داخل الـ except
      # أضف الألعاب الأساسية
+# ============= دوال تهيئة الألعاب =============
+
 async def init_games(pool):
     """إضافة الألعاب الأساسية مع خياراتها (تشغل مرة واحدة)"""
     try:
@@ -1927,78 +1930,83 @@ async def init_games(pool):
                 logging.info("🎮 الألعاب موجودة مسبقاً، تخطي الإضافة")
                 return
             
-            # جلب قسم الألعاب بدون استخدام عمود type
+            # جلب قسم الألعاب
             games_cat = await conn.fetchval("SELECT id FROM categories WHERE name = 'games'")
             
             if not games_cat:
-                # إذا ما في قسم ألعاب، نضيفه بدون عمود type
+                # إذا ما في قسم ألعاب، نضيفه
                 games_cat = await conn.fetchval('''
                     INSERT INTO categories (name, display_name, icon, sort_order)
                     VALUES ('games', '🎮 ألعاب', '🎮', 2)
                     RETURNING id
                 ''')
                 logging.info("✅ تم إضافة قسم الألعاب")
-        
-        # 1. ببجي موبايل
-        pubg_id = await conn.fetchval('''
-            INSERT INTO applications (name, description, category_id, type, is_active)
-            VALUES ($1, $2, $3, 'game', true)
-            RETURNING id
-        ''', 'PUBG Mobile', 'شحن UC وبطاقات عضوية - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
-        
-        # خيارات ببجي
-        pubg_options = [
-            ('60 UC', 60, 0.99),
-            ('300 UC + 25 هدية', 325, 4.99),
-            ('600 UC + 60 هدية', 660, 9.99),
-            ('1500 UC + 300 هدية', 1800, 24.99),
-            ('3850 UC + 1020 هدية', 4870, 49.99),
-        ]
-        
-        for i, (name, qty, price) in enumerate(pubg_options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
-                VALUES ($1, $2, $3, $4, $5)
-            ''', pubg_id, name, qty, price, i)
-        
-        # 2. فري فاير
-        ff_id = await conn.fetchval('''
-            INSERT INTO applications (name, description, category_id, type, is_active)
-            VALUES ($1, $2, $3, 'game', true)
-            RETURNING id
-        ''', 'Free Fire', 'شحن الماس وعضويات - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
-        
-        ff_options = [
-            ('110 ماسة', 110, 0.99),
-            ('570 ماسة + 50 هدية', 620, 4.99),
-            ('1220 ماسة + 150 هدية', 1370, 9.99),
-            ('2420 ماسة + 450 هدية', 2870, 24.99),
-        ]
-        
-        for i, (name, qty, price) in enumerate(ff_options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
-                VALUES ($1, $2, $3, $4, $5)
-            ''', ff_id, name, qty, price, i)
-        
-        # 3. كلاش أوف كلانس
-        coc_id = await conn.fetchval('''
-            INSERT INTO applications (name, description, category_id, type, is_active)
-            VALUES ($1, $2, $3, 'game', true)
-            RETURNING id
-        ''', 'Clash of Clans', 'شحن الجواهر والتذكرة الذهبية - تأكد من إدخال إيميل Supercell ID بشكل صحيح', games_cat)
-        
-        coc_options = [
-            ('80 جوهرة', 80, 0.99),
-            ('500 جوهرة', 500, 4.99),
-            ('1200 جوهرة', 1200, 9.99),
-            ('2500 جوهرة', 2500, 19.99),
-            ('التذكرة الذهبية (شهر)', 1, 4.99),
-        ]
-        
-        for i, (name, qty, price) in enumerate(coc_options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
-                VALUES ($1, $2, $3, $4, $5)
-            ''', coc_id, name, qty, price, i)
+            
+            # 1. ببجي موبايل
+            pubg_id = await conn.fetchval('''
+                INSERT INTO applications (name, description, category_id, type, is_active)
+                VALUES ($1, $2, $3, 'game', true)
+                RETURNING id
+            ''', 'PUBG Mobile', 'شحن UC وبطاقات عضوية - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
+            
+            # خيارات ببجي
+            pubg_options = [
+                ('60 UC', 60, 0.99),
+                ('300 UC + 25 هدية', 325, 4.99),
+                ('600 UC + 60 هدية', 660, 9.99),
+                ('1500 UC + 300 هدية', 1800, 24.99),
+                ('3850 UC + 1020 هدية', 4870, 49.99),
+            ]
+            
+            for i, (name, qty, price) in enumerate(pubg_options):
+                await conn.execute('''
+                    INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
+                    VALUES ($1, $2, $3, $4, $5)
+                ''', pubg_id, name, qty, price, i)
+            
+            # 2. فري فاير
+            ff_id = await conn.fetchval('''
+                INSERT INTO applications (name, description, category_id, type, is_active)
+                VALUES ($1, $2, $3, 'game', true)
+                RETURNING id
+            ''', 'Free Fire', 'شحن الماس وعضويات - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
+            
+            ff_options = [
+                ('110 ماسة', 110, 0.99),
+                ('570 ماسة + 50 هدية', 620, 4.99),
+                ('1220 ماسة + 150 هدية', 1370, 9.99),
+                ('2420 ماسة + 450 هدية', 2870, 24.99),
+            ]
+            
+            for i, (name, qty, price) in enumerate(ff_options):
+                await conn.execute('''
+                    INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
+                    VALUES ($1, $2, $3, $4, $5)
+                ''', ff_id, name, qty, price, i)
+            
+            # 3. كلاش أوف كلانس
+            coc_id = await conn.fetchval('''
+                INSERT INTO applications (name, description, category_id, type, is_active)
+                VALUES ($1, $2, $3, 'game', true)
+                RETURNING id
+            ''', 'Clash of Clans', 'شحن الجواهر والتذكرة الذهبية - تأكد من إدخال إيميل Supercell ID بشكل صحيح', games_cat)
+            
+            coc_options = [
+                ('80 جوهرة', 80, 0.99),
+                ('500 جوهرة', 500, 4.99),
+                ('1200 جوهرة', 1200, 9.99),
+                ('2500 جوهرة', 2500, 19.99),
+                ('التذكرة الذهبية (شهر)', 1, 4.99),
+            ]
+            
+            for i, (name, qty, price) in enumerate(coc_options):
+                await conn.execute('''
+                    INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
+                    VALUES ($1, $2, $3, $4, $5)
+                ''', coc_id, name, qty, price, i)
+            
+            logging.info("✅ تم إضافة الألعاب بنجاح")
+            
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة الألعاب: {e}")
         return False
