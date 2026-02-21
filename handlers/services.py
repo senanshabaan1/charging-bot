@@ -22,8 +22,10 @@ class OrderStates(StatesGroup):
     choosing_variant = State()
 
 def get_back_keyboard():
+    """إنشاء زر رجوع فقط"""
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
+    builder.row(types.KeyboardButton(text="/رجوع"))
     return builder.as_markup(resize_keyboard=True)
 
 def get_damascus_time():
@@ -187,6 +189,11 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     
     buttons = []
     for app in apps:
+        # ✅ التأكد من وجود قيم صالحة (معالجة NULL)
+        unit_price = app['unit_price_usd'] or 0.0
+        profit_percentage = app.get('profit_percentage', 0) or 0
+        min_units = app.get('min_units', 1) or 1
+        
         # تعيين الأيقونة حسب نوع التطبيق
         if app['type'] == 'game':
             icon = "🎮"
@@ -196,8 +203,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             icon = "📱"
         
         # حساب السعر مع الخصم
-        profit_percentage = app.get('profit_percentage', 0)
-        final_price_usd = app['unit_price_usd'] * (1 + (profit_percentage / 100))
+        final_price_usd = unit_price * (1 + (profit_percentage / 100))
         
         # تطبيق الخصم
         discounted_price_usd = final_price_usd * (1 - discount/100)
@@ -206,9 +212,15 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         # عرض السعر مع إشارة الخصم
         if discount > 0:
             original_price = final_price_usd * current_rate
-            button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
+            if app['type'] == 'game' and min_units > 1:
+                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units}) (خصم {discount}%)"
+            else:
+                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
         else:
-            button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
+            if app['type'] == 'game' and min_units > 1:
+                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units})"
+            else:
+                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
         
         buttons.append(types.InlineKeyboardButton(
             text=button_text, 
@@ -283,19 +295,25 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     if not app:
         return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
     
+    # ✅ التأكد من وجود قيم صالحة
+    unit_price = app['unit_price_usd'] or 0.0
+    profit_percentage = app.get('profit_percentage', 0) or 0
+    min_units = app.get('min_units', 1) or 1
+    
     await state.update_data({
         'app': dict(app),
         'app_type': app_type,
         'current_rate': current_rate,
         'discount': discount,
-        'vip_level': vip_level
+        'vip_level': vip_level,
+        'unit_price': unit_price,
+        'min_units': min_units
     })
     
     # معالجة مختلفة حسب نوع التطبيق
     if app_type == 'service':
         # خدمة عادية - نطلب الكمية
-        profit_percentage = app.get('profit_percentage', 0)
-        final_unit_price_usd = app['unit_price_usd'] * (1 + (profit_percentage / 100))
+        final_unit_price_usd = unit_price * (1 + (profit_percentage / 100))
         
         # تطبيق الخصم
         discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
@@ -319,7 +337,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         await callback.message.answer(
             f"🏷 **الخدمة:** {app['name']}\n"
-            f"📦 **أقل كمية:** {app['min_units']}\n"
+            f"📦 **أقل كمية:** {min_units}\n"
             f"{price_text}\n\n"
             f"**الرجاء إدخال الكمية المطلوبة:**",
             reply_markup=get_back_keyboard(),
@@ -328,22 +346,26 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     
     elif app_type == 'game' or app_type == 'subscription':
         # لعبة أو اشتراك - نعرض الفئات
-        from database import get_app_variants
-        variants = await get_app_variants(db_pool, app_id)
+        from database import get_product_options
+        variants = await get_product_options(db_pool, app_id)
         
         if not variants:
             return await callback.answer("لا توجد فئات متاحة لهذا التطبيق حالياً", show_alert=True)
         
         builder = InlineKeyboardBuilder()
         for v in variants:
-            price_with_profit = v['price_usd'] * (1 + (app['profit_percentage'] / 100))
+            # ✅ التأكد من وجود قيم صالحة للفئات
+            v_price = v['price_usd'] or 0.0
+            price_with_profit = v_price * (1 + (profit_percentage / 100))
             discounted_price_usd = price_with_profit * (1 - discount/100)
             price_syp = discounted_price_usd * current_rate
             
             if app_type == 'game':
-                button_text = f"📦 {v['quantity']} وحدة\n{price_syp:,.0f} ل.س"
+                qty_text = v.get('quantity', 1) or 1
+                button_text = f"📦 {qty_text} وحدة\n{price_syp:,.0f} ل.س"
             else:  # subscription
-                button_text = f"⏱️ {v['duration_days']} يوم\n{price_syp:,.0f} ل.س"
+                days = v.get('duration_days', 30) or 30
+                button_text = f"⏱️ {days} يوم\n{price_syp:,.0f} ل.س"
             
             if discount > 0:
                 button_text += f" (خصم {discount}%)"
@@ -372,8 +394,8 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     """اختيار فئة فرعية (للألعاب والاشتراكات)"""
     variant_id = int(callback.data.split("_")[1])
     
-    from database import get_app_variant
-    variant = await get_app_variant(db_pool, variant_id)
+    from database import get_product_option
+    variant = await get_product_option(db_pool, variant_id)
     
     if not variant:
         return await callback.answer("هذه الفئة غير متوفرة", show_alert=True)
@@ -383,9 +405,11 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     current_rate = data['current_rate']
     discount = data['discount']
     vip_level = data['vip_level']
+    profit_percentage = app.get('profit_percentage', 0) or 0
     
     # حساب السعر مع الربح والخصم
-    price_with_profit = variant['price_usd'] * (1 + (app['profit_percentage'] / 100))
+    v_price = variant['price_usd'] or 0.0
+    price_with_profit = v_price * (1 + (profit_percentage / 100))
     discounted_price_usd = price_with_profit * (1 - discount/100)
     total_syp = discounted_price_usd * current_rate
     
@@ -398,15 +422,24 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
         'final_price_usd': discounted_price_usd,
         'total_syp': total_syp,
         'original_total_syp': original_total_syp,
-        'qty': variant.get('quantity', 1)  # للتوافق
+        'qty': variant.get('quantity', 1) or 1
     })
+    
+    # رسالة تعليمات حسب نوع اللعبة
+    instructions = ""
+    if app['name'].lower() in ['pubg mobile', 'free fire']:
+        instructions = "🎮 **يرجى إرسال ID اللاعب الخاص بك:**\n"
+    elif app['name'].lower() == 'clash of clans':
+        instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**\n"
+    else:
+        instructions = "🎯 **يرجى إرسال الحساب المستهدف:**\n"
     
     await callback.message.answer(
         f"📋 **تفاصيل الطلب**\n\n"
         f"📱 **التطبيق:** {app['name']}\n"
         f"📦 **الفئة:** {variant['name']}\n"
-        f"💰 **السعر:** {total_syp:,.0f} ل.س\n"
-        f"🎯 **يرجى إرسال ID الحساب المستهدف:**",
+        f"💰 **السعر:** {total_syp:,.0f} ل.س\n\n"
+        f"{instructions}",
         reply_markup=get_back_keyboard()
     )
     await state.set_state(OrderStates.target_id)
@@ -431,10 +464,11 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     current_rate = data.get('current_rate', 115)
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
+    min_units = data.get('min_units', 1) or 1
     
-    if qty < app['min_units']:
+    if qty < min_units:
         return await message.answer(
-            f"⚠️ أقل كمية مسموح بها هي {app['min_units']}.",
+            f"⚠️ أقل كمية مسموح بها هي {min_units}.",
             reply_markup=get_back_keyboard()
         )
     
@@ -484,10 +518,19 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     else:
         price_message = f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س"
     
+    # رسالة تعليمات حسب نوع اللعبة
+    app_name = app['name'].lower()
+    if 'pubg' in app_name or 'free fire' in app_name:
+        instructions = "🎮 **الرجاء إرسال ID اللاعب الخاص بك:**\n"
+    elif 'clash' in app_name:
+        instructions = "📧 **الرجاء إرسال إيميل Supercell ID الخاص بك:**\n"
+    else:
+        instructions = "🎯 **الرجاء إرسال الحساب المستهدف:**\n"
+    
     await message.answer(
         f"✅ **الكمية مقبولة**\n\n"
         f"{price_message}\n\n"
-        f"**الرجاء إرسال (ID الحساب) المراد شحنه:**",
+        f"{instructions}",
         reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
@@ -538,6 +581,14 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     else:
         price_detail = f"💰 **السعر الإجمالي:** {data['total_syp']:,.0f} ل.س"
     
+    # إضافة تحذيرات حسب نوع الخدمة
+    app_name = data['app']['name'].lower()
+    warnings = ""
+    if 'pubg' in app_name or 'free fire' in app_name:
+        warnings = "\n⚠️ **تنبيه:** غير مسؤولين عن أي ID خاطئ. تأكد من صحة ID اللاعب قبل الإرسال.\n"
+    elif 'clash' in app_name:
+        warnings = "\n⚠️ **تنبيه:** تأكد من صحة إيميل Supercell ID الخاص بك.\n"
+    
     msg = (
         f"📋 **تفاصيل الطلب:**\n\n"
         f"🔹 **التطبيق:** {data['app']['name']}\n"
@@ -550,7 +601,8 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     
     msg += (
         f"🔹 **المستهدف:** `{target_id}`\n"
-        f"{price_detail}\n\n"
+        f"{price_detail}\n"
+        f"{warnings}\n"
         f"💳 **سيتم خصم المبلغ من رصيدك.**\n"
         f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
     )
@@ -600,8 +652,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data['app']['name'],
                 variant['id'],
                 variant['name'],
-                variant.get('quantity', 0),
-                variant.get('duration_days', 0),
+                variant.get('quantity', 1) or 1,
+                variant.get('duration_days', 0) or 0,
                 data['final_price_usd'] if 'final_price_usd' in data else data['discounted_unit_price_usd'],
                 data['total_syp'],
                 data['target_id'],
@@ -614,7 +666,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'username': callback.from_user.username or 'غير معروف',
                     'app_name': data['app']['name'],
                     'variant_name': variant['name'],
-                    'quantity': variant.get('quantity', 0),
+                    'quantity': variant.get('quantity', 1) or 1,
                     'total_syp': data['total_syp'],
                     'target_id': data['target_id'],
                 }
@@ -667,7 +719,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
-        f"📋 **الوقت المتوقع 5 دقائق.**\n"
+        f"📋 **سيتم التنفيذ خلال 24 ساعة.**\n"
         f"⭐ **نقاط مضافة:** +{points}"
         f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}",
