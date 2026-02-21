@@ -249,25 +249,19 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     if not app:
         return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
     
-    # ✅ تحويل Decimal إلى float
-    unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
-    profit_percentage = float(app.get('profit_percentage', 0) or 0)
-    min_units = int(app.get('min_units', 1) or 1)
-    
     await state.update_data({
         'app': dict(app),
         'app_type': app_type,
         'current_rate': current_rate,
         'discount': discount,
-        'vip_level': vip_level,
-        'unit_price': unit_price,
-        'min_units': min_units
+        'vip_level': vip_level
     })
     
     # معالجة مختلفة حسب نوع التطبيق
     if app_type == 'service':
         # خدمة عادية - نطلب الكمية
-        final_unit_price_usd = unit_price * (1 + (profit_percentage / 100))
+        profit_percentage = app.get('profit_percentage', 0)
+        final_unit_price_usd = app['unit_price_usd'] * (1 + (profit_percentage / 100))
         
         # تطبيق الخصم
         discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
@@ -291,7 +285,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         await callback.message.answer(
             f"🏷 **الخدمة:** {app['name']}\n"
-            f"📦 **أقل كمية:** {min_units}\n"
+            f"📦 **أقل كمية:** {app['min_units']}\n"
             f"{price_text}\n\n"
             f"**الرجاء إدخال الكمية المطلوبة:**",
             reply_markup=get_back_keyboard(),
@@ -303,23 +297,19 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         from database import get_product_options
         variants = await get_product_options(db_pool, app_id)
         
-        if not variants:
+        if not options:
             return await callback.answer("لا توجد فئات متاحة لهذا التطبيق حالياً", show_alert=True)
         
         builder = InlineKeyboardBuilder()
-        for v in variants:
-            # ✅ تحويل Decimal إلى float
-            v_price = float(v['price_usd']) if v['price_usd'] is not None else 0.0
-            price_with_profit = v_price * (1 + (profit_percentage / 100))
+        for opt in options:
+            price_with_profit = opt['price_usd'] * (1 + (app['profit_percentage'] / 100))
             discounted_price_usd = price_with_profit * (1 - discount/100)
             price_syp = discounted_price_usd * current_rate
-            
+                        
             if app_type == 'game':
-                qty_text = int(v.get('quantity', 1) or 1)
-                button_text = f"📦 {qty_text} وحدة\n{price_syp:,.0f} ل.س"
+                button_text = f"📦 {opt['name']}\n{price_syp:,.0f} ل.س"
             else:  # subscription
-                days = int(v.get('duration_days', 30) or 30)
-                button_text = f"⏱️ {days} يوم\n{price_syp:,.0f} ل.س"
+                button_text = f"⏱️ {opt['name']}\n{price_syp:,.0f} ل.س"
             
             if discount > 0:
                 button_text += f" (خصم {discount}%)"
