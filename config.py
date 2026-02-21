@@ -44,7 +44,7 @@ if DATABASE_URL:
         print(f"⚠️ Error parsing DATABASE_URL: {e}, using fallback config")
         # بيانات Supabase من متغيرات البيئة الفردية
         DB_CONFIG = {
-            "host": os.getenv("DB_HOST", "aws-1-ap-northeast-1.pooler.supabase.com"),
+            "host": os.getenv("DB_HOST", "aws-0-us-west-2.pooler.supabase.com"),
             "port": int(os.getenv("DB_PORT", "6543")),
             "database": os.getenv("DB_NAME", "postgres"),
             "user": os.getenv("DB_USER", "postgres"),
@@ -53,7 +53,7 @@ if DATABASE_URL:
 else:
     print("⚠️ No DATABASE_URL found, using local config")
     DB_CONFIG = {
-        "host": os.getenv("DB_HOST", "aws-1-ap-northeast-1.pooler.supabase.com"),
+        "host": os.getenv("DB_HOST", "DB_HOST", "aws-0-us-west-2.pooler.supabase.com"),
         "port": int(os.getenv("DB_PORT", "6543")),
         "database": os.getenv("DB_NAME", "postgres"),
         "user": os.getenv("DB_USER", "postgres"),
