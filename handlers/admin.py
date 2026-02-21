@@ -10,6 +10,7 @@ import asyncio
 import logging
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.deposit import get_damascus_time
+from aiogram.enums import ParseMode
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
@@ -1120,7 +1121,7 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
                 await bot.send_message(
                     user['user_id'],
                     f"📢 **رسالة من الإدارة:**\n\n{message.text}",
-                    parse_mode="Markdown"  # 👈 أضف هذا السطر
+                    parse_mode=ParseMode.MARKDOWN  # 👈 استخدم ParseMode.MARKDOWN
                 )
                 success += 1
                 
@@ -1129,8 +1130,15 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
                 
                 await asyncio.sleep(0.05)
             except Exception as e:
-                logger.error(f"فشل إرسال للمستخدم {user['user_id']}: {e}")
-                failed += 1
+                # إذا فشل، جرب بدون تنسيق
+                try:
+                    await bot.send_message(
+                        user['user_id'],
+                        f"📢 رسالة من الإدارة:\n\n{message.text}"
+                    )
+                    success += 1
+                except:
+                    failed += 1
         
         await progress_msg.delete()
         await message.answer(
@@ -1138,7 +1146,7 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
             f"📊 **الإحصائيات:**\n"
             f"• ✅ تم الإرسال: {success}\n"
             f"• ❌ فشل الإرسال: {failed}",
-            parse_mode="Markdown"
+            parse_mode=ParseMode.MARKDOWN
         )
         
         await state.clear()
@@ -1249,7 +1257,7 @@ async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext,
         await bot.send_message(
             user_id,
             f"✉️ **رسالة من الإدارة**\n\n{text}",
-            parse_mode="Markdown"  # 👈 أضف هذا
+            parse_mode=ParseMode.MARKDOWN  # 👈 استخدم ParseMode.MARKDOWN
         )
         
         # تسجيل في logs
@@ -1265,26 +1273,9 @@ async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext,
         )
         
     except Exception as e:
-        # إذا فشل Markdown، جرب HTML
-        try:
-            # تحويل Markdown لـ HTML بشكل بسيط
-            html_text = text.replace('**', '<b>', 1)
-            html_text = html_text.replace('**', '</b>', 1)
-            
-            await bot.send_message(
-                user_id,
-                f"<b>✉️ رسالة من الإدارة</b>\n\n{html_text}",
-                parse_mode="HTML"
-            )
-            
-            await callback.message.edit_text(
-                f"✅ **تم إرسال الرسالة بنجاح (بصيغة HTML)**\n\n"
-                f"إلى: @{username} (`{user_id}`)"
-            )
-        except:
-            await callback.message.edit_text(
-                f"❌ **فشل إرسال الرسالة**\n\nالسبب: {str(e)}"
-            )
+        await callback.message.edit_text(
+            f"❌ **فشل إرسال الرسالة**\n\nالسبب: {str(e)}"
+        )
     
     await state.clear()
 
