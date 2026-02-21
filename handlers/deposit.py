@@ -50,7 +50,22 @@ async def back_from_deposit(callback: types.CallbackQuery):
         "تم العودة للقائمة الرئيسية.",
         reply_markup=get_back_keyboard()
     )
-
+@router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel"]))
+async def deposit_back_handler(message: types.Message, state: FSMContext):
+    """الرجوع من عملية الشحن"""
+    current_state = await state.get_state()
+    
+    if current_state is not None:
+        await state.clear()
+        await message.answer(
+            "✅ تم إلغاء عملية الشحن",
+            reply_markup=get_back_keyboard()
+        )
+    else:
+        await message.answer(
+            "👋 أنت في القائمة الرئيسية",
+            reply_markup=get_back_keyboard()
+        )
 @router.callback_query(F.data.startswith("m_"))
 async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء عملية الشحن - مع جلب سعر الصرف من قاعدة البيانات"""
