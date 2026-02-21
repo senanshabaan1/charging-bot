@@ -365,72 +365,17 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح (مع تفصيل حسب مستوى VIP)"""
+    """تقرير الأرباح (مبسط وشامل)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.message.edit_text("⏳ جاري حساب الأرباح...")
     
-    # ✅ أولاً: جلب سعر الصرف
-    from database import get_exchange_rate
-    exchange_rate = await get_exchange_rate(db_pool)
-    
     async with db_pool.acquire() as conn:
-        # 1. أرباح كل تطبيق
-        apps_profits = await conn.fetch('''
-            SELECT 
-                a.name as app_name,
-                a.unit_price_usd as cost_price_usd,
-                a.profit_percentage,
-                COUNT(o.id) as sales_count,
-                COALESCE(SUM(o.quantity), 0) as total_units,
-                COALESCE(SUM(o.total_amount_syp), 0) as total_revenue_syp,
-                
-                -- السعر قبل الخصم
-                (a.unit_price_usd * (1 + a.profit_percentage / 100)) as price_before_discount_usd,
-                
-                -- الربح المتوقع قبل الخصم
-                (a.unit_price_usd * (1 + a.profit_percentage / 100) - a.unit_price_usd) as expected_profit_per_unit_usd,
-                
-                -- الربح الفعلي بعد خصم المستخدم
-                (o.unit_price_usd - a.unit_price_usd) as actual_profit_per_unit_usd,
-                
-                -- نسبة الخصم التي حصل عليها المستخدم
-                ((a.unit_price_usd * (1 + a.profit_percentage / 100) - o.unit_price_usd) / 
-                 (a.unit_price_usd * (1 + a.profit_percentage / 100)) * 100) as discount_percent
-                 
-            FROM applications a
-            JOIN orders o ON a.id = o.app_id AND o.status = 'completed'
-            GROUP BY a.id, a.name, a.unit_price_usd, a.profit_percentage, o.unit_price_usd
-            ORDER BY a.name
-        ''')
-        
-        # 2. تحليل الخصومات حسب مستوى VIP
-        vip_analysis = await conn.fetch('''
-            SELECT 
-                u.vip_level,
-                COUNT(o.id) as orders_count,
-                COALESCE(SUM(o.quantity), 0) as units_sold,
-                COALESCE(SUM(o.total_amount_syp), 0) as revenue_syp,
-                
-                -- إجمالي الخصم الممنوح لهذا المستوى
-                SUM(
-                    (a.unit_price_usd * (1 + a.profit_percentage / 100) - o.unit_price_usd) * o.quantity * $1
-                ) as total_discount_given_usd
-                
-            FROM orders o
-            JOIN applications a ON o.app_id = a.id
-            JOIN users u ON o.user_id = u.user_id
-            WHERE o.status = 'completed'
-            GROUP BY u.vip_level
-            ORDER BY u.vip_level
-        ''', exchange_rate)  # ✅ exchange_rate معرف الآن
-        
-        # 3. إحصائيات عامة
+        # 1. إحصائيات عامة
         totals = await conn.fetchrow('''
             SELECT 
-                COUNT(DISTINCT o.app_id) as apps_with_sales,
-                COUNT(o.id) as total_orders,
+                COUNT(DISTINCT o.id) as total_orders,
                 COALESCE(SUM(o.quantity), 0) as total_units,
                 COALESCE(SUM(o.total_amount_syp), 0) as total_revenue_syp,
                 
@@ -452,93 +397,112 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             FROM orders o
             JOIN applications a ON o.app_id = a.id
             WHERE o.status = 'completed'
-        ''', exchange_rate)  # ✅ exchange_rate معرف الآن
+        ''', exchange_rate)
+        
+        # 2. تحليل حسب مستوى VIP
+        vip_analysis = await conn.fetch('''
+            SELECT 
+                u.vip_level,
+                COUNT(o.id) as orders_count,
+                COALESCE(SUM(o.quantity), 0) as units_sold,
+                COALESCE(SUM(o.total_amount_syp), 0) as revenue_syp,
                 
-        # 4. جلب سعر الصرف
+                -- إجمالي الخصم الممنوح لهذا المستوى
+                SUM(
+                    ((a.unit_price_usd * (1 + a.profit_percentage / 100) - o.unit_price_usd) * o.quantity * $1)
+                ) as total_discount_given_syp
+                
+            FROM orders o
+            JOIN applications a ON o.app_id = a.id
+            JOIN users u ON o.user_id = u.user_id
+            WHERE o.status = 'completed'
+            GROUP BY u.vip_level
+            ORDER BY u.vip_level
+        ''', exchange_rate)
+        
+        # 3. أكثر 6 تطبيقات شراء
+        top_apps = await conn.fetch('''
+            SELECT 
+                a.name,
+                COUNT(o.id) as order_count,
+                COALESCE(SUM(o.quantity), 0) as total_units,
+                COALESCE(SUM(o.total_amount_syp), 0) as revenue_syp
+            FROM applications a
+            JOIN orders o ON a.id = o.app_id AND o.status = 'completed'
+            GROUP BY a.id, a.name
+            ORDER BY order_count DESC, revenue_syp DESC
+            LIMIT 6
+        ''')
+        
+        # 4. جلب سعر الصرف (للحسابات فقط)
         from database import get_exchange_rate
         exchange_rate = await get_exchange_rate(db_pool)
     
-    # بناء نص التقرير
-    text = "💰 **تقرير الأرباح التفصيلي**\n\n"
+    # التحقق من وجود بيانات
+    if not totals or totals['total_orders'] == 0:
+        await callback.message.edit_text("📊 لا توجد مبيعات مكتملة بعد.")
+        return
     
-    if totals and totals['total_orders'] > 0:
-        # ===== الإجماليات =====
-        expected_profit = totals['expected_profit_syp'] or 0
-        actual_profit = totals['actual_profit_syp'] or 0
-        total_discounts = totals['total_discounts_syp'] or 0
-        profit_loss_percent = ((actual_profit - expected_profit) / expected_profit * 100) if expected_profit > 0 else 0
+    # حساب نسبة تأثير الخصم
+    expected_profit = totals['expected_profit_syp'] or 0
+    actual_profit = totals['actual_profit_syp'] or 0
+    total_discounts = totals['total_discounts_syp'] or 0
+    profit_loss_percent = ((actual_profit - expected_profit) / expected_profit * 100) if expected_profit > 0 else 0
+    
+    # نسبة الخصم من الإيرادات
+    discount_percent_of_revenue = (total_discounts / totals['total_revenue_syp'] * 100) if totals['total_revenue_syp'] > 0 else 0
+    
+    # بناء نص التقرير
+    text = (
+        "💰 **تقرير الأرباح**\n\n"
         
-        text += (
-            f"📊 **الإجمالي الكلي**\n"
-            f"• إجمالي الطلبات: {totals['total_orders']}\n"
-            f"• إجمالي الوحدات: {totals['total_units']}\n"
-            f"• الإيرادات: {totals['total_revenue_syp']:,.0f} ل.س\n\n"
-            
-            f"📈 **تحليل الأرباح:**\n"
-            f"• الربح المتوقع (بدون خصم): {expected_profit:,.0f} ل.س\n"
-            f"• الربح الفعلي (بعد الخصم): {actual_profit:,.0f} ل.س\n"
-            f"• الخصومات الممنوحة: {total_discounts:,.0f} ل.س\n"
-            f"• نسبة تأثير الخصم: {abs(profit_loss_percent):.1f}% ({'🔻' if profit_loss_percent < 0 else '✅'})\n\n"
-        )
+        "📊 **إجمالي عام**\n"
+        f"• الطلبات: {totals['total_orders']}\n"
+        f"• الوحدات المباعة: {totals['total_units']}\n"
+        f"• الإيرادات: {totals['total_revenue_syp']:,.0f} ل.س\n\n"
         
-        # ===== تحليل حسب مستوى VIP =====
-        if vip_analysis:
-            text += "👑 **تحليل حسب مستوى VIP**\n"
-            vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"]
-            
-            for vip in vip_analysis:
-                level = vip['vip_level']
-                icon = vip_icons[level] if level < len(vip_icons) else "⭐"
-                discount_syp = vip['total_discount_given_usd'] or 0
-                
-                text += (
-                    f"{icon} **VIP {level}**\n"
-                    f"  • طلبات: {vip['orders_count']}\n"
-                    f"  • خصومات: {discount_syp:,.0f} ل.س\n"
-                )
-            text += "\n"
+        "📈 **تحليل الأرباح**\n"
+        f"• الربح المتوقع: {expected_profit:,.0f} ل.س\n"
+        f"• الربح الفعلي: {actual_profit:,.0f} ل.س\n"
+        f"• الخصومات: {total_discounts:,.0f} ل.س\n"
+        f"• تأثير الخصم: {abs(profit_loss_percent):.1f}% ({'🔻' if profit_loss_percent < 0 else '✅'})\n\n"
+    )
+    
+    # تحليل حسب مستوى VIP
+    if vip_analysis:
+        text += "👑 **تحليل VIP**\n"
+        vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"]
         
-        # ===== أرباح كل تطبيق =====
-        text += "📱 **أرباح التطبيقات**\n\n"
-        
-        for app in apps_profits:
-            cost_usd = app['cost_price_usd']
-            profit_percent = app['profit_percentage']
-            price_before = app['price_before_discount_usd']
-            expected_profit_unit = app['expected_profit_per_unit_usd'] * exchange_rate
-            actual_profit_unit = app['actual_profit_per_unit_usd'] * exchange_rate
-            discount = app['discount_percent'] or 0
-            units = app['total_units']
-            
-            # إجمالي أرباح هذا التطبيق
-            total_expected = expected_profit_unit * units
-            total_actual = actual_profit_unit * units
-            total_discount_app = total_expected - total_actual
+        for vip in vip_analysis:
+            level = vip['vip_level']
+            icon = vip_icons[level] if level < len(vip_icons) else "⭐"
+            discount_syp = vip['total_discount_given_syp'] or 0
             
             text += (
-                f"**{app['app_name']}**\n"
-                f"• سعر التكلفة: ${cost_usd:.3f}\n"
-                f"• نسبة الربح: {profit_percent}%\n"
-                f"• سعر البيع قبل الخصم: ${price_before:.3f}\n"
-                f"• خصم العملاء: {discount:.1f}%\n"
-                f"• الوحدات المباعة: {units}\n"
-                f"• الربح المتوقع: {total_expected:,.0f} ل.س\n"
-                f"• الربح الفعلي: {total_actual:,.0f} ل.س\n"
-                f"• الخصم الممنوح: {total_discount_app:,.0f} ل.س\n\n"
+                f"{icon} VIP {level}\n"
+                f"  • طلبات: {vip['orders_count']}\n"
+                f"  • خصومات: {discount_syp:,.0f} ل.س\n"
             )
-        
-        # ===== نسبة الخصم الإجمالية =====
-        discount_percent_of_revenue = (total_discounts / totals['total_revenue_syp'] * 100) if totals['total_revenue_syp'] > 0 else 0
-        
-        text += (
-            f"📊 **ملخص الخصومات**\n"
-            f"• نسبة الخصم من الإيرادات: {discount_percent_of_revenue:.1f}%\n"
-            f"• صافي الربح بعد الخصم: {actual_profit:,.0f} ل.س\n"
-            f"• سعر الصرف: {exchange_rate:,.0f} ل.س = 1$"
-        )
-        
-    else:
-        text += "لا توجد مبيعات مكتملة بعد."
+        text += "\n"
+    
+    # أكثر التطبيقات شراء
+    if top_apps:
+        text += "📱 **الأكثر شراء**\n"
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣"]
+        for i, app in enumerate(top_apps):
+            medal = medals[i] if i < len(medals) else "•"
+            text += (
+                f"{medal} **{app['name']}**\n"
+                f"  طلبات: {app['order_count']} | وحدات: {app['total_units']}\n"
+            )
+        text += "\n"
+    
+    # ملخص الخصومات
+    text += (
+        "📊 **ملخص الخصومات**\n"
+        f"• نسبة الخصم من الإيرادات: {discount_percent_of_revenue:.1f}%\n"
+        f"• صافي الربح: {actual_profit:,.0f} ل.س"
+    )
     
     await callback.message.edit_text(text)
 
