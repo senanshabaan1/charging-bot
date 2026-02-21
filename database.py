@@ -1918,17 +1918,26 @@ async def update_report_setting(pool, key, value):
         logging.error(f"❌ خطأ في تحديث إعداد التقرير {key}: {e}")
      # أضف الألعاب الأساسية
 async def init_games(pool):
-    async with pool.acquire() as conn:
-        # جلب قسم الألعاب
-        games_cat = await conn.fetchval("SELECT id FROM categories WHERE name = 'games'")
-        
-        if not games_cat:
-            # إذا ما في قسم ألعاب، نضيفه
-            games_cat = await conn.fetchval('''
-                INSERT INTO categories (name, display_name, icon, type, sort_order)
-                VALUES ('games', '🎮 ألعاب', '🎮', 'game', 2)
-                RETURNING id
-            ''')
+    """إضافة الألعاب الأساسية مع خياراتها (تشغل مرة واحدة)"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق إذا كانت الألعاب موجودة مسبقاً
+            existing_games = await conn.fetchval("SELECT COUNT(*) FROM applications WHERE type = 'game'")
+            if existing_games > 0:
+                logging.info("🎮 الألعاب موجودة مسبقاً، تخطي الإضافة")
+                return
+            
+            # جلب قسم الألعاب بدون استخدام عمود type
+            games_cat = await conn.fetchval("SELECT id FROM categories WHERE name = 'games'")
+            
+            if not games_cat:
+                # إذا ما في قسم ألعاب، نضيفه بدون عمود type
+                games_cat = await conn.fetchval('''
+                    INSERT INTO categories (name, display_name, icon, sort_order)
+                    VALUES ('games', '🎮 ألعاب', '🎮', 2)
+                    RETURNING id
+                ''')
+                logging.info("✅ تم إضافة قسم الألعاب")
         
         # 1. ببجي موبايل
         pubg_id = await conn.fetchval('''
