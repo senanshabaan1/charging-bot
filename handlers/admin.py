@@ -1128,44 +1128,39 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
         original_text = message.text
         logger.info(f"📝 النص الأصلي: {original_text}")
         
-        # تنسيق النص للـ HTML
-        formatted_text = format_message_text(original_text)
-        logger.info(f"📝 النص بعد التنسيق: {formatted_text}")
-        
-        # التحقق من وجود تنسيق
-        has_formatting = formatted_text != original_text
-        
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
             user_count = len(users)
-            logger.info(f"👥 عدد المستخدمين: {user_count}")
         
         if user_count == 0:
             await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
             await state.clear()
             return
         
-        # إرسال معاينة للأدمن أولاً
+        # ✅ معاينة باستخدام HTML
         try:
-            preview_text = f"<b>📢 معاينة الرسالة:</b>\n\n{formatted_text}"
+            # تحويل Markdown إلى HTML بشكل يدوي بسيط
+            html_text = original_text.replace('**', '<b>', 1)
+            html_text = html_text.replace('**', '</b>', 1)
+            
             await bot.send_message(
                 message.from_user.id,
-                preview_text,
-                parse_mode=ParseMode.HTML  # ✅ استخدم ParseMode
+                f"<b>📢 معاينة الرسالة:</b>\n\n{html_text}",
+                parse_mode=ParseMode.HTML
             )
             logger.info("✅ المعاينة نجحت")
         except Exception as e:
             logger.error(f"❌ فشلت المعاينة: {e}")
-            await message.answer(
-                f"❌ خطأ في تنسيق الرسالة!\n\n{str(e)}\n\n"
-                f"تأكد من إغلاق جميع العلامات بشكل صحيح."
+            # إذا فشل HTML، نرسل نفس النص
+            await bot.send_message(
+                message.from_user.id,
+                f"📢 معاينة الرسالة:\n\n{original_text}"
             )
-            return
         
-        # تأكيد قبل الإرسال
+        # تأكيد الإرسال
         confirm_builder = InlineKeyboardBuilder()
         confirm_builder.row(
-            types.InlineKeyboardButton(text="✅ تأكيد الإرسال للجميع", callback_data="confirm_broadcast"),
+            types.InlineKeyboardButton(text="✅ تأكيد الإرسال للجميع", callback_data="confirm_broadcast_final"),
             types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast")
         )
         
@@ -1175,26 +1170,18 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
             reply_markup=confirm_builder.as_markup()
         )
         
-        # حفظ البيانات في الحالة
-        await state.update_data(
-            broadcast_text=original_text,
-            broadcast_formatted=formatted_text,
-            broadcast_has_formatting=has_formatting,
-            broadcast_users=user_count
-        )
+        await state.update_data(broadcast_text=original_text, broadcast_users=user_count)
         
     except Exception as e:
         logger.error(f"❌ خطأ عام: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
-@router.callback_query(F.data == "confirm_broadcast")
-async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
-    """تأكيد إرسال البث للجميع"""
+@router.callback_query(F.data == "confirm_broadcast_final")
+async def confirm_broadcast_final(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
+    """تأكيد إرسال البث"""
     data = await state.get_data()
-    original_text = data.get('broadcast_text')
-    formatted_text = data.get('broadcast_formatted')
-    has_formatting = data.get('broadcast_has_formatting', False)
+    text = data.get('broadcast_text')
     user_count = data.get('broadcast_users', 0)
     
     await callback.message.edit_text("⏳ جاري الإرسال...")
@@ -1205,25 +1192,35 @@ async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bo
     success = 0
     failed = 0
     
+    # تحويل بسيط لـ HTML
+    html_text = text
+    # **نص** -> <b>نص</b>
+    import re
+    html_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html_text)
+    # *نص* -> <i>نص</i>
+    html_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', html_text)
+    # `نص` -> <code>نص</code>
+    html_text = re.sub(r'`(.*?)`', r'<code>\1</code>', html_text)
+    
     for i, user in enumerate(users):
         if user['user_id'] == callback.from_user.id:
-            continue  # نتخطى الأدمن لأنه استلم المعاينة
+            continue
             
         try:
-            # محاولة إرسال مع HTML أولاً
+            # إرسال مع HTML
             await bot.send_message(
                 user['user_id'],
-                f"<b>📢 رسالة من الإدارة:</b>\n\n{formatted_text}",
+                f"<b>📢 رسالة من الإدارة:</b>\n\n{html_text}",
                 parse_mode=ParseMode.HTML
             )
             success += 1
         except Exception as e:
             logger.error(f"❌ فشل HTML للمستخدم {user['user_id']}: {e}")
-            # إذا فشل HTML، نرسل نص عادي
+            # إذا فشل، نرسل نص عادي
             try:
                 await bot.send_message(
                     user['user_id'],
-                    f"📢 رسالة من الإدارة:\n\n{original_text}"
+                    f"📢 رسالة من الإدارة:\n\n{text}"
                 )
                 success += 1
             except:
@@ -1241,10 +1238,10 @@ async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bo
         f"• ❌ فشل: {failed}\n\n"
     )
     
-    if has_formatting and success > 0:
+    if success > 0 and html_text != text:
         result_text += "✅ تم الإرسال مع تنسيق HTML"
     elif success > 0:
-        result_text += "ℹ️ تم الإرسال كنص عادي (بدون تنسيق)"
+        result_text += "ℹ️ تم الإرسال كنص عادي"
     
     await callback.message.edit_text(result_text)
     await state.clear()
