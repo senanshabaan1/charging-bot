@@ -1236,7 +1236,7 @@ async def send_custom_message_final(message: types.Message, state: FSMContext, b
     )
 
 @router.callback_query(F.data == "confirm_send_message")
-async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
     """تأكيد إرسال الرسالة"""
     data = await state.get_data()
     user_id = data['target_user']
@@ -1251,17 +1251,17 @@ async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext,
             parse_mode="Markdown"
         )
         
-        await callback.message.edit_text(
-            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
-            f"إلى: @{username} (`{user_id}`)"
-        )
-        
-        # تسجيل في logs
-        async with callback.message.bot.db_pool.acquire() as conn:
+        # تسجيل في logs - استخدم db_pool من المعاملات
+        async with db_pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO logs (user_id, action, details, created_at)
                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
             ''', callback.from_user.id, 'send_message', f'رسالة إلى {user_id}: {text[:50]}...')
+        
+        await callback.message.edit_text(
+            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
+            f"إلى: @{username} (`{user_id}`)"
+        )
         
     except Exception as e:
         await callback.message.edit_text(
