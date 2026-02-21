@@ -113,7 +113,14 @@ async def main():
     await init_db()
     await fix_points_history_table(db_pool)
     logging.info("✅ تم تهيئة قاعدة البيانات")
-    
+        # ===== إضافة الألعاب الأساسية =====
+    try:
+        from database import init_games
+        await init_games(db_pool)
+        logging.info("✅ تم التحقق من الألعاب")
+    except Exception as e:
+        logging.warning(f"⚠️ لم يتم إضافة الألعاب: {e}")
+    # ==================================
     # تحميل سعر الصرف
     try:
         from config import load_exchange_rate
