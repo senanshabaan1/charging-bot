@@ -221,6 +221,60 @@
         </div>
     </div>
 </div>
+    <div class="card shadow-sm mt-4">
+        <div class="card-header bg-white">
+            <h5>⚙️ خيارات المنتجات</h5>
+        </div>
+        <div class="card-body">
+            <ul class="nav nav-tabs" id="productTabs" role="tablist">
+                {% for app in applications %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link {{ 'active' if loop.first else '' }}" 
+                            id="tab-{{ app[0] }}" 
+                            data-bs-toggle="tab" 
+                            data-bs-target="#options-{{ app[0] }}" 
+                            type="button">
+                        {{ app[1] }}
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+            
+            <div class="tab-content mt-3">
+                {% for app in applications %}
+                <div class="tab-pane fade {{ 'show active' if loop.first else '' }}" 
+                     id="options-{{ app[0] }}">
+                     
+                    <div class="d-flex justify-content-between mb-3">
+                        <h6>خيارات {{ app[1] }}</h6>
+                        <button class="btn btn-sm btn-success" 
+                                onclick="showAddOptionModal({{ app[0] }}, '{{ app[1] }}')">
+                            <i class="fa fa-plus"></i> إضافة خيار
+                        </button>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>الخيار</th>
+                                    <th>الكمية</th>
+                                    <th>السعر ($)</th>
+                                    <th>السعر (ل.س)</th>
+                                    <th>الحالة</th>
+                                    <th>الإجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="options-{{ app[0] }}-tbody">
+                                <!-- يتم التعبئة عبر AJAX -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
 
 <!-- Modal لإضافة تطبيق جديد (معدل - كمية قابلة للتعديل) -->
 <div class="modal fade" id="addAppModal" tabindex="-1">
@@ -487,6 +541,87 @@
         // تنفيذ الحساب مرة واحدة عند التحميل
         calculatePrices();
     });
+
+function loadOptions(appId) {
+    fetch(`/api/options/${appId}`)
+        .then(res => res.json())
+        .then(data => {
+            const tbody = document.getElementById(`options-${appId}-tbody`);
+            if (!tbody) return;
+            
+            tbody.innerHTML = '';
+            
+            data.forEach(opt => {
+                const priceSyp = (opt.price_usd * {{ rate }}).toLocaleString();
+                const row = `
+                    <tr>
+                        <td>${opt.name}</td>
+                        <td>${opt.quantity}</td>
+                        <td>$${opt.price_usd.toFixed(2)}</td>
+                        <td>${priceSyp} ل.س</td>
+                        <td>
+                            <span class="badge bg-${opt.is_active ? 'success' : 'secondary'}">
+                                ${opt.is_active ? 'نشط' : 'معطل'}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-warning" onclick="editOption(${opt.id})">
+                                <i class="fa fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-${opt.is_active ? 'danger' : 'success'}" 
+                                    onclick="toggleOption(${opt.id})">
+                                <i class="fa fa-${opt.is_active ? 'ban' : 'check'}"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        });
+}
+
+// تحميل الخيارات عند فتح التبويب
+document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+    tab.addEventListener('shown.bs.tab', function (e) {
+        const appId = this.id.replace('tab-', '');
+        loadOptions(appId);
+    });
+});
+
+// تحميل أول تبويب تلقائياً
+window.addEventListener('load', function() {
+    const firstTab = document.querySelector('.nav-link.active');
+    if (firstTab) {
+        const appId = firstTab.id.replace('tab-', '');
+        loadOptions(appId);
+    }
+});
+
+// دوال مساعدة للخيارات (تحتاج تنفيذ)
+function showAddOptionModal(appId, appName) {
+    alert(`إضافة خيار لـ ${appName} - سيتم تنفيذها لاحقاً`);
+}
+
+function editOption(optionId) {
+    alert(`تعديل خيار ${optionId} - سيتم تنفيذها لاحقاً`);
+}
+
+function toggleOption(optionId) {
+    if (confirm('هل أنت متأكد من تغيير حالة هذا الخيار؟')) {
+        fetch(`/api/option/toggle/${optionId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    // إعادة تحميل التبويب النشط
+                    const activeTab = document.querySelector('.nav-link.active');
+                    if (activeTab) {
+                        const appId = activeTab.id.replace('tab-', '');
+                        loadOptions(appId);
+                    }
+                }
+            });
+    }
+}
 </script>
 </body>
 </html>
