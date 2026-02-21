@@ -1108,16 +1108,6 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_broadcast_msg)
 async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     try:
-        # تحويل النص من Markdown إلى HTML (إذا كان المستخدم كاتب **نص**)
-        import re
-        text = message.text
-        # تحويل **نص** إلى <b>نص</b>
-        text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-        # تحويل *نص* إلى <i>نص</i>
-        text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-        # تحويل `نص` إلى <code>نص</code>
-        text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
-        
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
         
@@ -1129,8 +1119,8 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
             try:
                 await bot.send_message(
                     user['user_id'],
-                    f"<b>📢 رسالة من الإدارة:</b>\n\n{text}",
-                    parse_mode="HTML"  # 👈 استخدم HTML
+                    f"📢 **رسالة من الإدارة:**\n\n{message.text}",
+                    parse_mode="Markdown"  # 👈 أضف هذا السطر
                 )
                 success += 1
                 
@@ -1144,16 +1134,16 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
         
         await progress_msg.delete()
         await message.answer(
-            f"<b>✅ تم إرسال الرسالة بنجاح</b>\n\n"
-            f"📊 <b>الإحصائيات:</b>\n"
+            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
+            f"📊 **الإحصائيات:**\n"
             f"• ✅ تم الإرسال: {success}\n"
             f"• ❌ فشل الإرسال: {failed}",
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
         
         await state.clear()
     except Exception as e:
-        await message.answer(f"❌ <b>حدث خطأ:</b> {str(e)}", parse_mode="HTML")
+        await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
 
 # ============= إرسال رسالة لمستخدم معين =============
