@@ -1108,6 +1108,12 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_broadcast_msg)
 async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     try:
+        # نص الرسالة الأصلي
+        original_text = message.text
+        
+        # محاولة إرسال مع Markdown أولاً
+        use_markdown = True
+        
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
         
@@ -1117,11 +1123,19 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
         
         for i, user in enumerate(users):
             try:
-                await bot.send_message(
-                    user['user_id'],
-                    f"📢 **رسالة من الإدارة:**\n\n{message.text}",
-                    parse_mode="Markdown"
-                )
+                if use_markdown:
+                    # محاولة إرسال مع Markdown
+                    await bot.send_message(
+                        user['user_id'],
+                        f"📢 **رسالة من الإدارة:**\n\n{original_text}",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    # إذا فشل Markdown، نرسل بدون تنسيق
+                    await bot.send_message(
+                        user['user_id'],
+                        f"📢 رسالة من الإدارة:\n\n{original_text}"
+                    )
                 success += 1
                 
                 if i % 10 == 0:
@@ -1129,19 +1143,38 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
                 
                 await asyncio.sleep(0.05)
             except Exception as e:
-                logger.error(f"فشل إرسال للمستخدم {user['user_id']}: {e}")
-                failed += 1
+                # إذا فشل بسبب Markdown، نجرب بدون تنسيق
+                if "can't parse entities" in str(e) and use_markdown:
+                    use_markdown = False
+                    # إعادة المحاولة للمستخدم الحالي بدون تنسيق
+                    try:
+                        await bot.send_message(
+                            user['user_id'],
+                            f"📢 رسالة من الإدارة:\n\n{original_text}"
+                        )
+                        success += 1
+                    except:
+                        failed += 1
+                else:
+                    logger.error(f"فشل إرسال للمستخدم {user['user_id']}: {e}")
+                    failed += 1
         
         await progress_msg.delete()
-        await message.answer(
+        
+        # رسالة النتيجة
+        result_text = (
             f"✅ **تم إرسال الرسالة بنجاح**\n\n"
             f"📊 **الإحصائيات:**\n"
             f"• ✅ تم الإرسال: {success}\n"
-            f"• ❌ فشل الإرسال: {failed}",
-            parse_mode="Markdown"
+            f"• ❌ فشل الإرسال: {failed}\n"
         )
         
+        if not use_markdown:
+            result_text += "\n⚠️ تم إرسال الرسالة بدون تنسيق Markdown بسبب أخطاء في النص."
+        
+        await message.answer(result_text, parse_mode="Markdown")
         await state.clear()
+        
     except Exception as e:
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
@@ -1244,29 +1277,42 @@ async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext,
     text = data['message_text']
     
     try:
-        # إرسال الرسالة
-        await bot.send_message(
-            user_id,
-            f"✉️ **رسالة من الإدارة**\n\n{text}",
-            parse_mode="Markdown"
-        )
+        # محاولة إرسال مع Markdown أولاً
+        try:
+            await bot.send_message(
+                user_id,
+                f"✉️ **رسالة من الإدارة**\n\n{text}",
+                parse_mode="Markdown"
+            )
+            markdown_used = True
+        except Exception as e:
+            if "can't parse entities" in str(e):
+                # إذا فشل بسبب Markdown، نرسل بدون تنسيق
+                await bot.send_message(
+                    user_id,
+                    f"✉️ رسالة من الإدارة:\n\n{text}"
+                )
+                markdown_used = False
+            else:
+                raise e
         
-        # تسجيل في logs - استخدم db_pool من المعاملات
+        # تسجيل في logs
         async with db_pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO logs (user_id, action, details, created_at)
                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
             ''', callback.from_user.id, 'send_message', f'رسالة إلى {user_id}: {text[:50]}...')
         
-        await callback.message.edit_text(
-            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
-            f"إلى: @{username} (`{user_id}`)"
-        )
+        result_text = f"✅ **تم إرسال الرسالة بنجاح**\n\nإلى: @{username} (`{user_id}`)"
+        
+        if not markdown_used:
+            result_text += "\n\n⚠️ تم إرسال الرسالة بدون تنسيق Markdown بسبب أخطاء في النص."
+        
+        await callback.message.edit_text(result_text)
         
     except Exception as e:
         await callback.message.edit_text(
-            f"❌ **فشل إرسال الرسالة**\n\n"
-            f"السبب: {str(e)}"
+            f"❌ **فشل إرسال الرسالة**\n\nالسبب: {str(e)}"
         )
     
     await state.clear()
