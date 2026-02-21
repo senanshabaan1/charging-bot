@@ -250,8 +250,14 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     if not app:
         return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
     
+    # ✅ تحويل جميع القيم من Decimal إلى float
+    app_dict = dict(app)
+    app_dict['unit_price_usd'] = float(app_dict['unit_price_usd']) if app_dict['unit_price_usd'] is not None else 0.0
+    app_dict['profit_percentage'] = float(app_dict.get('profit_percentage', 0) or 0)
+    app_dict['min_units'] = int(app_dict.get('min_units', 1) or 1)
+    
     await state.update_data({
-        'app': dict(app),
+        'app': app_dict,
         'app_type': app_type,
         'current_rate': current_rate,
         'discount': discount,
@@ -261,8 +267,8 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     # معالجة مختلفة حسب نوع التطبيق
     if app_type == 'service':
         # خدمة عادية - نطلب الكمية
-        profit_percentage = app.get('profit_percentage', 0)
-        final_unit_price_usd = app['unit_price_usd'] * (1 + (profit_percentage / 100))
+        profit_percentage = app_dict['profit_percentage']
+        final_unit_price_usd = app_dict['unit_price_usd'] * (1 + (profit_percentage / 100))
         
         # تطبيق الخصم
         discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
@@ -285,8 +291,8 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         await state.set_state(OrderStates.qty)
         
         await callback.message.answer(
-            f"🏷 **الخدمة:** {app['name']}\n"
-            f"📦 **أقل كمية:** {app['min_units']}\n"
+            f"🏷 **الخدمة:** {app_dict['name']}\n"
+            f"📦 **أقل كمية:** {app_dict['min_units']}\n"
             f"{price_text}\n\n"
             f"**الرجاء إدخال الكمية المطلوبة:**",
             reply_markup=get_back_keyboard(),
@@ -296,37 +302,41 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     elif app_type == 'game' or app_type == 'subscription':
         # لعبة أو اشتراك - نعرض الفئات
         from database import get_product_options
-        variants = await get_product_options(db_pool, app_id)  # 👈 هنا المتغير اسمه variants
+        variants = await get_product_options(db_pool, app_id)
         
-        if not variants:  # 👈 هنا التصحيح: variants بدل options
+        if not variants:
             return await callback.answer("لا توجد فئات متاحة لهذا التطبيق حالياً", show_alert=True)
         
         builder = InlineKeyboardBuilder()
-        for opt in variants:  # 👈 هنا opt بدل v
-            price_with_profit = opt['price_usd'] * (1 + (app['profit_percentage'] / 100))
+        for opt in variants:
+            # ✅ تحويل Decimal إلى float
+            opt_dict = dict(opt)
+            opt_price = float(opt_dict['price_usd']) if opt_dict['price_usd'] is not None else 0.0
+            
+            price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
             discounted_price_usd = price_with_profit * (1 - discount/100)
             price_syp = discounted_price_usd * current_rate
-                        
+            
             if app_type == 'game':
-                button_text = f"📦 {opt['name']}\n{price_syp:,.0f} ل.س"
+                button_text = f"📦 {opt_dict['name']}\n{price_syp:,.0f} ل.س"
             else:  # subscription
-                button_text = f"⏱️ {opt['name']}\n{price_syp:,.0f} ل.س"
+                button_text = f"⏱️ {opt_dict['name']}\n{price_syp:,.0f} ل.س"
             
             if discount > 0:
                 button_text += f" (خصم {discount}%)"
             
             builder.row(types.InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"var_{opt['id']}"  # 👈 هنا opt['id'] بدل v['id']
+                callback_data=f"var_{opt_dict['id']}"
             ))
         
         builder.row(types.InlineKeyboardButton(
             text="🔙 رجوع",
-            callback_data=f"cat_{app['category_id']}"
+            callback_data=f"cat_{app_dict['category_id']}"
         ))
         
         await callback.message.edit_text(
-            f"**{app['name']}**\n\n"
+            f"**{app_dict['name']}**\n\n"
             f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
             f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
             "🔸 **اختر الفئة المناسبة:**",
@@ -340,9 +350,9 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     variant_id = int(callback.data.split("_")[1])
     
     from database import get_product_option
-    variant = await get_product_option(db_pool, variant_id)
+    option = await get_product_option(db_pool, variant_id)
     
-    if not variant:
+    if not option:
         return await callback.answer("هذه الفئة غير متوفرة", show_alert=True)
     
     data = await state.get_data()
@@ -350,11 +360,12 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     current_rate = data['current_rate']
     discount = data['discount']
     vip_level = data['vip_level']
-    profit_percentage = float(app.get('profit_percentage', 0) or 0)
     
-    # ✅ تحويل Decimal إلى float
-    v_price = float(variant['price_usd']) if variant['price_usd'] is not None else 0.0
-    price_with_profit = v_price * (1 + (profit_percentage / 100))
+    # ✅ تحويل القيم إلى float
+    app_profit = float(app.get('profit_percentage', 0) or 0)
+    opt_price = float(option['price_usd']) if option['price_usd'] is not None else 0.0
+    
+    price_with_profit = opt_price * (1 + (app_profit / 100))
     discounted_price_usd = price_with_profit * (1 - discount/100)
     total_syp = discounted_price_usd * current_rate
     
@@ -362,12 +373,15 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     original_price_usd = price_with_profit
     original_total_syp = original_price_usd * current_rate
     
+    # ✅ تحويل الكمية إلى int
+    quantity = int(option.get('quantity', 1) or 1)
+    
     await state.update_data({
-        'variant': dict(variant),
+        'variant': dict(option),
         'final_price_usd': discounted_price_usd,
         'total_syp': total_syp,
         'original_total_syp': original_total_syp,
-        'qty': int(variant.get('quantity', 1) or 1)
+        'qty': quantity
     })
     
     # رسالة تعليمات حسب نوع اللعبة
@@ -382,7 +396,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     await callback.message.answer(
         f"📋 **تفاصيل الطلب**\n\n"
         f"📱 **التطبيق:** {app['name']}\n"
-        f"📦 **الفئة:** {variant['name']}\n"
+        f"📦 **الفئة:** {option['name']}\n"
         f"💰 **السعر:** {total_syp:,.0f} ل.س\n\n"
         f"{instructions}",
         reply_markup=get_back_keyboard()
@@ -570,7 +584,9 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     points = await get_points_per_order(db_pool)
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
-    logger.info(f"📊 نقاط الطلب: {points}, خصم VIP: {discount}%")
+    
+    # ✅ تحويل القيم إلى float للتأكد
+    total_syp = float(data['total_syp'])
     
     async with db_pool.acquire() as conn:
         # بدء transaction لضمان تكامل البيانات
@@ -578,7 +594,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
             # خصم الرصيد
             await conn.execute(
                 "UPDATE users SET balance = balance - $1, total_orders = total_orders + 1 WHERE user_id = $2",
-                data['total_syp'], callback.from_user.id
+                total_syp, callback.from_user.id
             )
             
             if 'variant' in data:
@@ -599,8 +615,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 variant['name'],
                 int(variant.get('quantity', 1) or 1),
                 int(variant.get('duration_days', 0) or 0),
-                data['final_price_usd'] if 'final_price_usd' in data else data['discounted_unit_price_usd'],
-                data['total_syp'],
+                float(data.get('final_price_usd', data.get('discounted_unit_price_usd', 0))),
+                total_syp,
                 data['target_id'],
                 points
                 )
