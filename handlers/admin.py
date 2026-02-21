@@ -1109,8 +1109,28 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_broadcast_msg)
 async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     try:
+        # 📝 سجل النص الأصلي
+        original_text = message.text
+        logger.info(f"📝 النص الأصلي: {original_text}")
+        
+        # جرب إرسال لنفسك أولاً (للتجربة)
+        try:
+            test_msg = await bot.send_message(
+                message.from_user.id,  # أرسل لنفس الأدمن
+                f"🧪 **رسالة تجريبية**\n\n{original_text}",
+                parse_mode="Markdown"
+            )
+            logger.info(f"✅ التجربة نجحت: {test_msg.message_id}")
+        except Exception as e:
+            logger.error(f"❌ فشلت التجربة: {e}")
+            await message.answer(f"❌ خطأ في التنسيق: {e}")
+            return
+        
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
+        
+        # استثني نفسك من الإرسال (لأنك جربتها قبل)
+        users = [u for u in users if u['user_id'] != message.from_user.id]
         
         success = 0
         failed = 0
@@ -1120,38 +1140,44 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
             try:
                 await bot.send_message(
                     user['user_id'],
-                    f"📢 **رسالة من الإدارة:**\n\n{message.text}",
-                    parse_mode=ParseMode.MARKDOWN  # 👈 استخدم ParseMode.MARKDOWN
+                    f"📢 **رسالة من الإدارة:**\n\n{original_text}",
+                    parse_mode="Markdown"
                 )
                 success += 1
-                
-                if i % 10 == 0:
-                    await progress_msg.edit_text(f"⏳ تم الإرسال: {success} / {len(users)}")
-                
-                await asyncio.sleep(0.05)
             except Exception as e:
-                # إذا فشل، جرب بدون تنسيق
+                logger.error(f"❌ فشل للمستخدم {user['user_id']}: {e}")
+                # جرب بدون تنسيق
                 try:
                     await bot.send_message(
                         user['user_id'],
-                        f"📢 رسالة من الإدارة:\n\n{message.text}"
+                        f"📢 رسالة من الإدارة:\n\n{original_text}"
                     )
                     success += 1
                 except:
                     failed += 1
+            
+            if i % 10 == 0:
+                await progress_msg.edit_text(f"⏳ تم الإرسال: {success} / {len(users)}")
+            
+            await asyncio.sleep(0.05)
         
         await progress_msg.delete()
-        await message.answer(
-            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
+        
+        # رسالة النتيجة
+        result = (
+            f"✅ **تم إرسال الرسالة**\n\n"
             f"📊 **الإحصائيات:**\n"
-            f"• ✅ تم الإرسال: {success}\n"
-            f"• ❌ فشل الإرسال: {failed}",
-            parse_mode=ParseMode.MARKDOWN
+            f"• ✅ نجح: {success}\n"
+            f"• ❌ فشل: {failed}\n\n"
+            f"**نص الرسالة:**\n{original_text}"
         )
         
+        await message.answer(result, parse_mode="Markdown")
         await state.clear()
+        
     except Exception as e:
-        await message.answer(f"❌ **حدث خطأ:** {str(e)}")
+        logger.error(f"❌ خطأ عام: {e}")
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
 # ============= إرسال رسالة لمستخدم معين =============
