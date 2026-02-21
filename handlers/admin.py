@@ -1109,34 +1109,42 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_broadcast_msg)
 async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     try:
-        # 📝 سجل النص الأصلي
         original_text = message.text
         logger.info(f"📝 النص الأصلي: {original_text}")
         
-        # جرب إرسال لنفسك أولاً (للتجربة)
-        try:
-            test_msg = await bot.send_message(
-                message.from_user.id,  # أرسل لنفس الأدمن
-                f"🧪 **رسالة تجريبية**\n\n{original_text}",
-                parse_mode="Markdown"
-            )
-            logger.info(f"✅ التجربة نجحت: {test_msg.message_id}")
-        except Exception as e:
-            logger.error(f"❌ فشلت التجربة: {e}")
-            await message.answer(f"❌ خطأ في التنسيق: {e}")
-            return
+        # ✅ التحقق من وجود تنسيق Markdown
+        has_markdown = any(mark in original_text for mark in ['**', '*', '`', '_', '__'])
         
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
         
-        # استثني نفسك من الإرسال (لأنك جربتها قبل)
-        users = [u for u in users if u['user_id'] != message.from_user.id]
+        # إرسال لنفسك أولاً (للتأكيد)
+        try:
+            test_msg = await bot.send_message(
+                message.from_user.id,
+                f"🧪 **معاينة الرسالة**\n\n{original_text}",
+                parse_mode="Markdown" if has_markdown else None
+            )
+            logger.info(f"✅ المعاينة نجحت: {test_msg.message_id}")
+        except Exception as e:
+            logger.error(f"❌ فشلت المعاينة: {e}")
+            await message.answer(
+                f"❌ خطأ في تنسيق الرسالة!\n\n{str(e)}\n\n"
+                f"تأكد من إغلاق جميع العلامات بشكل صحيح:\n"
+                f"• `**نص**` للنص العريض\n"
+                f"• `*نص*` للنص المائل\n"
+                f"• `` `نص` `` للكود"
+            )
+            return
         
         success = 0
         failed = 0
         progress_msg = await message.answer("⏳ جاري الإرسال...")
         
         for i, user in enumerate(users):
+            if user['user_id'] == message.from_user.id:
+                continue  # نتخطى نفسه لأنه جربنا قبلاً
+                
             try:
                 await bot.send_message(
                     user['user_id'],
@@ -1146,7 +1154,7 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
                 success += 1
             except Exception as e:
                 logger.error(f"❌ فشل للمستخدم {user['user_id']}: {e}")
-                # جرب بدون تنسيق
+                # إذا فشل Markdown، نرسل بدون تنسيق
                 try:
                     await bot.send_message(
                         user['user_id'],
@@ -1163,7 +1171,6 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
         
         await progress_msg.delete()
         
-        # رسالة النتيجة
         result = (
             f"✅ **تم إرسال الرسالة**\n\n"
             f"📊 **الإحصائيات:**\n"
@@ -1171,6 +1178,11 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
             f"• ❌ فشل: {failed}\n\n"
             f"**نص الرسالة:**\n{original_text}"
         )
+        
+        if has_markdown:
+            result += "\n\n✅ تم إرسالها مع تنسيق Markdown"
+        else:
+            result += "\n\nℹ️ تم إرسالها كنص عادي (بدون تنسيق)"
         
         await message.answer(result, parse_mode="Markdown")
         await state.clear()
