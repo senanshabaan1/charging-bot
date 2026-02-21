@@ -1043,6 +1043,47 @@ async def get_app_variant(pool, variant_id):
     except Exception as e:
         logging.error(f"❌ خطأ في جلب الفئة {variant_id}: {e}")
         return None
+# ============= دوال المنتجات والخيارات الجديدة =============
+
+async def get_product_options(pool, product_id):
+    """جلب خيارات منتج معين (للألعاب والاشتراكات)"""
+    try:
+        async with pool.acquire() as conn:
+            options = await conn.fetch('''
+                SELECT * FROM product_options 
+                WHERE product_id = $1 AND is_active = TRUE 
+                ORDER BY sort_order, price_usd
+            ''', product_id)
+            return options
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب خيارات المنتج {product_id}: {e}")
+        return []
+
+async def get_product_option(pool, option_id):
+    """جلب خيار محدد"""
+    try:
+        async with pool.acquire() as conn:
+            option = await conn.fetchrow(
+                "SELECT * FROM product_options WHERE id = $1",
+                option_id
+            )
+            return option
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب الخيار {option_id}: {e}")
+        return None
+
+async def get_product(pool, product_id):
+    """جلب منتج محدد"""
+    try:
+        async with pool.acquire() as conn:
+            product = await conn.fetchrow(
+                "SELECT * FROM applications WHERE id = $1",
+                product_id
+            )
+            return product
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب المنتج {product_id}: {e}")
+        return None
 
 # ============= دوال الإحصائيات =============
 
