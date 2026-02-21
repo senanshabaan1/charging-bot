@@ -10,7 +10,9 @@ import asyncio
 import logging
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.deposit import get_damascus_time
-from aiogram.enums import ParseMode
+from aiogram import types
+from aiogram.utils import markdown as md
+from aiogram.types import ParseMode
 import re
 
 # إعداد logging
@@ -1127,55 +1129,50 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
     try:
         original_text = message.text
         logger.info(f"📝 النص الأصلي: {original_text}")
-        
+
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
             user_count = len(users)
-        
-        if user_count == 0:
-            await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
-            await state.clear()
-            return
-        
-        # ✅ معاينة باستخدام HTML
-        try:
-            # تحويل Markdown إلى HTML بشكل يدوي بسيط
-            html_text = original_text.replace('**', '<b>', 1)
-            html_text = html_text.replace('**', '</b>', 1)
-            
+
+            if user_count == 0:
+                await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
+                await state.clear()
+                return
+
+            # ✅ معاينة باستخدام HTML
+            # يمكن الآن استخدام Markdown لتنسيق أفضل
+            html_text = md.text(
+                md.hbold("📢 معاينة الرسالة:"),
+                original_text
+            )
+
             await bot.send_message(
                 message.from_user.id,
-                f"<b>📢 معاينة الرسالة:</b>\n\n{html_text}",
+                html_text,
                 parse_mode=ParseMode.HTML
             )
             logger.info("✅ المعاينة نجحت")
-        except Exception as e:
-            logger.error(f"❌ فشلت المعاينة: {e}")
-            # إذا فشل HTML، نرسل نفس النص
-            await bot.send_message(
-                message.from_user.id,
-                f"📢 معاينة الرسالة:\n\n{original_text}"
+
+            # تأكيد الإرسال
+            confirm_builder = InlineKeyboardBuilder()
+            confirm_builder.row(
+                types.InlineKeyboardButton(text="✅ تأكيد الإرسال للجميع", callback_data="confirm_broadcast_final"),
+                types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast")
             )
-        
-        # تأكيد الإرسال
-        confirm_builder = InlineKeyboardBuilder()
-        confirm_builder.row(
-            types.InlineKeyboardButton(text="✅ تأكيد الإرسال للجميع", callback_data="confirm_broadcast_final"),
-            types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast")
-        )
-        
-        await message.answer(
-            f"📊 **عدد المستلمين:** {user_count}\n\n"
-            f"هل أنت متأكد من إرسال الرسالة للجميع؟",
-            reply_markup=confirm_builder.as_markup()
-        )
-        
-        await state.update_data(broadcast_text=original_text, broadcast_users=user_count)
-        
+
+            await message.answer(
+                f"📊 عدد المستلمين: {user_count}\n\n"
+                f"هل أنت متأكد من إرسال الرسالة للجميع؟",
+                reply_markup=confirm_builder.as_markup()
+            )
+
+            await state.update_data(broadcast_text=original_text, broadcast_users=user_count)
+
     except Exception as e:
         logger.error(f"❌ خطأ عام: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
+
 
 @router.callback_query(F.data == "confirm_broadcast_final")
 async def confirm_broadcast_final(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
