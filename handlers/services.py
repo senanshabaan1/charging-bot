@@ -296,7 +296,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
     
     # ✅ التأكد من وجود قيم صالحة
-    unit_price = app['unit_price_usd'] or 0.0
+    unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
     profit_percentage = app.get('profit_percentage', 0) or 0
     min_units = app.get('min_units', 1) or 1
     
@@ -405,10 +405,10 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     current_rate = data['current_rate']
     discount = data['discount']
     vip_level = data['vip_level']
-    profit_percentage = app.get('profit_percentage', 0) or 0
+    profit_percentage = float(app.get('profit_percentage', 0) or 0)
     
-    # حساب السعر مع الربح والخصم
-    v_price = variant['price_usd'] or 0.0
+    # حساب السعر مع الربح والخصم - مع تحويل Decimal إلى float
+    v_price = float(variant['price_usd']) if variant['price_usd'] is not None else 0.0
     price_with_profit = v_price * (1 + (profit_percentage / 100))
     discounted_price_usd = price_with_profit * (1 - discount/100)
     total_syp = discounted_price_usd * current_rate
@@ -422,14 +422,14 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
         'final_price_usd': discounted_price_usd,
         'total_syp': total_syp,
         'original_total_syp': original_total_syp,
-        'qty': variant.get('quantity', 1) or 1
+        'qty': int(variant.get('quantity', 1) or 1)
     })
     
     # رسالة تعليمات حسب نوع اللعبة
-    instructions = ""
-    if app['name'].lower() in ['pubg mobile', 'free fire']:
+    app_name = app['name'].lower()
+    if 'pubg' in app_name or 'free fire' in app_name:
         instructions = "🎮 **يرجى إرسال ID اللاعب الخاص بك:**\n"
-    elif app['name'].lower() == 'clash of clans':
+    elif 'clash' in app_name:
         instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**\n"
     else:
         instructions = "🎯 **يرجى إرسال الحساب المستهدف:**\n"
