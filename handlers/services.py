@@ -22,10 +22,11 @@ class OrderStates(StatesGroup):
     choosing_variant = State()
 
 def get_back_keyboard():
-    """إنشاء زر رجوع فقط"""
+    """إنشاء زر رجوع مع خيارات إضافية للخروج"""
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
-    builder.row(types.KeyboardButton(text="/رجوع"))
+    builder.row(types.KeyboardButton(text="🏠 القائمة الرئيسية"))
+    builder.row(types.KeyboardButton(text="/cancel"))
     return builder.as_markup(resize_keyboard=True)
 
 def get_damascus_time():
@@ -295,13 +296,13 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     elif app_type == 'game' or app_type == 'subscription':
         # لعبة أو اشتراك - نعرض الفئات
         from database import get_product_options
-        variants = await get_product_options(db_pool, app_id)
+        variants = await get_product_options(db_pool, app_id)  # 👈 هنا المتغير اسمه variants
         
-        if not options:
+        if not variants:  # 👈 هنا التصحيح: variants بدل options
             return await callback.answer("لا توجد فئات متاحة لهذا التطبيق حالياً", show_alert=True)
         
         builder = InlineKeyboardBuilder()
-        for opt in options:
+        for opt in variants:  # 👈 هنا opt بدل v
             price_with_profit = opt['price_usd'] * (1 + (app['profit_percentage'] / 100))
             discounted_price_usd = price_with_profit * (1 - discount/100)
             price_syp = discounted_price_usd * current_rate
@@ -316,7 +317,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             
             builder.row(types.InlineKeyboardButton(
                 text=button_text,
-                callback_data=f"var_{v['id']}"
+                callback_data=f"var_{opt['id']}"  # 👈 هنا opt['id'] بدل v['id']
             ))
         
         builder.row(types.InlineKeyboardButton(
@@ -678,9 +679,38 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
 
 @router.callback_query(F.data == "back_to_main")
-async def back_to_main_from_services(callback: types.CallbackQuery):
+async def back_to_main(callback: types.CallbackQuery):
+    """العودة للقائمة الرئيسية"""
+    from handlers.start import get_main_menu_keyboard
+    from database import is_admin_user
+    
+    is_admin = await is_admin_user(None, callback.from_user.id)  # 👈 تحتاج تمرير pool هنا
+    
     await callback.message.delete()
     await callback.message.answer(
-        "تم العودة للقائمة الرئيسية.",
-        reply_markup=get_back_keyboard()
+        "👋 أهلاً بك في القائمة الرئيسية",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
+@router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel", "🏠 القائمة الرئيسية"]))
+async def global_back_handler(message: types.Message, state: FSMContext, db_pool):
+    """معالج الرجوع من أي مكان"""
+    current_state = await state.get_state()
+    
+    if current_state is not None:
+        await state.clear()
+    
+    if message.text == "🏠 القائمة الرئيسية":
+        from handlers.start import get_main_menu_keyboard
+        from database import is_admin_user
+        
+        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        
+        await message.answer(
+            "👋 أهلاً بك في القائمة الرئيسية",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
+    else:
+        await message.answer(
+            "✅ تم إلغاء العملية",
+            reply_markup=get_back_keyboard()
+        )
