@@ -80,52 +80,6 @@ async def send_order_to_group(bot: Bot, order_data: dict):
         logging.error(f"خطأ في إرسال الطلب للمجموعة: {e}")
         return None
 
-async def update_order_message(bot: Bot, message_id: int, order_data: dict, status: str):
-    """تحديث رسالة الطلب في المجموعة بعد المعالجة - مع الحفاظ على الوقت الأصلي"""
-    try:
-        status_text = {
-            "processing": "🔄 **جاري التنفيذ...**",
-            "completed": "✅ **تم التنفيذ بنجاح**",
-            "failed": "❌ **تعذر التنفيذ**"
-        }
-        
-        caption = (
-            f"{status_text.get(status, '📋 تحديث الطلب')}\n\n"
-            f"👤 **المستخدم:** @{order_data['username']}\n"
-            f"🆔 **الآيدي:** `{order_data['user_id']}`\n"
-            f"📱 **التطبيق:** {order_data['app_name']}\n"
-            f"📦 **الكمية:** {order_data['quantity']}\n"
-            f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **وقت الطلب:** {order_data['time']}\n"
-            f"🔄 **آخر تحديث:** {get_damascus_time()}"
-        )
-        
-        # أزرار جديدة بناءً على الحالة
-        builder = InlineKeyboardBuilder()
-        if status == "processing":
-            builder.row(
-                types.InlineKeyboardButton(
-                    text="✅ تم التنفيذ", 
-                    callback_data=f"compl_order_{order_data['order_id']}"
-                ),
-                types.InlineKeyboardButton(
-                    text="❌ تعذر التنفيذ", 
-                    callback_data=f"fail_order_{order_data['order_id']}"
-                ),
-                width=2
-            )
-        
-        await bot.edit_message_text(
-            chat_id=ORDERS_GROUP,
-            message_id=message_id,
-            text=caption,
-            reply_markup=builder.as_markup() if status == "processing" else None,
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        logging.error(f"خطأ في تحديث رسالة المجموعة: {e}")
-
 @router.message(F.text == "📱 خدمات الشحن")
 async def show_categories(message: types.Message, db_pool):
     """عرض الأقسام أولاً"""
@@ -189,10 +143,10 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     
     buttons = []
     for app in apps:
-        # ✅ التأكد من وجود قيم صالحة (معالجة NULL)
-        unit_price = app['unit_price_usd'] or 0.0
-        profit_percentage = app.get('profit_percentage', 0) or 0
-        min_units = app.get('min_units', 1) or 1
+        # ✅ تحويل Decimal إلى float
+        unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
+        profit_percentage = float(app.get('profit_percentage', 0) or 0)
+        min_units = int(app.get('min_units', 1) or 1)
         
         # تعيين الأيقونة حسب نوع التطبيق
         if app['type'] == 'game':
@@ -295,10 +249,10 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     if not app:
         return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
     
-    # ✅ التأكد من وجود قيم صالحة
+    # ✅ تحويل Decimal إلى float
     unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
-    profit_percentage = app.get('profit_percentage', 0) or 0
-    min_units = app.get('min_units', 1) or 1
+    profit_percentage = float(app.get('profit_percentage', 0) or 0)
+    min_units = int(app.get('min_units', 1) or 1)
     
     await state.update_data({
         'app': dict(app),
@@ -354,17 +308,17 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         builder = InlineKeyboardBuilder()
         for v in variants:
-            # ✅ التأكد من وجود قيم صالحة للفئات
-            v_price = v['price_usd'] or 0.0
+            # ✅ تحويل Decimal إلى float
+            v_price = float(v['price_usd']) if v['price_usd'] is not None else 0.0
             price_with_profit = v_price * (1 + (profit_percentage / 100))
             discounted_price_usd = price_with_profit * (1 - discount/100)
             price_syp = discounted_price_usd * current_rate
             
             if app_type == 'game':
-                qty_text = v.get('quantity', 1) or 1
+                qty_text = int(v.get('quantity', 1) or 1)
                 button_text = f"📦 {qty_text} وحدة\n{price_syp:,.0f} ل.س"
             else:  # subscription
-                days = v.get('duration_days', 30) or 30
+                days = int(v.get('duration_days', 30) or 30)
                 button_text = f"⏱️ {days} يوم\n{price_syp:,.0f} ل.س"
             
             if discount > 0:
@@ -407,7 +361,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     vip_level = data['vip_level']
     profit_percentage = float(app.get('profit_percentage', 0) or 0)
     
-    # حساب السعر مع الربح والخصم - مع تحويل Decimal إلى float
+    # ✅ تحويل Decimal إلى float
     v_price = float(variant['price_usd']) if variant['price_usd'] is not None else 0.0
     price_with_profit = v_price * (1 + (profit_percentage / 100))
     discounted_price_usd = price_with_profit * (1 - discount/100)
@@ -652,8 +606,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data['app']['name'],
                 variant['id'],
                 variant['name'],
-                variant.get('quantity', 1) or 1,
-                variant.get('duration_days', 0) or 0,
+                int(variant.get('quantity', 1) or 1),
+                int(variant.get('duration_days', 0) or 0),
                 data['final_price_usd'] if 'final_price_usd' in data else data['discounted_unit_price_usd'],
                 data['total_syp'],
                 data['target_id'],
@@ -666,7 +620,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'username': callback.from_user.username or 'غير معروف',
                     'app_name': data['app']['name'],
                     'variant_name': variant['name'],
-                    'quantity': variant.get('quantity', 1) or 1,
+                    'quantity': int(variant.get('quantity', 1) or 1),
                     'total_syp': data['total_syp'],
                     'target_id': data['target_id'],
                 }
