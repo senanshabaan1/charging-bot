@@ -1941,7 +1941,6 @@ async def init_games(pool):
             games_cat = await conn.fetchval("SELECT id FROM categories WHERE name = 'games'")
             
             if not games_cat:
-                # إذا ما في قسم ألعاب، نضيفه
                 games_cat = await conn.fetchval('''
                     INSERT INTO categories (name, display_name, icon, sort_order)
                     VALUES ('games', '🎮 ألعاب', '🎮', 2)
@@ -1949,12 +1948,12 @@ async def init_games(pool):
                 ''')
                 logging.info("✅ تم إضافة قسم الألعاب")
             
-            # 1. ببجي موبايل
+            # 1. ببجي موبايل - مع unit_price_usd (سعر رمزي)
             pubg_id = await conn.fetchval('''
-                INSERT INTO applications (name, description, category_id, type, is_active)
-                VALUES ($1, $2, $3, 'game', true)
+                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
+                VALUES ($1, $2, $3, $4, $5, 'game', true)
                 RETURNING id
-            ''', 'PUBG Mobile', 'شحن UC وبطاقات عضوية - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
+            ''', 'PUBG Mobile', 0.01, 1, 10, games_cat)
             
             # خيارات ببجي
             pubg_options = [
@@ -1971,12 +1970,12 @@ async def init_games(pool):
                     VALUES ($1, $2, $3, $4, $5)
                 ''', pubg_id, name, qty, price, i)
             
-            # 2. فري فاير
+            # 2. فري فاير - مع unit_price_usd
             ff_id = await conn.fetchval('''
-                INSERT INTO applications (name, description, category_id, type, is_active)
-                VALUES ($1, $2, $3, 'game', true)
+                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
+                VALUES ($1, $2, $3, $4, $5, 'game', true)
                 RETURNING id
-            ''', 'Free Fire', 'شحن الماس وعضويات - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
+            ''', 'Free Fire', 0.01, 1, 10, games_cat)
             
             ff_options = [
                 ('110 ماسة', 110, 0.99),
@@ -1991,12 +1990,12 @@ async def init_games(pool):
                     VALUES ($1, $2, $3, $4, $5)
                 ''', ff_id, name, qty, price, i)
             
-            # 3. كلاش أوف كلانس
+            # 3. كلاش أوف كلانس - مع unit_price_usd
             coc_id = await conn.fetchval('''
-                INSERT INTO applications (name, description, category_id, type, is_active)
-                VALUES ($1, $2, $3, 'game', true)
+                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
+                VALUES ($1, $2, $3, $4, $5, 'game', true)
                 RETURNING id
-            ''', 'Clash of Clans', 'شحن الجواهر والتذكرة الذهبية - تأكد من إدخال إيميل Supercell ID بشكل صحيح', games_cat)
+            ''', 'Clash of Clans', 0.01, 1, 10, games_cat)
             
             coc_options = [
                 ('80 جوهرة', 80, 0.99),
