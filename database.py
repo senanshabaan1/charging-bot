@@ -369,9 +369,11 @@ async def get_pool():
                 server_settings={
                     'timezone': 'Asia/Damascus'
                 },
-                init=init_connection  # تمرير الدالة وليس القائمة
+                init=init_connection,
+                statement_cache_size=0,  # 👈 أضف هذا السطر (مهم جداً!)
+                max_cached_statement_lifetime=0  # 👈 أضف هذا السطر أيضاً
             )
-            logging.info("✅ تم إنشاء مجمع الاتصالات باستخدام DSN مع ضبط التوقيت")
+            logging.info("✅ تم إنشاء مجمع الاتصالات مع تعطيل prepared statements")
         else:
             pool = await asyncpg.create_pool(
                 **DB_CONFIG,
@@ -379,9 +381,11 @@ async def get_pool():
                 server_settings={
                     'timezone': 'Asia/Damascus'
                 },
-                init=init_connection  # تمرير الدالة وليس القائمة
+                init=init_connection,
+                statement_cache_size=0,  # 👈 أضف هذا السطر
+                max_cached_statement_lifetime=0  # 👈 أضف هذا السطر
             )
-            logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح مع ضبط التوقيت")
+            logging.info("✅ تم إنشاء مجمع الاتصالات مع تعطيل prepared statements")
         return pool
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
