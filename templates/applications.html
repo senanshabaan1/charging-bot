@@ -129,16 +129,20 @@
                                         <strong>{{ app[1] }}</strong>
                                     </td>
                                     <td>
-                                        <span class="price-badge">${{ "%.6f"|format(app[2]) }}</span>
+                                        <span class="price-badge">
+                                            ${{ "%.6f"|format(app[2] or 0) }}
+                                        </span>
                                         <br>
-                                        <small class="text-muted">{{ (app[2] * rate)|int }} ل.س</small>
+                                        <small class="text-muted">{{ ((app[2] or 0) * rate)|int }} ل.س</small>
                                     </td>
-                                    <td>{{ app[3] }}</td>
+                                    <td>{{ app[3] or 0 }}</td>
                                     <td>
-                                        <span class="badge bg-info">{{ app[4] }}%</span>
+                                        <span class="badge bg-info">{{ app[4] or 0 }}%</span>
                                     </td>
                                     <td>
-                                        {% set final_price = app[2] * (1 + app[4]/100) %}
+                                        {% set base_price = app[2] or 0 %}
+                                        {% set profit_percent = app[4] or 0 %}
+                                        {% set final_price = base_price * (1 + profit_percent/100) %}
                                         <span class="price-badge">${{ "%.6f"|format(final_price) }}</span>
                                         <br>
                                         <small class="text-muted">{{ (final_price * rate)|int }} ل.س</small>
