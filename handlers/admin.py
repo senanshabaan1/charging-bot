@@ -1108,11 +1108,15 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminStates.waiting_broadcast_msg)
 async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     try:
-        # نص الرسالة الأصلي
-        original_text = message.text
-        
-        # محاولة إرسال مع Markdown أولاً
-        use_markdown = True
+        # تحويل النص من Markdown إلى HTML (إذا كان المستخدم كاتب **نص**)
+        import re
+        text = message.text
+        # تحويل **نص** إلى <b>نص</b>
+        text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+        # تحويل *نص* إلى <i>نص</i>
+        text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+        # تحويل `نص` إلى <code>نص</code>
+        text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
         
         async with db_pool.acquire() as conn:
             users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
@@ -1123,19 +1127,11 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
         
         for i, user in enumerate(users):
             try:
-                if use_markdown:
-                    # محاولة إرسال مع Markdown
-                    await bot.send_message(
-                        user['user_id'],
-                        f"📢 **رسالة من الإدارة:**\n\n{original_text}",
-                        parse_mode="Markdown"
-                    )
-                else:
-                    # إذا فشل Markdown، نرسل بدون تنسيق
-                    await bot.send_message(
-                        user['user_id'],
-                        f"📢 رسالة من الإدارة:\n\n{original_text}"
-                    )
+                await bot.send_message(
+                    user['user_id'],
+                    f"<b>📢 رسالة من الإدارة:</b>\n\n{text}",
+                    parse_mode="HTML"  # 👈 استخدم HTML
+                )
                 success += 1
                 
                 if i % 10 == 0:
@@ -1143,41 +1139,23 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
                 
                 await asyncio.sleep(0.05)
             except Exception as e:
-                # إذا فشل بسبب Markdown، نجرب بدون تنسيق
-                if "can't parse entities" in str(e) and use_markdown:
-                    use_markdown = False
-                    # إعادة المحاولة للمستخدم الحالي بدون تنسيق
-                    try:
-                        await bot.send_message(
-                            user['user_id'],
-                            f"📢 رسالة من الإدارة:\n\n{original_text}"
-                        )
-                        success += 1
-                    except:
-                        failed += 1
-                else:
-                    logger.error(f"فشل إرسال للمستخدم {user['user_id']}: {e}")
-                    failed += 1
+                logger.error(f"فشل إرسال للمستخدم {user['user_id']}: {e}")
+                failed += 1
         
         await progress_msg.delete()
-        
-        # رسالة النتيجة
-        result_text = (
-            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
-            f"📊 **الإحصائيات:**\n"
+        await message.answer(
+            f"<b>✅ تم إرسال الرسالة بنجاح</b>\n\n"
+            f"📊 <b>الإحصائيات:</b>\n"
             f"• ✅ تم الإرسال: {success}\n"
-            f"• ❌ فشل الإرسال: {failed}\n"
+            f"• ❌ فشل الإرسال: {failed}",
+            parse_mode="HTML"
         )
         
-        if not use_markdown:
-            result_text += "\n⚠️ تم إرسال الرسالة بدون تنسيق Markdown بسبب أخطاء في النص."
-        
-        await message.answer(result_text, parse_mode="Markdown")
         await state.clear()
-        
     except Exception as e:
-        await message.answer(f"❌ **حدث خطأ:** {str(e)}")
+        await message.answer(f"❌ <b>حدث خطأ:</b> {str(e)}", parse_mode="HTML")
         await state.clear()
+
 # ============= إرسال رسالة لمستخدم معين =============
 
 @router.callback_query(F.data == "send_custom_message")
@@ -1277,24 +1255,12 @@ async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext,
     text = data['message_text']
     
     try:
-        # محاولة إرسال مع Markdown أولاً
-        try:
-            await bot.send_message(
-                user_id,
-                f"✉️ **رسالة من الإدارة**\n\n{text}",
-                parse_mode="Markdown"
-            )
-            markdown_used = True
-        except Exception as e:
-            if "can't parse entities" in str(e):
-                # إذا فشل بسبب Markdown، نرسل بدون تنسيق
-                await bot.send_message(
-                    user_id,
-                    f"✉️ رسالة من الإدارة:\n\n{text}"
-                )
-                markdown_used = False
-            else:
-                raise e
+        # إرسال مع Markdown
+        await bot.send_message(
+            user_id,
+            f"✉️ **رسالة من الإدارة**\n\n{text}",
+            parse_mode="Markdown"  # 👈 أضف هذا
+        )
         
         # تسجيل في logs
         async with db_pool.acquire() as conn:
@@ -1303,17 +1269,32 @@ async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext,
                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
             ''', callback.from_user.id, 'send_message', f'رسالة إلى {user_id}: {text[:50]}...')
         
-        result_text = f"✅ **تم إرسال الرسالة بنجاح**\n\nإلى: @{username} (`{user_id}`)"
-        
-        if not markdown_used:
-            result_text += "\n\n⚠️ تم إرسال الرسالة بدون تنسيق Markdown بسبب أخطاء في النص."
-        
-        await callback.message.edit_text(result_text)
+        await callback.message.edit_text(
+            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
+            f"إلى: @{username} (`{user_id}`)"
+        )
         
     except Exception as e:
-        await callback.message.edit_text(
-            f"❌ **فشل إرسال الرسالة**\n\nالسبب: {str(e)}"
-        )
+        # إذا فشل Markdown، جرب HTML
+        try:
+            # تحويل Markdown لـ HTML بشكل بسيط
+            html_text = text.replace('**', '<b>', 1)
+            html_text = html_text.replace('**', '</b>', 1)
+            
+            await bot.send_message(
+                user_id,
+                f"<b>✉️ رسالة من الإدارة</b>\n\n{html_text}",
+                parse_mode="HTML"
+            )
+            
+            await callback.message.edit_text(
+                f"✅ **تم إرسال الرسالة بنجاح (بصيغة HTML)**\n\n"
+                f"إلى: @{username} (`{user_id}`)"
+            )
+        except:
+            await callback.message.edit_text(
+                f"❌ **فشل إرسال الرسالة**\n\nالسبب: {str(e)}"
+            )
     
     await state.clear()
 
