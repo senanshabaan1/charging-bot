@@ -45,6 +45,9 @@ class AdminStates(StatesGroup):
     waiting_vip_user_id = State()          # لإدخال آيدي المستخدم
     waiting_vip_level = State()            # لإدخال مستوى VIP الجديد
     waiting_vip_discount = State()         # لإدخال نسبة الخصم المخصصة
+    waiting_vip_downgrade_reason = State()  # سبب خفض المستوى
+    waiting_custom_message_user = State()    # آيدي المستخدم للرسالة
+    waiting_custom_message_text = State()    # نص الرسالة
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -113,7 +116,8 @@ async def admin_panel(message: types.Message, db_pool):
         ],
         # الصف الحادي عشر
         [
-            types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance")
+            types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
+            types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message")
         ],
         # ===== الصف الجديد - إدارة المشرفين =====
           [
@@ -1141,6 +1145,137 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
     except Exception as e:
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
+# ============= إرسال رسالة لمستخدم معين =============
+
+@router.callback_query(F.data == "send_custom_message")
+async def send_custom_message_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إرسال رسالة لمستخدم معين"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "✉️ **إرسال رسالة لمستخدم معين**\n\n"
+        "أدخل آيدي المستخدم:\n"
+        "مثال: `123456789`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_custom_message_user)
+
+@router.message(AdminStates.waiting_custom_message_user)
+async def send_custom_message_get_text(message: types.Message, state: FSMContext, db_pool):
+    """استلام آيدي المستخدم وطلب نص الرسالة"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        user_id = int(message.text.strip())
+        
+        # التحقق من وجود المستخدم
+        async with db_pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT username, first_name FROM users WHERE user_id = $1",
+                user_id
+            )
+        
+        if not user:
+            await message.answer(
+                "❌ المستخدم غير موجود!\n"
+                "الرجاء إدخال آيدي صحيح أو أرسل /cancel للإلغاء"
+            )
+            return
+        
+        username = user['username'] or user['first_name'] or str(user_id)
+        
+        await state.update_data(target_user=user_id, target_username=username)
+        
+        await message.answer(
+            f"✉️ **إرسال رسالة إلى @{username}**\n\n"
+            f"أدخل نص الرسالة التي تريد إرسالها:\n\n"
+            f"يمكنك استخدام Markdown للتنسيق:\n"
+            f"• **نص عريض**\n"
+            f"• *نص مائل*\n"
+            f"• `كود`\n\n"
+            f"أو أرسل /cancel للإلغاء"
+        )
+        await state.set_state(AdminStates.waiting_custom_message_text)
+        
+    except ValueError:
+        await message.answer(
+            "❌ آيدي غير صالح!\n"
+            "الرجاء إدخال أرقام فقط أو أرسل /cancel للإلغاء"
+        )
+
+@router.message(AdminStates.waiting_custom_message_text)
+async def send_custom_message_final(message: types.Message, state: FSMContext, bot: Bot):
+    """إرسال الرسالة للمستخدم"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    user_id = data['target_user']
+    username = data['target_username']
+    text = message.text
+    
+    # تأكيد قبل الإرسال
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ تأكيد الإرسال", callback_data="confirm_send_message"),
+        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_send_message")
+    )
+    
+    # حفظ نص الرسالة في الحالة
+    await state.update_data(message_text=text)
+    
+    # عرض معاينة
+    await message.answer(
+        f"✉️ **معاينة الرسالة**\n\n"
+        f"إلى: @{username} (`{user_id}`)\n\n"
+        f"**نص الرسالة:**\n{text}\n\n"
+        f"هل أنت متأكد من إرسالها؟",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "confirm_send_message")
+async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    """تأكيد إرسال الرسالة"""
+    data = await state.get_data()
+    user_id = data['target_user']
+    username = data['target_username']
+    text = data['message_text']
+    
+    try:
+        # إرسال الرسالة
+        await bot.send_message(
+            user_id,
+            f"✉️ **رسالة من الإدارة**\n\n{text}",
+            parse_mode="Markdown"
+        )
+        
+        await callback.message.edit_text(
+            f"✅ **تم إرسال الرسالة بنجاح**\n\n"
+            f"إلى: @{username} (`{user_id}`)"
+        )
+        
+        # تسجيل في logs
+        async with callback.message.bot.db_pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO logs (user_id, action, details, created_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ''', callback.from_user.id, 'send_message', f'رسالة إلى {user_id}: {text[:50]}...')
+        
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ **فشل إرسال الرسالة**\n\n"
+            f"السبب: {str(e)}"
+        )
+    
+    await state.clear()
+
+@router.callback_query(F.data == "cancel_send_message")
+async def cancel_send_message(callback: types.CallbackQuery, state: FSMContext):
+    """إلغاء إرسال الرسالة"""
+    await state.clear()
+    await callback.message.edit_text("✅ تم إلغاء الإرسال.")
 
 # إضافة رصيد يدوي
 @router.callback_query(F.data == "add_balance")
@@ -1492,6 +1627,13 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             types.InlineKeyboardButton(
                 text="👑 رفع مستوى VIP",
                 callback_data=f"upgrade_vip_{user['user_id']}"
+            )
+        )
+        # في قسم الأزرار، بعد زر رفع مستوى VIP
+        builder.row(
+            types.InlineKeyboardButton(
+                text="⬇️ خفض مستوى VIP",
+                callback_data=f"downgrade_vip_{user['user_id']}"
             )
         )
         # =================================
@@ -2733,6 +2875,175 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
         
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح")
+# ============= خفض مستوى VIP مع تحذير =============
+
+@router.callback_query(F.data.startswith("downgrade_vip_"))
+async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """بدء خفض مستوى VIP لمستخدم"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    user_id = int(callback.data.split("_")[2])
+    await state.update_data(target_user=user_id)
+    
+    # جلب معلومات المستخدم الحالية
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT username, first_name, vip_level, discount_percent, manual_vip FROM users WHERE user_id = $1",
+            user_id
+        )
+    
+    if not user:
+        return await callback.answer("المستخدم غير موجود", show_alert=True)
+    
+    username = user['username'] or user['first_name'] or str(user_id)
+    current_vip = user['vip_level']
+    current_discount = user['discount_percent']
+    manual_status = " (يدوي)" if user['manual_vip'] else ""
+    
+    # رسالة اختيار مستوى VIP الجديد
+    text = (
+        f"⚠️ **خفض مستوى VIP للمستخدم**\n\n"
+        f"👤 المستخدم: @{username}\n"
+        f"🆔 الآيدي: `{user_id}`\n"
+        f"📊 المستوى الحالي: VIP {current_vip}{manual_status} (خصم {current_discount}%)\n\n"
+        f"اختر المستوى الجديد:"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    # أزرار المستويات (الأقل فقط)
+    levels = []
+    for level in range(0, current_vip):  # فقط المستويات الأقل
+        if level == 0:
+            discount = 0
+            btn_text = f"🟢 VIP 0 (0%)"
+        elif level == 1:
+            discount = 1
+            btn_text = f"🔵 VIP 1 (1%)"
+        elif level == 2:
+            discount = 2
+            btn_text = f"🟣 VIP 2 (2%)"
+        elif level == 3:
+            discount = 3
+            btn_text = f"🟡 VIP 3 (3%)"
+        elif level == 4:
+            discount = 5
+            btn_text = f"🔴 VIP 4 (5%)"
+        elif level == 5:
+            discount = 7
+            btn_text = f"💎 VIP 5 (7%)"
+        elif level == 6:
+            discount = 10
+            btn_text = f"👑 VIP 6 (10%)"
+        else:
+            continue
+            
+        builder.row(types.InlineKeyboardButton(
+            text=btn_text,
+            callback_data=f"downgrade_to_{user_id}_{level}_{discount}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data=f"user_info_cancel"
+    ))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("downgrade_to_"))
+async def downgrade_vip_ask_reason(callback: types.CallbackQuery, state: FSMContext):
+    """طلب سبب خفض المستوى"""
+    parts = callback.data.split("_")
+    user_id = int(parts[2])
+    new_level = int(parts[3])
+    new_discount = int(parts[4])
+    
+    await state.update_data(
+        target_user=user_id,
+        new_level=new_level,
+        new_discount=new_discount
+    )
+    
+    await callback.message.edit_text(
+        f"⚠️ **خفض مستوى VIP**\n\n"
+        f"المستوى الجديد: VIP {new_level} (خصم {new_discount}%)\n\n"
+        f"📝 **أدخل سبب خفض المستوى** (سيتم إرساله للمستخدم):\n"
+        f"مثال: عدم الالتزام بشروط الاستخدام\n\n"
+        f"أو أرسل /skip لتخطي إرسال سبب"
+    )
+    await state.set_state(AdminStates.waiting_vip_downgrade_reason)
+
+@router.message(AdminStates.waiting_vip_downgrade_reason)
+async def downgrade_vip_execute(message: types.Message, state: FSMContext, db_pool, bot: Bot):
+    """تنفيذ خفض مستوى VIP مع إرسال تحذير"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    user_id = data['target_user']
+    new_level = data['new_level']
+    new_discount = data['new_discount']
+    
+    # التحقق من سبب التخطي
+    reason = None
+    if message.text and message.text != "/skip":
+        reason = message.text.strip()
+    
+    async with db_pool.acquire() as conn:
+        # تحديث مستوى VIP (يبقى يدوي أو يصبح تلقائي؟ هنا بنخليه يدوي)
+        await conn.execute('''
+            UPDATE users 
+            SET vip_level = $1, 
+                discount_percent = $2,
+                manual_vip = TRUE  -- نبقيه يدوي عشان ما يتغير تلقائياً
+            WHERE user_id = $3
+        ''', new_level, new_discount, user_id)
+        
+        # جلب معلومات المستخدم
+        user = await conn.fetchrow(
+            "SELECT username, first_name FROM users WHERE user_id = $1",
+            user_id
+        )
+    
+    username = user['username'] or user['first_name'] or str(user_id)
+    
+    # رسالة تأكيد للأدمن
+    admin_text = (
+        f"✅ **تم خفض مستوى VIP بنجاح**\n\n"
+        f"👤 المستخدم: @{username}\n"
+        f"🆔 الآيدي: `{user_id}`\n"
+        f"👑 المستوى الجديد: VIP {new_level}\n"
+        f"💰 نسبة الخصم: {new_discount}%\n"
+    )
+    
+    if reason:
+        admin_text += f"📝 السبب: {reason}\n"
+    
+    admin_text += f"\n⚠️ تم إرسال تحذير للمستخدم."
+    
+    await message.answer(admin_text)
+    
+    # إرسال إشعار للمستخدم (تحذير)
+    try:
+        user_message = (
+            f"⚠️ **تم تعديل مستواك في البوت**\n\n"
+            f"👑 مستواك الجديد: VIP {new_level}\n"
+            f"💰 نسبة الخصم: {new_discount}%\n\n"
+        )
+        
+        if reason:
+            user_message += f"📝 **السبب:** {reason}\n\n"
+        
+        user_message += (
+            f"🔸 هذا التعديل نهائي ولن يتغير تلقائياً.\n"
+            f"📞 للاستفسار، تواصل مع الدعم."
+        )
+        
+        await bot.send_message(user_id, user_message)
+    except Exception as e:
+        await message.answer(f"❌ فشل إرسال إشعار للمستخدم: {e}")
+    
+    await state.clear()
 
 @router.callback_query(F.data == "user_info_cancel")
 async def user_info_cancel(callback: types.CallbackQuery):
