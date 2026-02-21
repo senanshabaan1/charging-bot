@@ -1067,6 +1067,7 @@ async def delete_app_variant(db_pool, variant_id):
         return True
 # ============= دوال المنتجات والخيارات الجديدة =============
 
+# في دوال get_product_options و get_product_option
 async def get_product_options(pool, product_id):
     """جلب خيارات منتج معين (للألعاب والاشتراكات)"""
     try:
@@ -1076,7 +1077,14 @@ async def get_product_options(pool, product_id):
                 WHERE product_id = $1 AND is_active = TRUE 
                 ORDER BY sort_order, price_usd
             ''', product_id)
-            return options
+            
+            # ✅ تحويل Decimal إلى float
+            result = []
+            for opt in options:
+                opt_dict = dict(opt)
+                opt_dict['price_usd'] = float(opt_dict['price_usd']) if opt_dict['price_usd'] else 0.0
+                result.append(opt_dict)
+            return result
     except Exception as e:
         logging.error(f"❌ خطأ في جلب خيارات المنتج {product_id}: {e}")
         return []
@@ -1089,22 +1097,52 @@ async def get_product_option(pool, option_id):
                 "SELECT * FROM product_options WHERE id = $1",
                 option_id
             )
-            return option
+            if option:
+                opt_dict = dict(option)
+                opt_dict['price_usd'] = float(opt_dict['price_usd']) if opt_dict['price_usd'] else 0.0
+                return opt_dict
+            return None
     except Exception as e:
         logging.error(f"❌ خطأ في جلب الخيار {option_id}: {e}")
         return None
 
-async def get_product(pool, product_id):
-    """جلب منتج محدد"""
+# نفس الشيء لدوال app_variants
+async def get_app_variants(pool, app_id):
+    """جلب الفئات الفرعية لتطبيق معين"""
     try:
         async with pool.acquire() as conn:
-            product = await conn.fetchrow(
-                "SELECT * FROM applications WHERE id = $1",
-                product_id
-            )
-            return product
+            variants = await conn.fetch('''
+                SELECT * FROM app_variants 
+                WHERE app_id = $1 AND is_active = TRUE 
+                ORDER BY sort_order, price_usd
+            ''', app_id)
+            
+            # ✅ تحويل Decimal إلى float
+            result = []
+            for v in variants:
+                v_dict = dict(v)
+                v_dict['price_usd'] = float(v_dict['price_usd']) if v_dict['price_usd'] else 0.0
+                result.append(v_dict)
+            return result
     except Exception as e:
-        logging.error(f"❌ خطأ في جلب المنتج {product_id}: {e}")
+        logging.error(f"❌ خطأ في جلب الفئات للتطبيق {app_id}: {e}")
+        return []
+
+async def get_app_variant(pool, variant_id):
+    """جلب فئة فرعية محددة"""
+    try:
+        async with pool.acquire() as conn:
+            variant = await conn.fetchrow(
+                "SELECT * FROM app_variants WHERE id = $1",
+                variant_id
+            )
+            if variant:
+                v_dict = dict(variant)
+                v_dict['price_usd'] = float(v_dict['price_usd']) if v_dict['price_usd'] else 0.0
+                return v_dict
+            return None
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب الفئة {variant_id}: {e}")
         return None
 
 # ============= دوال الإحصائيات =============
