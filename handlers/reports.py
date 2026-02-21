@@ -371,8 +371,12 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text("⏳ جاري حساب الأرباح...")
     
+    # ✅ أولاً: جلب سعر الصرف
+    from database import get_exchange_rate
+    exchange_rate = await get_exchange_rate(db_pool)
+    
     async with db_pool.acquire() as conn:
-        # 1. إحصائيات عامة
+        # 1. إحصائيات عامة (الآن exchange_rate معرف)
         totals = await conn.fetchrow('''
             SELECT 
                 COUNT(DISTINCT o.id) as total_orders,
@@ -433,10 +437,6 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             ORDER BY order_count DESC, revenue_syp DESC
             LIMIT 6
         ''')
-        
-        # 4. جلب سعر الصرف (للحسابات فقط)
-        from database import get_exchange_rate
-        exchange_rate = await get_exchange_rate(db_pool)
     
     # التحقق من وجود بيانات
     if not totals or totals['total_orders'] == 0:
