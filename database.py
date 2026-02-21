@@ -382,6 +382,13 @@ async def init_db():
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
         # ===============================================================
+        # ===== إضافة عمود description إلى جدول applications =====
+        try:
+            await conn.execute('ALTER TABLE applications ADD COLUMN IF NOT EXISTS description TEXT')
+            logging.info("✅ تم إضافة عمود description إلى جدول applications")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود description: {e}")
+        # =======================================================
         # ===== كود إضافة manual_vip =====
         try:
             await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
