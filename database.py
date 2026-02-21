@@ -2056,4 +2056,63 @@ async def init_games(pool):
             
     except Exception as e:
         logging.error(f"❌ خطأ في إضافة الألعاب: {e}")
+# ============= دوال خيارات المنتجات (product_options) =============
+
+async def get_product_options(db_pool, product_id):
+    """جلب جميع الخيارات النشطة لمنتج معين"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch(
+            "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+            product_id
+        )
+
+async def get_product_option(db_pool, option_id):
+    """جلب معلومات خيار معين"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT * FROM product_options WHERE id = $1",
+            option_id
+        )
+
+async def update_product_option(db_pool, option_id, updates):
+    """تحديث بيانات خيار"""
+    async with db_pool.acquire() as conn:
+        # تحضير جملة SET الديناميكية
+        set_parts = []
+        values = []
+        i = 1
+        for key, value in updates.items():
+            if key in ['name', 'quantity', 'price_usd', 'sort_order', 'description', 'is_active']:
+                set_parts.append(f"{key} = ${i}")
+                values.append(value)
+                i += 1
+        
+        if not set_parts:
+            return False
+        
+        set_clause = ", ".join(set_parts)
+        values.append(option_id)
+        
+        query = f"UPDATE product_options SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ${i}"
+        await conn.execute(query, *values)
+        return True
+
+async def delete_product_option(db_pool, option_id):
+    """حذف خيار (تعطيله)"""
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE product_options SET is_active = FALSE WHERE id = $1",
+            option_id
+        )
+        return True
+
+async def add_product_option(db_pool, product_id, name, quantity, price_usd, description=None, sort_order=0):
+    """إضافة خيار جديد"""
+    async with db_pool.acquire() as conn:
+        option_id = await conn.fetchval('''
+            INSERT INTO product_options (product_id, name, quantity, price_usd, description, sort_order, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+            RETURNING id
+        ''', product_id, name, quantity, price_usd, description, sort_order)
+        return option_id
         return False
