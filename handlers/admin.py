@@ -681,7 +681,7 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
 # ============= إدارة الفئات (Variants) =============
 @router.callback_query(F.data == "manage_variants")
 async def manage_variants_start(callback: types.CallbackQuery, db_pool):
-    """عرض التطبيقات لإدارة فئاتها"""
+    """عرض التطبيقات لإدارة فئاتها (جدول app_variants)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -690,18 +690,18 @@ async def manage_variants_start(callback: types.CallbackQuery, db_pool):
             SELECT a.id, a.name, c.display_name 
             FROM applications a
             LEFT JOIN categories c ON a.category_id = c.id
-            WHERE a.type IN ('game', 'subscription')
+            WHERE a.type IN ('game', 'subscription', 'service')  -- كل الأنواع
             ORDER BY c.sort_order, a.name
         ''')
     
     if not apps:
-        await callback.answer("❌ لا توجد تطبيقات ألعاب أو اشتراكات", show_alert=True)
+        await callback.answer("❌ لا توجد تطبيقات", show_alert=True)
         return
     
     builder = InlineKeyboardBuilder()
     for app in apps:
         builder.row(types.InlineKeyboardButton(
-            text=f"🎮 {app['name']} ({app['display_name']})",
+            text=f"📦 {app['name']} ({app['display_name']})",
             callback_data=f"app_variants_{app['id']}"
         ))
     
@@ -711,7 +711,10 @@ async def manage_variants_start(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "📋 **اختر التطبيق لإدارة فئاته:**",
+        "📋 **إدارة فئات المنتجات (app_variants)**\n\n"
+        "هذه الفئات تُستخدم للمنتجات الأساسية:\n"
+        "• يمكن إضافة عدة فئات لمنتج واحد\n"
+        "• مثال: 60 UC, 325 UC, 660 UC",
         reply_markup=builder.as_markup()
     )
 
@@ -907,7 +910,7 @@ async def delete_variant_execute(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
-    """عرض المنتجات لإدارة خياراتها"""
+    """عرض المنتجات لإدارة خياراتها (جدول product_options)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -916,12 +919,12 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
             SELECT a.id, a.name, c.display_name 
             FROM applications a
             LEFT JOIN categories c ON a.category_id = c.id
-            WHERE a.type IN ('game', 'subscription')
+            WHERE a.type IN ('game', 'subscription')  -- فقط الألعاب والاشتراكات
             ORDER BY c.sort_order, a.name
         ''')
     
     if not products:
-        await callback.answer("❌ لا توجد منتجات ألعاب أو اشتراكات", show_alert=True)
+        await callback.answer("❌ لا توجد ألعاب أو اشتراكات", show_alert=True)
         return
     
     builder = InlineKeyboardBuilder()
@@ -937,7 +940,10 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "📋 **اختر المنتج لإدارة خياراته:**",
+        "🎮 **إدارة خيارات الألعاب (product_options)**\n\n"
+        "هذه الخيارات خاصة بالألعاب والاشتراكات:\n"
+        "• تحتوي على أوصاف إضافية\n"
+        "• مثال: 60 UC + هدية, 570 ماسة + 50 هدية",
         reply_markup=builder.as_markup()
     )
 
@@ -3663,3 +3669,26 @@ async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb),
         parse_mode="Markdown"
     )
+@router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel"]))
+async def admin_back_handler(message: types.Message, state: FSMContext, db_pool):
+    """الرجوع من أي عملية إدارية"""
+    current_state = await state.get_state()
+    
+    if current_state is not None:
+        await state.clear()
+    
+    from handlers.start import get_main_menu_keyboard
+    from database import is_admin_user
+    
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    
+    if is_admin:
+        await message.answer(
+            "👋 تم الإلغاء. استخدم /admin للعودة للوحة التحكم",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
+    else:
+        await message.answer(
+            "✅ تم الإلغاء",
+            reply_markup=get_back_keyboard()
+        )
