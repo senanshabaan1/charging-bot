@@ -11,6 +11,7 @@ import logging
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.deposit import get_damascus_time
 from aiogram.enums import ParseMode
+import re
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
