@@ -3,8 +3,6 @@ from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils import markdown as md
-from aiogram.enums import ParseMode  # ✅ 
 from config import ADMIN_ID, MODERATORS, USD_TO_SYP, DEPOSIT_GROUP, ORDERS_GROUP
 import config
 from datetime import datetime
@@ -12,6 +10,9 @@ import asyncio
 import logging
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.deposit import get_damascus_time
+from aiogram import types
+from aiogram.utils import markdown as md
+from aiogram.enums import ParseMode  # ✅ صح
 import re
 
 # إعداد logging
@@ -1138,19 +1139,25 @@ async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot
                 await state.clear()
                 return
 
-            # ✅ معاينة باستخدام HTML
-            # يمكن الآن استخدام Markdown لتنسيق أفضل
-            html_text = md.text(
-                md.hbold("📢 معاينة الرسالة:"),
-                original_text
-            )
-
-            await bot.send_message(
-                message.from_user.id,
-                html_text,
-                parse_mode=ParseMode.HTML
-            )
-            logger.info("✅ المعاينة نجحت")
+            # ✅ معاينة باستخدام Markdown (نفس طريقة الإرسال)
+            try:
+                await bot.send_message(
+                    message.from_user.id,
+                    f"📢 **معاينة الرسالة:**\n\n{original_text}",
+                    parse_mode=ParseMode.MARKDOWN  # 👈 استخدم MARKDOWN
+                )
+                logger.info("✅ المعاينة نجحت")
+            except Exception as e:
+                logger.error(f"❌ فشلت المعاينة: {e}")
+                await message.answer(
+                    f"❌ خطأ في تنسيق Markdown!\n\n{str(e)}\n\n"
+                    f"تأكد من كتابة:\n"
+                    f"• `**نص**` للنص العريض\n"
+                    f"• `*نص*` للنص المائل\n"
+                    f"• `` `نص` `` للكود"
+                )
+                await state.clear()
+                return
 
             # تأكيد الإرسال
             confirm_builder = InlineKeyboardBuilder()
@@ -1188,30 +1195,21 @@ async def confirm_broadcast_final(callback: types.CallbackQuery, state: FSMConte
     success = 0
     failed = 0
     
-    # تحويل بسيط لـ HTML
-    html_text = text
-    # **نص** -> <b>نص</b>
-    import re
-    html_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html_text)
-    # *نص* -> <i>نص</i>
-    html_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', html_text)
-    # `نص` -> <code>نص</code>
-    html_text = re.sub(r'`(.*?)`', r'<code>\1</code>', html_text)
-    
+    # ✅ استخدام Markdown مباشرة (لأنك كتبت **نص** و *نص*)
     for i, user in enumerate(users):
         if user['user_id'] == callback.from_user.id:
             continue
             
         try:
-            # إرسال مع HTML
+            # إرسال مع Markdown (لأن النص مكتوب بـ ** و *)
             await bot.send_message(
                 user['user_id'],
-                f"<b>📢 رسالة من الإدارة:</b>\n\n{html_text}",
-                parse_mode=ParseMode.HTML
+                f"📢 **رسالة من الإدارة:**\n\n{text}",
+                parse_mode=ParseMode.MARKDOWN  # 👈 استخدم MARKDOWN مش HTML
             )
             success += 1
         except Exception as e:
-            logger.error(f"❌ فشل HTML للمستخدم {user['user_id']}: {e}")
+            logger.error(f"❌ فشل Markdown للمستخدم {user['user_id']}: {e}")
             # إذا فشل، نرسل نص عادي
             try:
                 await bot.send_message(
@@ -1233,11 +1231,6 @@ async def confirm_broadcast_final(callback: types.CallbackQuery, state: FSMConte
         f"• ✅ نجح: {success}\n"
         f"• ❌ فشل: {failed}\n\n"
     )
-    
-    if success > 0 and html_text != text:
-        result_text += "✅ تم الإرسال مع تنسيق HTML"
-    elif success > 0:
-        result_text += "ℹ️ تم الإرسال كنص عادي"
     
     await callback.message.edit_text(result_text)
     await state.clear()
