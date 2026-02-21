@@ -3,6 +3,8 @@ from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils import markdown as md
+from aiogram.enums import ParseMode  # ✅ 
 from config import ADMIN_ID, MODERATORS, USD_TO_SYP, DEPOSIT_GROUP, ORDERS_GROUP
 import config
 from datetime import datetime
@@ -10,9 +12,6 @@ import asyncio
 import logging
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.deposit import get_damascus_time
-from aiogram import types
-from aiogram.utils import markdown as md
-from aiogram.types import ParseMode
 import re
 
 # إعداد logging
