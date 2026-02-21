@@ -83,7 +83,47 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ''')
+        # ===== إضافة الجداول الجديدة هنا =====
+        
+        # جدول خيارات المنتجات (للألعاب والاشتراكات)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS product_options (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                quantity INTEGER,           -- الكمية (للشدات، الجواهر، المتابعين)
+                price_usd DECIMAL(10, 6) NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+        logging.info("✅ تم التأكد من وجود جدول product_options")
 
+        # جدول أنواع الخدمات (لتمييز رشق عادي / جودة عالية)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS service_types (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(50) UNIQUE,
+                display_name VARCHAR(100),
+                description TEXT
+            );
+        ''')
+        logging.info("✅ تم التأكد من وجود جدول service_types")
+
+        # إضافة أنواع الخدمات الأساسية
+        await conn.execute('''
+            INSERT INTO service_types (name, display_name, description) 
+            VALUES 
+                ('regular', 'رشق عادي', 'متابعين عاديين'),
+                ('high_quality', 'جودة عالية', 'متابعين بجودة عالية'),
+                ('telegram_stars', 'نجوم تليجرام', 'شراء نجوم تيليجرام')
+            ON CONFLICT (name) DO NOTHING;
+        ''')
+        logging.info("✅ تم إضافة أنواع الخدمات الأساسية")
+        
+        # ===== نهاية الجداول الجديدة =====
         # جدول طلبات الشحن
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS deposit_requests (
@@ -1876,5 +1916,80 @@ async def update_report_setting(pool, key, value):
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث إعداد التقرير {key}: {e}")
-     
+     # أضف الألعاب الأساسية
+async def init_games(pool):
+    async with pool.acquire() as conn:
+        # جلب قسم الألعاب
+        games_cat = await conn.fetchval("SELECT id FROM categories WHERE name = 'games'")
+        
+        if not games_cat:
+            # إذا ما في قسم ألعاب، نضيفه
+            games_cat = await conn.fetchval('''
+                INSERT INTO categories (name, display_name, icon, type, sort_order)
+                VALUES ('games', '🎮 ألعاب', '🎮', 'game', 2)
+                RETURNING id
+            ''')
+        
+        # 1. ببجي موبايل
+        pubg_id = await conn.fetchval('''
+            INSERT INTO applications (name, description, category_id, type, is_active)
+            VALUES ($1, $2, $3, 'game', true)
+            RETURNING id
+        ''', 'PUBG Mobile', 'شحن UC وبطاقات عضوية - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
+        
+        # خيارات ببجي
+        pubg_options = [
+            ('60 UC', 60, 0.99),
+            ('300 UC + 25 هدية', 325, 4.99),
+            ('600 UC + 60 هدية', 660, 9.99),
+            ('1500 UC + 300 هدية', 1800, 24.99),
+            ('3850 UC + 1020 هدية', 4870, 49.99),
+        ]
+        
+        for i, (name, qty, price) in enumerate(pubg_options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
+                VALUES ($1, $2, $3, $4, $5)
+            ''', pubg_id, name, qty, price, i)
+        
+        # 2. فري فاير
+        ff_id = await conn.fetchval('''
+            INSERT INTO applications (name, description, category_id, type, is_active)
+            VALUES ($1, $2, $3, 'game', true)
+            RETURNING id
+        ''', 'Free Fire', 'شحن الماس وعضويات - تأكد من إدخال ID اللاعب بشكل صحيح', games_cat)
+        
+        ff_options = [
+            ('110 ماسة', 110, 0.99),
+            ('570 ماسة + 50 هدية', 620, 4.99),
+            ('1220 ماسة + 150 هدية', 1370, 9.99),
+            ('2420 ماسة + 450 هدية', 2870, 24.99),
+        ]
+        
+        for i, (name, qty, price) in enumerate(ff_options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
+                VALUES ($1, $2, $3, $4, $5)
+            ''', ff_id, name, qty, price, i)
+        
+        # 3. كلاش أوف كلانس
+        coc_id = await conn.fetchval('''
+            INSERT INTO applications (name, description, category_id, type, is_active)
+            VALUES ($1, $2, $3, 'game', true)
+            RETURNING id
+        ''', 'Clash of Clans', 'شحن الجواهر والتذكرة الذهبية - تأكد من إدخال إيميل Supercell ID بشكل صحيح', games_cat)
+        
+        coc_options = [
+            ('80 جوهرة', 80, 0.99),
+            ('500 جوهرة', 500, 4.99),
+            ('1200 جوهرة', 1200, 9.99),
+            ('2500 جوهرة', 2500, 19.99),
+            ('التذكرة الذهبية (شهر)', 1, 4.99),
+        ]
+        
+        for i, (name, qty, price) in enumerate(coc_options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
+                VALUES ($1, $2, $3, $4, $5)
+            ''', coc_id, name, qty, price, i)
         return False
