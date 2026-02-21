@@ -83,6 +83,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ''')
+        
         # ===== إضافة الجداول الجديدة هنا =====
         
         # جدول خيارات المنتجات (للألعاب والاشتراكات)
@@ -92,7 +93,7 @@ async def init_db():
                 product_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
-                quantity INTEGER,           -- الكمية (للشدات، الجواهر، المتابعين)
+                quantity INTEGER,
                 price_usd DECIMAL(10, 6) NOT NULL,
                 sort_order INTEGER DEFAULT 0,
                 is_active BOOLEAN DEFAULT TRUE,
@@ -242,7 +243,8 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ''')
-	# جدول إعدادات التقارير
+        
+        # جدول إعدادات التقارير
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS report_settings (
                 id SERIAL PRIMARY KEY,
@@ -253,7 +255,7 @@ async def init_db():
             );
         ''')
 
-           # إضافة الإعدادات الافتراضية
+        # إضافة الإعدادات الافتراضية
         await conn.execute('''
             INSERT INTO report_settings (setting_key, setting_value, description) 
             VALUES 
@@ -381,23 +383,45 @@ async def init_db():
             logging.info("✅ تم التأكد من وجود عمود discount_percent")
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
-        # ===============================================================
+            
+        # ===== إضافة عمود manual_vip =====
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
+            logging.info("✅ تم إضافة عمود manual_vip")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود manual_vip: {e}")
+            
         # ===== إضافة عمود description إلى جدول applications =====
         try:
             await conn.execute('ALTER TABLE applications ADD COLUMN IF NOT EXISTS description TEXT')
             logging.info("✅ تم إضافة عمود description إلى جدول applications")
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود description: {e}")
-        # =======================================================
-        # ===== كود إضافة manual_vip =====
+            
+        # ========== إصلاح الأعمدة المفقودة في الجداول الجديدة ==========
         try:
-            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
-            logging.info("✅ تم إضافة عمود manual_vip")
+            # إضافة عمود display_name إلى app_variants
+            await conn.execute('ALTER TABLE app_variants ADD COLUMN IF NOT EXISTS display_name TEXT')
+            logging.info("✅ تم إضافة عمود display_name إلى app_variants")
         except Exception as e:
-            logging.warning(f"⚠️ خطأ في إضافة عمود manual_vip: {e}")
+            logging.warning(f"⚠️ خطأ في إضافة display_name إلى app_variants: {e}")
+            
+        try:
+            # إضافة عمود updated_at إلى product_options
+            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            logging.info("✅ تم إضافة عمود updated_at إلى product_options")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة updated_at إلى product_options: {e}")
+            
+        try:
+            # إضافة عمود created_at إلى product_options إذا لم يكن موجوداً
+            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            logging.info("✅ تم التأكد من وجود created_at في product_options")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة created_at إلى product_options: {e}")
 
         await conn.close()
-        logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح.")
+        logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
     except Exception as e:
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
 
@@ -417,8 +441,8 @@ async def get_pool():
                     'timezone': 'Asia/Damascus'
                 },
                 init=init_connection,
-                statement_cache_size=0,  # 👈 أضف هذا السطر (مهم جداً!)
-                max_cached_statement_lifetime=0  # 👈 أضف هذا السطر أيضاً
+                statement_cache_size=0,
+                max_cached_statement_lifetime=0
             )
             logging.info("✅ تم إنشاء مجمع الاتصالات مع تعطيل prepared statements")
         else:
@@ -429,8 +453,8 @@ async def get_pool():
                     'timezone': 'Asia/Damascus'
                 },
                 init=init_connection,
-                statement_cache_size=0,  # 👈 أضف هذا السطر
-                max_cached_statement_lifetime=0  # 👈 أضف هذا السطر
+                statement_cache_size=0,
+                max_cached_statement_lifetime=0
             )
             logging.info("✅ تم إنشاء مجمع الاتصالات مع تعطيل prepared statements")
         return pool
@@ -506,7 +530,7 @@ async def update_old_records_timezone(pool):
                         UPDATE {table} 
                         SET created_at = created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Damascus'
                         WHERE created_at IS NOT NULL
-                          AND EXTRACT(HOUR FROM created_at) < 3  -- تقريباً السجلات الليلية
+                          AND EXTRACT(HOUR FROM created_at) < 3
                     """)
                     
                     # تحديث updated_at إذا كان موجوداً
@@ -1016,33 +1040,31 @@ async def get_top_users_by_points(pool, limit=10):
         return []
 
 # ============= دوال الفئات الفرعية =============
+# في database.py - دوال app_variants
+async def get_app_variants(db_pool, app_id):
+    """جلب فئات منتج معين"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch(
+            "SELECT * FROM app_variants WHERE app_id = $1 AND is_active = TRUE ORDER BY price_usd",
+            app_id
+        )
 
-async def get_app_variants(pool, app_id):
-    """جلب الفئات الفرعية لتطبيق معين"""
-    try:
-        async with pool.acquire() as conn:
-            variants = await conn.fetch('''
-                SELECT * FROM app_variants 
-                WHERE app_id = $1 AND is_active = TRUE 
-                ORDER BY sort_order, price_usd
-            ''', app_id)
-            return variants
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب الفئات للتطبيق {app_id}: {e}")
-        return []
+async def get_app_variant(db_pool, variant_id):
+    """جلب فئة محددة"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT * FROM app_variants WHERE id = $1",
+            variant_id
+        )
 
-async def get_app_variant(pool, variant_id):
-    """جلب فئة فرعية محددة"""
-    try:
-        async with pool.acquire() as conn:
-            variant = await conn.fetchrow(
-                "SELECT * FROM app_variants WHERE id = $1",
-                variant_id
-            )
-            return variant
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب الفئة {variant_id}: {e}")
-        return None
+async def delete_app_variant(db_pool, variant_id):
+    """حذف فئة"""
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE app_variants SET is_active = FALSE WHERE id = $1",
+            variant_id
+        )
+        return True
 # ============= دوال المنتجات والخيارات الجديدة =============
 
 async def get_product_options(pool, product_id):
