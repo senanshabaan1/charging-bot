@@ -347,71 +347,65 @@ async def get_product_price(message: types.Message, state: FSMContext):
     """استلام سعر المنتج"""
     try:
         price = float(message.text)
+        await state.update_data(product_price=price)
+        await message.answer(
+            "📦 **أدخل الحد الأدنى للكمية:**\n"
+            "مثال: 100"
+        )
+        await state.set_state(AdminStates.waiting_product_min)
     except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001)")
-    
-    await state.update_data(product_price=price)
-    await message.answer(
-        "📦 **أدخل الحد الأدنى للكمية:**\n"
-        "مثال: 100"
-    )
-    await state.set_state(AdminStates.waiting_product_min)
-    except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001)")
 
 @router.message(AdminStates.waiting_product_min)
 async def get_product_min(message: types.Message, state: FSMContext):
     """استلام الحد الأدنى"""
     try:
         min_units = int(message.text)
+        
+        if min_units <= 0:
+            return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0")
+        
+        await state.update_data(product_min=min_units)
+        await message.answer(
+            "📈 **أدخل نسبة الربح (%):**\n"
+            "مثال: 10"
+        )
+        await state.set_state(AdminStates.waiting_product_profit)
+        
     except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
-    
-    if min_units <= 0:
-        return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0")
-    
-    await state.update_data(product_min=min_units)
-    await message.answer(
-        "📈 **أدخل نسبة الربح (%):**\n"
-        "مثال: 10"
-    )
-    await state.set_state(AdminStates.waiting_product_profit)
-    except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
 
 @router.message(AdminStates.waiting_product_profit)
 async def get_product_profit(message: types.Message, state: FSMContext, db_pool):
     """استلام نسبة الربح وحفظ المنتج"""
     try:
         profit = float(message.text)
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10)")
-    
-    data = await state.get_data()
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute('''
-            INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type)
-            VALUES ($1, $2, $3, $4, $5, 'service')
-        ''', 
-        data['product_name'],
-        data['product_price'],
-        data['product_min'],
-        profit,
-        data['category_id']
+        
+        data = await state.get_data()
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type)
+                VALUES ($1, $2, $3, $4, $5, 'service')
+            ''', 
+            data['product_name'],
+            data['product_price'],
+            data['product_min'],
+            profit,
+            data['category_id']
+            )
+        
+        await message.answer(
+            f"✅ **تم إضافة المنتج بنجاح!**\n\n"
+            f"📱 الاسم: {data['product_name']}\n"
+            f"💰 السعر: ${data['product_price']}\n"
+            f"📦 الحد الأدنى: {data['product_min']}\n"
+            f"📈 الربح: {profit}%"
         )
-    
-    await message.answer(
-        f"✅ **تم إضافة المنتج بنجاح!**\n\n"
-        f"📱 الاسم: {data['product_name']}\n"
-        f"💰 السعر: ${data['product_price']}\n"
-        f"📦 الحد الأدنى: {data['product_min']}\n"
-        f"📈 الربح: {profit}%"
-    )
-    await state.clear()
+        await state.clear()
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10)")
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
@@ -871,30 +865,28 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
     
     try:
         quantity = int(message.text.strip())
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
-    
-    if quantity <= 0:
-        return await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
-    
-    await state.update_data(option_quantity=quantity)
-    
-    data = await state.get_data()
-    option_name = data.get('option_name', '')
-    
-    await message.answer(
-        "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
-        "💰 **أدخل سعر المورد (بالدولار):**\n"
-        f"مثال: `0.99` لـ {quantity} وحدة\n"
-        f"الاسم: **{option_name}**\n"
-        f"الكمية: **{quantity}**\n\n"
-        f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
-    )
-    await state.set_state(AdminStates.waiting_option_supplier_price)
+        
+        if quantity <= 0:
+            return await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+        
+        await state.update_data(option_quantity=quantity)
+        
+        data = await state.get_data()
+        option_name = data.get('option_name', '')
+        
+        await message.answer(
+            "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
+            "💰 **أدخل سعر المورد (بالدولار):**\n"
+            f"مثال: `0.99` لـ {quantity} وحدة\n"
+            f"الاسم: **{option_name}**\n"
+            f"الكمية: **{quantity}**\n\n"
+            f"❌ اضغط على زر الإلغاء للرجوع",
+            reply_markup=get_cancel_keyboard()
+        )
+        await state.set_state(AdminStates.waiting_option_supplier_price)
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_option_supplier_price)
 async def add_option_step_supplier_price(message: types.Message, state: FSMContext, db_pool):
@@ -1669,92 +1661,92 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
     from config import ADMIN_ID, MODERATORS
     admin_ids = [ADMIN_ID] + MODERATORS
     admin_ids_str = ','.join([str(id) for id in admin_ids if id])
-            
-        async with db_pool.acquire() as conn:
-            # 1. مسح سجل النقاط
-            await conn.execute("DELETE FROM points_history")
-            
-            # 2. مسح طلبات الاسترداد
-            await conn.execute("DELETE FROM redemption_requests")
-            
-            # 3. مسح طلبات الشحن
-            await conn.execute("DELETE FROM deposit_requests")
-            
-            # 4. مسح طلبات التطبيقات
-            await conn.execute("DELETE FROM orders")
-            
-            # 5. مسح المستخدمين (مع الاحتفاظ بالمشرفين)
-            if admin_ids_str:
-                await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
-                
-                # إعادة ضبط المشرفين - مع إعادة تعيين VIP والخصومات اليدوية
-                for admin_id in admin_ids:
-                    if admin_id:
-                        await conn.execute('''
-                            UPDATE users 
-                            SET 
-                                balance = 0, 
-                                total_points = 0, 
-                                total_deposits = 0, 
-                                total_orders = 0, 
-                                referral_count = 0, 
-                                referral_earnings = 0,
-                                total_points_earned = 0, 
-                                total_points_redeemed = 0,
-                                vip_level = 0,           -- إعادة ضبط مستوى VIP
-                                total_spent = 0,         -- إعادة ضبط إجمالي المشتريات
-                                discount_percent = 0,    -- إعادة ضبط نسبة الخصم
-                                manual_vip = FALSE,      -- 👈 إعادة ضبط الحالة اليدوية
-                                last_activity = CURRENT_TIMESTAMP
-                            WHERE user_id = $1
-                        ''', admin_id)
-            else:
-                await conn.execute("DELETE FROM users")
-            
-            # 6. تحديث سعر الصرف
-            await conn.execute('''
-                INSERT INTO bot_settings (key, value, description) 
-                VALUES ('usd_to_syp', $1, 'سعر صرف الدولار مقابل الليرة')
-                ON CONFLICT (key) DO UPDATE SET value = $1
-            ''', str(new_rate))
-            
-            # 7. إعادة ضبط إعدادات النقاط
-            await conn.execute('''
-                UPDATE bot_settings SET value = '1' 
-                WHERE key IN ('points_per_order', 'points_per_referral')
-            ''')
-            
-            # 8. إعادة ضبط redemption_rate
-            await conn.execute('''
-                UPDATE bot_settings SET value = '100' 
-                WHERE key = 'redemption_rate'
-            ''')
-            
-            # 9. إعادة ضبط مستويات VIP في جدول vip_levels
-            await conn.execute('''
-                INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
-                VALUES 
-                    (0, 'VIP 0', 0, 0, '🟢'),
-                    (1, 'VIP 1', 1000, 1, '🔵'),
-                    (2, 'VIP 2', 2000, 2, '🟣'),
-                    (3, 'VIP 3', 4000, 3, '🟡'),
-                    (4, 'VIP 4', 8000, 5, '🔴')
-                ON CONFLICT (level) DO UPDATE SET 
-                    min_spent = EXCLUDED.min_spent,
-                    discount_percent = EXCLUDED.discount_percent,
-                    icon = EXCLUDED.icon;
-            ''')
+    
+    async with db_pool.acquire() as conn:
+        # 1. مسح سجل النقاط
+        await conn.execute("DELETE FROM points_history")
         
-        await message.answer(
-            f"✅ **تم تصفير البوت بنجاح!**\n\n"
-            f"💰 سعر الصرف الجديد: {new_rate} ل.س\n"
-            f"⭐ نقاط لكل طلب: 1\n"
-            f"🔗 نقاط لكل إحالة: 1\n"
-            f"🎁 100 نقطة = 1 دولار\n"
-            f"👑 تم إعادة ضبط جميع مستويات VIP والخصومات اليدوية إلى 0\n\n"
-            f"البوت الآن جاهز للبدء من جديد!"
-        )
-        await state.clear()
+        # 2. مسح طلبات الاسترداد
+        await conn.execute("DELETE FROM redemption_requests")
+        
+        # 3. مسح طلبات الشحن
+        await conn.execute("DELETE FROM deposit_requests")
+        
+        # 4. مسح طلبات التطبيقات
+        await conn.execute("DELETE FROM orders")
+        
+        # 5. مسح المستخدمين (مع الاحتفاظ بالمشرفين)
+        if admin_ids_str:
+            await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
+            
+            # إعادة ضبط المشرفين - مع إعادة تعيين VIP والخصومات اليدوية
+            for admin_id in admin_ids:
+                if admin_id:
+                    await conn.execute('''
+                        UPDATE users 
+                        SET 
+                            balance = 0, 
+                            total_points = 0, 
+                            total_deposits = 0, 
+                            total_orders = 0, 
+                            referral_count = 0, 
+                            referral_earnings = 0,
+                            total_points_earned = 0, 
+                            total_points_redeemed = 0,
+                            vip_level = 0,           -- إعادة ضبط مستوى VIP
+                            total_spent = 0,         -- إعادة ضبط إجمالي المشتريات
+                            discount_percent = 0,    -- إعادة ضبط نسبة الخصم
+                            manual_vip = FALSE,      -- 👈 إعادة ضبط الحالة اليدوية
+                            last_activity = CURRENT_TIMESTAMP
+                        WHERE user_id = $1
+                    ''', admin_id)
+        else:
+            await conn.execute("DELETE FROM users")
+        
+        # 6. تحديث سعر الصرف
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value, description) 
+            VALUES ('usd_to_syp', $1, 'سعر صرف الدولار مقابل الليرة')
+            ON CONFLICT (key) DO UPDATE SET value = $1
+        ''', str(new_rate))
+        
+        # 7. إعادة ضبط إعدادات النقاط
+        await conn.execute('''
+            UPDATE bot_settings SET value = '1' 
+            WHERE key IN ('points_per_order', 'points_per_referral')
+        ''')
+        
+        # 8. إعادة ضبط redemption_rate
+        await conn.execute('''
+            UPDATE bot_settings SET value = '100' 
+            WHERE key = 'redemption_rate'
+        ''')
+        
+        # 9. إعادة ضبط مستويات VIP في جدول vip_levels
+        await conn.execute('''
+            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
+            VALUES 
+                (0, 'VIP 0', 0, 0, '🟢'),
+                (1, 'VIP 1', 1000, 1, '🔵'),
+                (2, 'VIP 2', 2000, 2, '🟣'),
+                (3, 'VIP 3', 4000, 3, '🟡'),
+                (4, 'VIP 4', 8000, 5, '🔴')
+            ON CONFLICT (level) DO UPDATE SET 
+                min_spent = EXCLUDED.min_spent,
+                discount_percent = EXCLUDED.discount_percent,
+                icon = EXCLUDED.icon;
+        ''')
+    
+    await message.answer(
+        f"✅ **تم تصفير البوت بنجاح!**\n\n"
+        f"💰 سعر الصرف الجديد: {new_rate} ل.س\n"
+        f"⭐ نقاط لكل طلب: 1\n"
+        f"🔗 نقاط لكل إحالة: 1\n"
+        f"🎁 100 نقطة = 1 دولار\n"
+        f"👑 تم إعادة ضبط جميع مستويات VIP والخصومات اليدوية إلى 0\n\n"
+        f"البوت الآن جاهز للبدء من جديد!"
+    )
+    await state.clear()
         
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح")
@@ -2357,7 +2349,7 @@ async def finalize_add_balance(message: types.Message, state: FSMContext, db_poo
         logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
     
     await state.clear()
-    except Exception as e:
+    
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
 
