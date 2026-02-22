@@ -928,9 +928,6 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
         reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_option_profit)
-        
-    except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_option_profit)
 async def add_option_step_profit(message: types.Message, state: FSMContext):
