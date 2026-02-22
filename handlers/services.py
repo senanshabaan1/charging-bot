@@ -345,6 +345,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             reply_markup=builder.as_markup()
         )
         await state.set_state(OrderStates.choosing_variant)
+
 @router.message(OrderStates.qty)
 async def get_qty(message: types.Message, state: FSMContext, db_pool):
     """استقبال الكمية مع تطبيق الخصم"""
@@ -393,17 +394,24 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
         )
         return
     
-    # حساب السعر
+    # حساب السعر الأصلي (بدون خصم) والسعر بعد الخصم
     final_unit_price_usd = data.get('final_unit_price_usd', 0)
+    
+    # السعر الأصلي قبل الخصم
+    original_total_usd = final_unit_price_usd * qty
+    original_total_syp = original_total_usd * current_rate
+    
+    # السعر بعد الخصم
     discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100) if final_unit_price_usd > 0 else 0
     total_usd = qty * discounted_unit_price_usd
     total_syp = total_usd * current_rate
     
-    # حفظ البيانات الجديدة
+    # حفظ البيانات الجديدة مع السعر الأصلي
     await state.update_data(
         qty=qty,
         total_usd=total_usd,
-        total_syp=total_syp
+        total_syp=total_syp,
+        original_total_syp=original_total_syp  # حفظ السعر الأصلي
     )
     
     # التحقق من الرصيد
@@ -422,7 +430,6 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
             return
         
         if user['balance'] < total_syp:
-            # حساب المبلغ المتبقي
             remaining = total_syp - user['balance']
             await message.answer(
                 f"⚠️ **رصيدك غير كافي**\n\n"
@@ -434,12 +441,12 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
             )
             return
     
-    # رسالة مع تفاصيل الخصم
+    # رسالة مع تفاصيل الخصم بشكل صحيح
     if discount > 0:
-        original_total = (final_unit_price_usd * qty * current_rate)
-        saved_amount = original_total - total_syp
+        saved_amount = original_total_syp - total_syp
         price_message = (
-            f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س\n"
+            f"💰 **المبلغ قبل الخصم:** {original_total_syp:,.0f} ل.س\n"
+            f"💰 **المبلغ بعد الخصم:** {total_syp:,.0f} ل.س\n"
             f"🎁 **وفرت:** {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
         )
     else:
@@ -561,48 +568,96 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
 
 @router.message(OrderStates.target_id)
 async def confirm_order(message: types.Message, state: FSMContext, db_pool):
-    if message.text == "🔙 رجوع للقائمة":
+    """استقبال ID الهدف وتأكيد الطلب"""
+    logger.info(f"📩 استقبال target_id من {message.from_user.id}: {message.text}")
+    
+    # التحقق من الإلغاء أولاً
+    if message.text in ["🔙 رجوع للقائمة", "/cancel", "/رجوع", "🏠 القائمة الرئيسية"]:
         await state.clear()
-        await message.answer("تم إلغاء الطلب.")
+        from handlers.start import get_main_menu_keyboard
+        from database import is_admin_user
+        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        await message.answer(
+            "✅ تم إلغاء الطلب",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
         return
     
     target_id = message.text.strip()
     if not target_id:
-        return await message.answer(
+        await message.answer(
             "⚠️ يرجى إدخال ID الحساب.",
             reply_markup=get_back_keyboard()
         )
+        return
     
+    # التحقق من وجود البيانات
     data = await state.get_data()
+    if not data or 'app' not in data:
+        await message.answer("❌ انتهت صلاحية الطلب، يرجى البدء من جديد")
+        await state.clear()
+        return
+    
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
+    total_syp = data.get('total_syp', 0)
     
+    # التحقق من الرصيد
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow(
             "SELECT balance FROM users WHERE user_id = $1",
             message.from_user.id
         )
         
-        if not user or user['balance'] < data['total_syp']:
+        if not user or user['balance'] < total_syp:
             await state.clear()
-            return await message.answer(
+            await message.answer(
                 "❌ رصيدك غير كافي. تم إلغاء الطلب.",
                 reply_markup=get_back_keyboard()
             )
+            return
     
     await state.update_data(target_id=target_id)
     
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="✅ تأكيد ودفع", callback_data="execute_buy"))
-    builder.row(types.InlineKeyboardButton(text="🔙 إلغاء", callback_data="cancel_order"))
-    
-    # رسالة التأكيد مع تفاصيل الخصم
-    if discount > 0:
-        saved_amount = data.get('original_total_syp', data['total_syp']) - data['total_syp']
-        price_detail = f"💰 **السعر الإجمالي:** {data['total_syp']:,.0f} ل.س (بدلاً من {data.get('original_total_syp', data['total_syp']):,.0f} ل.س)\n"
-        price_detail += f"🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
+    # حساب السعر الأصلي قبل الخصم
+    if 'variant' in data:
+        # للألعاب والاشتراكات
+        app = data['app']
+        variant = data['variant']
+        app_profit = float(app.get('profit_percentage', 0) or 0) / 100
+        opt_price = float(variant.get('price_usd', 0))
+        original_price_usd = opt_price * (1 + app_profit)
+        original_total_syp = original_price_usd * data.get('current_rate', 115)
     else:
-        price_detail = f"💰 **السعر الإجمالي:** {data['total_syp']:,.0f} ل.س"
+        # للخدمات العادية
+        final_unit_price_usd = data.get('final_unit_price_usd', 0)
+        qty = data.get('qty', 1)
+        original_total_syp = final_unit_price_usd * qty * data.get('current_rate', 115)
+    
+    # حفظ السعر الأصلي في البيانات
+    await state.update_data(original_total_syp=original_total_syp)
+    
+    # بناء أزرار التأكيد
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ تأكيد ودفع", callback_data="execute_buy"),
+        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_order")
+    )
+    
+    # رسالة التأكيد مع تفاصيل الخصم بشكل صحيح
+    if discount > 0:
+        saved_amount = original_total_syp - total_syp
+        if saved_amount > 0:
+            price_detail = (
+                f"💰 **السعر قبل الخصم:** {original_total_syp:,.0f} ل.س\n"
+                f"💰 **السعر بعد الخصم:** {total_syp:,.0f} ل.س\n"
+                f"🎁 **وفرت:** {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
+            )
+        else:
+            # إذا كان الحساب غلط، نعرض السعر فقط
+            price_detail = f"💰 **السعر الإجمالي:** {total_syp:,.0f} ل.س"
+    else:
+        price_detail = f"💰 **السعر الإجمالي:** {total_syp:,.0f} ل.س"
     
     # إضافة تحذيرات حسب نوع الخدمة
     app_name = data['app']['name'].lower()
@@ -631,11 +686,12 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     )
     
     await message.answer(
-        msg, 
-        reply_markup=builder.as_markup(), 
+        msg,
+        reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     await state.set_state(OrderStates.confirm)
+    logger.info(f"✅ تم تغيير الحالة إلى confirm للمستخدم {message.from_user.id}")
 
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
