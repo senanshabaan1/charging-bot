@@ -1082,7 +1082,7 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
         await message.answer("❌ يرجى إدخال رقم صحيح للسعر:")
 
 @router.message(AdminStates.waiting_option_profit)
-async def add_option_step_profit(message: types.Message, state: FSMContext, db_pool):
+async def add_option_step_profit(message: types.Message, state: FSMContext):
     """استلام نسبة الربح"""
     if not is_admin(message.from_user.id):
         return
@@ -1126,7 +1126,7 @@ async def add_option_step_profit(message: types.Message, state: FSMContext, db_p
         await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح:")
 
 @router.message(AdminStates.waiting_option_description)
-async def add_option_step_description(message: types.Message, state: FSMContext, db_pool):
+async def add_option_step_description(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     """استلام الوصف وحفظ الخيار"""
     if not is_admin(message.from_user.id):
         return
@@ -1187,23 +1187,29 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     
     await message.answer(confirm_text)
     
-    # العودة لقائمة الخيارات
-    await asyncio.sleep(2)
+    # العودة لقائمة الخيارات بعد 3 ثواني
+    await asyncio.sleep(3)
     
     # إعادة عرض قائمة الخيارات
-    from handlers.admin import show_product_options
-    fake_callback = types.CallbackQuery(
-        id='0',
-        from_user=message.from_user,
-        message=types.Message(
-            message_id=0,
-            date=datetime.now(),
-            chat=types.Chat(id=message.from_user.id, type='private'),
-            text=''
-        ),
-        data=f"prod_options_{product_id}"
-    )
-    await show_product_options(fake_callback, db_pool)
+    async with db_pool.acquire() as conn:
+        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+        if product:
+            # إنشاء callback وهمي لإعادة عرض الخيارات
+            fake_callback = types.CallbackQuery(
+                id='0',
+                from_user=message.from_user,
+                message=types.Message(
+                    message_id=0,
+                    date=datetime.now(),
+                    chat=types.Chat(id=message.from_user.id, type='private'),
+                    text=''
+                ),
+                data=f"prod_options_{product_id}",
+                bot=bot
+            )
+            # استدعاء دالة عرض الخيارات
+            from handlers.admin import show_product_options
+            await show_product_options(fake_callback, db_pool)
     
     await state.clear()
 
