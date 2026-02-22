@@ -6,6 +6,46 @@ from datetime import datetime
 from config import DB_CONFIG
 
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
+def format_local_time(dt):
+    """تنسيق الوقت حسب توقيت دمشق للعرض"""
+    if dt is None:
+        return "غير معروف"
+    
+    if isinstance(dt, str):
+        try:
+            # محاولة تحويل النص إلى datetime
+            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+        except:
+            return dt
+    
+    # إذا كان الوقت بدون منطقة زمنية، نضيف UTC
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    
+    # نحول إلى توقيت دمشق
+    local_dt = dt.astimezone(DAMASCUS_TZ)
+    return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+async def set_database_timezone(pool):
+    """ضبط المنطقة الزمنية لقاعدة البيانات لجميع الاتصالات"""
+    try:
+        async with pool.acquire() as conn:
+            # ضبط المنطقة الزمنية للاتصال الحالي
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # التحقق من الوقت بعد الضبط
+            db_time = await conn.fetchval("SELECT NOW()")
+            
+            # جلب الوقت الحقيقي من قاعدة البيانات (بدون تحويل)
+            db_time_utc = await conn.fetchval("SELECT NOW() AT TIME ZONE 'UTC'")
+            
+            logging.info(f"🕒 وقت DB بعد الضبط (Asia/Damascus): {db_time}")
+            logging.info(f"🕒 وقت DB بصيغة UTC: {db_time_utc}")
+            
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في ضبط توقيت قاعدة البيانات: {e}")
+        return False
 
 async def init_db():
     """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
@@ -671,6 +711,21 @@ async def deduct_points(pool, user_id, points, action, description):
     except Exception as e:
         logging.error(f"❌ خطأ في خصم نقاط من المستخدم {user_id}: {e}")
         return False, str(e)
+async def add_points_history(db_pool, user_id, points, action, description):
+    """إضافة سجل نقاط جديد مع توقيت دمشق"""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute('''
+                INSERT INTO points_history (user_id, points, action, description, created_at)
+                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Damascus')
+            ''', user_id, points, action, description)
+            
+            # تسجيل في اللوق للتوثيق
+            logging.info(f"✅ تم إضافة سجل نقاط للمستخدم {user_id}: {points} نقطة - {action}")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة سجل نقاط للمستخدم {user_id}: {e}")
+        return False
 
 async def process_referral(pool, referred_user_id, referrer_code):
     """معالجة الإحالة عند تسجيل مستخدم جديد"""
@@ -724,18 +779,31 @@ async def get_user_points(pool, user_id):
         logging.error(f"❌ خطأ في جلب نقاط المستخدم {user_id}: {e}")
         return 0
 
-async def get_points_history(pool, user_id, limit=10):
-    """جلب سجل نقاط المستخدم"""
+async def get_points_history(db_pool, user_id, limit=20):
+    """جلب سجل نقاط المستخدم مع توقيت دمشق"""
     try:
-        async with pool.acquire() as conn:
+        async with db_pool.acquire() as conn:
             await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
-            history = await conn.fetch('''
-                SELECT points, action, description, created_at AT TIME ZONE 'Asia/Damascus' as created_at
+            
+            rows = await conn.fetch('''
+                SELECT points, action, description, 
+                       to_char(created_at AT TIME ZONE 'Asia/Damascus', 'YYYY-MM-DD HH24:MI:SS') as date,
+                       created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history
                 WHERE user_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2
             ''', user_id, limit)
+            
+            history = []
+            for row in rows:
+                history.append({
+                    'points': row['points'],
+                    'action': row['action'],
+                    'description': row['description'],
+                    'date': row['date'],
+                    'created_at': row['created_at']
+                })
             return history
     except Exception as e:
         logging.error(f"❌ خطأ في جلب سجل النقاط للمستخدم {user_id}: {e}")
@@ -1067,18 +1135,16 @@ async def delete_app_variant(db_pool, variant_id):
         return True
 # ============= دوال المنتجات والخيارات الجديدة =============
 
-# في دوال get_product_options و get_product_option
-async def get_product_options(pool, product_id):
-    """جلب خيارات منتج معين (للألعاب والاشتراكات)"""
+async def get_product_options(db_pool, product_id):
+    """جلب جميع الخيارات النشطة لمنتج معين"""
     try:
-        async with pool.acquire() as conn:
-            options = await conn.fetch('''
-                SELECT * FROM product_options 
-                WHERE product_id = $1 AND is_active = TRUE 
-                ORDER BY sort_order, price_usd
-            ''', product_id)
+        async with db_pool.acquire() as conn:
+            options = await conn.fetch(
+                "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+                product_id
+            )
             
-            # ✅ تحويل Decimal إلى float
+            # تحويل Decimal إلى float للسهولة
             result = []
             for opt in options:
                 opt_dict = dict(opt)
@@ -1088,23 +1154,6 @@ async def get_product_options(pool, product_id):
     except Exception as e:
         logging.error(f"❌ خطأ في جلب خيارات المنتج {product_id}: {e}")
         return []
-
-async def get_product_option(pool, option_id):
-    """جلب خيار محدد"""
-    try:
-        async with pool.acquire() as conn:
-            option = await conn.fetchrow(
-                "SELECT * FROM product_options WHERE id = $1",
-                option_id
-            )
-            if option:
-                opt_dict = dict(option)
-                opt_dict['price_usd'] = float(opt_dict['price_usd']) if opt_dict['price_usd'] else 0.0
-                return opt_dict
-            return None
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب الخيار {option_id}: {e}")
-        return None
 
 # نفس الشيء لدوال app_variants
 async def get_app_variants(pool, app_id):
@@ -1605,35 +1654,42 @@ async def get_points_per_referral(pool):
         logging.error(f"❌ خطأ في جلب نقاط الإحالة: {e}")
         return 1
 
-async def get_user_points_history(pool, user_id, limit=20):
-    """جلب سجل نقاط المستخدم مع تفاصيل أكثر"""
+async def get_user_points_summary(db_pool, user_id):
+    """جلب ملخص نقاط المستخدم"""
     try:
-        async with pool.acquire() as conn:
+        async with db_pool.acquire() as conn:
             await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
-            history = await conn.fetch('''
-                SELECT points, action, description, created_at AT TIME ZONE 'Asia/Damascus' as created_at
+            
+            summary = await conn.fetchrow('''
+                SELECT 
+                    COALESCE(SUM(CASE WHEN points > 0 THEN points ELSE 0 END), 0) as total_earned,
+                    COALESCE(SUM(CASE WHEN points < 0 THEN ABS(points) ELSE 0 END), 0) as total_spent,
+                    COUNT(*) as total_transactions,
+                    MAX(created_at) as last_transaction
                 FROM points_history
                 WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT $2
-            ''', user_id, limit)
-            return history
+            ''', user_id)
+            
+            if summary:
+                result = {
+                    'total_earned': summary['total_earned'],
+                    'total_spent': summary['total_spent'],
+                    'total_transactions': summary['total_transactions'],
+                    'last_transaction': None
+                }
+                
+                if summary['last_transaction']:
+                    # تحويل التوقيت إذا لزم الأمر
+                    last_tx = summary['last_transaction']
+                    if last_tx.tzinfo is None:
+                        last_tx = pytz.UTC.localize(last_tx)
+                    result['last_transaction'] = last_tx.astimezone(DAMASCUS_TZ)
+                
+                return result
+            return None
     except Exception as e:
-        logging.error(f"❌ خطأ في جلب سجل النقاط للمستخدم {user_id}: {e}")
-        return []
-
-async def get_total_points_earned(pool, user_id):
-    """جلب إجمالي النقاط المكتسبة للمستخدم"""
-    try:
-        async with pool.acquire() as conn:
-            total = await conn.fetchval(
-                "SELECT total_points_earned FROM users WHERE user_id = $1",
-                user_id
-            )
-            return total or 0
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب إجمالي النقاط المكتسبة للمستخدم {user_id}: {e}")
-        return 0
+        logging.error(f"❌ خطأ في جلب ملخص النقاط للمستخدم {user_id}: {e}")
+        return None
 
 async def get_total_points_redeemed(pool, user_id):
     """جلب إجمالي النقاط المستردة للمستخدم"""
@@ -2118,31 +2174,17 @@ async def init_games(pool):
         logging.error(f"❌ خطأ في إضافة الألعاب: {e}")
 # ============= دوال خيارات المنتجات (product_options) =============
 
-async def get_product_options(db_pool, product_id):
-    """جلب جميع الخيارات النشطة لمنتج معين"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetch(
-            "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
-            product_id
-        )
-
-async def get_product_option(db_pool, option_id):
-    """جلب معلومات خيار معين"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow(
-            "SELECT * FROM product_options WHERE id = $1",
-            option_id
-        )
-
 async def update_product_option(db_pool, option_id, updates):
-    """تحديث بيانات خيار"""
+    """تعديل خيار (سعر، اسم، كمية) - مع تحديد الحقول المسموحة"""
     async with db_pool.acquire() as conn:
-        # تحضير جملة SET الديناميكية
         set_parts = []
         values = []
+        # الحقول المسموح بتعديلها فقط
+        allowed_fields = ['name', 'quantity', 'price_usd', 'sort_order', 'description', 'is_active']
+        
         i = 1
         for key, value in updates.items():
-            if key in ['name', 'quantity', 'price_usd', 'sort_order', 'description', 'is_active']:
+            if key in allowed_fields:
                 set_parts.append(f"{key} = ${i}")
                 values.append(value)
                 i += 1
@@ -2150,20 +2192,9 @@ async def update_product_option(db_pool, option_id, updates):
         if not set_parts:
             return False
         
-        set_clause = ", ".join(set_parts)
         values.append(option_id)
-        
-        query = f"UPDATE product_options SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ${i}"
+        query = f"UPDATE product_options SET {', '.join(set_parts)}, updated_at = CURRENT_TIMESTAMP WHERE id = ${i}"
         await conn.execute(query, *values)
-        return True
-
-async def delete_product_option(db_pool, option_id):
-    """حذف خيار (تعطيله)"""
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE product_options SET is_active = FALSE WHERE id = $1",
-            option_id
-        )
         return True
 
 async def add_product_option(db_pool, product_id, name, quantity, price_usd, description=None, sort_order=0):
