@@ -946,56 +946,23 @@ async def delete_option_execute(callback: types.CallbackQuery, db_pool):
     await asyncio.sleep(1)
     await show_product_options(callback, db_pool)
 
-@router.callback_query(F.data.startswith("templates_menu_"))
-async def templates_menu(callback: types.CallbackQuery, state: FSMContext):
-    """عرض قائمة القوالب الجاهزة"""
-    product_id = int(callback.data.split("_")[2])
-    await state.update_data(game_id=product_id)
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="🎯 قالب PUBG", 
-        callback_data=f"template_pubg_{product_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="🔥 قالب Free Fire", 
-        callback_data=f"template_ff_{product_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="⚔️ قالب Clash of Clans", 
-        callback_data=f"template_coc_{product_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="✏️ إدخال يدوي", 
-        callback_data=f"manual_options_{product_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data=f"prod_options_{product_id}"
-    ))
-    
-    await callback.message.edit_text(
-        "📋 **اختر القالب الجاهز:**",
-        reply_markup=builder.as_markup()
+
     )
-# ============= إضافة خيار جديد بطريقة تفاعلية =============
+# ============= إضافة خيار جديد بطريقة تفاعلية كاملة =============
 
 @router.callback_query(F.data.startswith("add_option_"))
 async def add_option_interactive_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء إضافة خيار جديد بطريقة تفاعلية"""
+    """بدء إضافة خيار جديد بطريقة تفاعلية خطوة بخطوة"""
     product_id = int(callback.data.split("_")[2])
     await state.update_data(product_id=product_id)
-    
-    # جلب معلومات المنتج
-    from database import get_product
-    product = await get_product(callback.bot, product_id)  # تحتاج تعديل هذه الدالة
     
     await callback.message.edit_text(
         "➕ **إضافة خيار جديد - الخطوة 1/5**\n\n"
         "📝 **أدخل اسم الخيار:**\n"
         "مثال: `60 UC`\n"
-        "مثال: `570 ماسة`\n\n"
-        "أو أرسل /cancel للإلغاء"
+        "مثال: `570 ماسة`\n"
+        "مثال: `اشتراك شهر`\n\n"
+        "❌ أرسل /cancel للإلغاء"
     )
     await state.set_state(AdminStates.waiting_option_name)
 
@@ -1003,6 +970,12 @@ async def add_option_interactive_start(callback: types.CallbackQuery, state: FSM
 async def add_option_step_name(message: types.Message, state: FSMContext):
     """استلام اسم الخيار"""
     if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
         return
     
     name = message.text.strip()
@@ -1013,9 +986,12 @@ async def add_option_step_name(message: types.Message, state: FSMContext):
     
     await message.answer(
         "➕ **إضافة خيار جديد - الخطوة 2/5**\n\n"
-        f"📦 **الكمية:** (أدخل الرقم فقط)\n"
-        f"مثال: `60`\n\n"
-        f"الاسم: **{name}**"
+        f"📦 **أدخل الكمية:** (رقم فقط)\n"
+        f"هذه هي الكمية الكاملة للحزمة (وليس سعر الوحدة)\n"
+        f"مثال: `60` لـ 60 UC\n"
+        f"مثال: `570` لـ 570 ماسة\n\n"
+        f"الاسم: **{name}**\n\n"
+        f"❌ أرسل /cancel للإلغاء"
     )
     await state.set_state(AdminStates.waiting_option_quantity)
 
@@ -1025,6 +1001,12 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
     try:
         quantity = int(message.text.strip())
         if quantity <= 0:
@@ -1032,12 +1014,18 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
         
         await state.update_data(option_quantity=quantity)
         
+        data = await state.get_data()
+        option_name = data.get('option_name', '')
+        
         await message.answer(
             "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
-            "💰 **سعر المورد (بالدولار):**\n"
-            "أدخل السعر الكامل للحزمة (وليس سعر الوحدة)\n"
-            f"مثال: `0.99` (لـ {quantity} وحدة)\n\n"
-            "هذا هو السعر الذي تشتري به من المورد"
+            "💰 **أدخل سعر المورد (بالدولار):**\n"
+            "هذا هو السعر الذي تشتري به هذه الحزمة كاملة من المورد\n"
+            f"مثال: `0.99` لـ {quantity} وحدة\n"
+            f"مثال: `4.99` لـ {quantity} وحدة\n\n"
+            f"الاسم: **{option_name}**\n"
+            f"الكمية: **{quantity}**\n\n"
+            f"❌ أرسل /cancel للإلغاء"
         )
         await state.set_state(AdminStates.waiting_option_supplier_price)
         
@@ -1048,6 +1036,12 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
 async def add_option_step_supplier_price(message: types.Message, state: FSMContext, db_pool):
     """استلام سعر المورد"""
     if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
         return
     
     try:
@@ -1068,13 +1062,19 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
             )
             default_profit = float(app['profit_percentage'] or 10) if app else 10
         
+        option_name = data.get('option_name', '')
+        quantity = data.get('option_quantity', 0)
+        
         await message.answer(
             "➕ **إضافة خيار جديد - الخطوة 4/5**\n\n"
-            "📈 **نسبة الربح (%):**\n"
+            "📈 **أدخل نسبة الربح (%):**\n"
             f"النسبة الافتراضية: **{default_profit}%**\n"
-            "أدخل النسبة المطلوبة (رقم فقط)\n"
+            "هذه النسبة ستضاف على سعر المورد لحساب سعر البيع\n"
             f"مثال: `{default_profit}`\n\n"
-            "هذه النسبة ستضاف على سعر المورد"
+            f"الاسم: **{option_name}**\n"
+            f"الكمية: **{quantity}**\n"
+            f"سعر المورد: **${supplier_price:.3f}**\n\n"
+            f"❌ أرسل /cancel للإلغاء"
         )
         await state.set_state(AdminStates.waiting_option_profit)
         
@@ -1087,6 +1087,12 @@ async def add_option_step_profit(message: types.Message, state: FSMContext, db_p
     if not is_admin(message.from_user.id):
         return
     
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
     try:
         profit_percent = float(message.text.strip())
         if profit_percent < 0:
@@ -1094,13 +1100,25 @@ async def add_option_step_profit(message: types.Message, state: FSMContext, db_p
         
         await state.update_data(profit_percent=profit_percent)
         
+        data = await state.get_data()
+        option_name = data.get('option_name', '')
+        quantity = data.get('option_quantity', 0)
+        supplier_price = data.get('supplier_price', 0)
+        
         await message.answer(
-            "➕ **إضافة خيار جديد - الخطوة 5/5 (اختياري)**\n\n"
-            "📝 **الوصف:**\n"
-            "أدخل وصفاً للخيار (اختياري)\n"
-            "مثال: `شحن سريع`\n"
-            "مثال: `مع هدية خاصة`\n\n"
-            "أرسل `/skip` لتخطي هذه الخطوة"
+            "➕ **إضافة خيار جديد - الخطوة 5/5**\n\n"
+            "📝 **أدخل وصف الخيار:**\n"
+            "هذا الوصف سيظهر للمستخدم عند اختيار هذا الخيار\n"
+            "يمكنك كتابة أي تفاصيل إضافية مثل:\n"
+            "• مدة الشحن\n"
+            "• هدايا إضافية\n"
+            "• شروط خاصة\n\n"
+            f"الاسم: **{option_name}**\n"
+            f"الكمية: **{quantity}**\n"
+            f"سعر المورد: **${supplier_price:.3f}**\n"
+            f"نسبة الربح: **{profit_percent}%**\n\n"
+            "أدخل الوصف (أو أرسل `-` لتخطي):\n\n"
+            "❌ أرسل /cancel للإلغاء"
         )
         await state.set_state(AdminStates.waiting_option_description)
         
@@ -1113,9 +1131,15 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     if not is_admin(message.from_user.id):
         return
     
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
     # التحقق من التخطي
     description = None
-    if message.text and message.text != "/skip":
+    if message.text and message.text != "-":
         description = message.text.strip()
     
     data = await state.get_data()
@@ -1157,9 +1181,30 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     )
     
     if description:
-        confirm_text += f"📝 **الوصف:** {description}\n"
+        confirm_text += f"📝 **الوصف:**\n{description}\n\n"
+    
+    confirm_text += "🔹 يمكنك الآن رؤية هذا الخيار عند شراء التطبيق."
     
     await message.answer(confirm_text)
+    
+    # العودة لقائمة الخيارات
+    await asyncio.sleep(2)
+    
+    # إعادة عرض قائمة الخيارات
+    from handlers.admin import show_product_options
+    fake_callback = types.CallbackQuery(
+        id='0',
+        from_user=message.from_user,
+        message=types.Message(
+            message_id=0,
+            date=datetime.now(),
+            chat=types.Chat(id=message.from_user.id, type='private'),
+            text=''
+        ),
+        data=f"prod_options_{product_id}"
+    )
+    await show_product_options(fake_callback, db_pool)
+    
     await state.clear()
 
 # ============= تعديل خيار بطريقة تفاعلية =============
