@@ -1366,22 +1366,45 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
     name = data['game_name']
     category_id = data['category_id']
     
-    async with db_pool.acquire() as conn:
-        # إضافة اللعبة إلى جدول applications
-        game_id = await conn.fetchval('''
-            INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
-            VALUES ($1, $2, $3, $4, $5, $6, TRUE)
-            RETURNING id
-        ''', name, 0.01, 1, 10, category_id, game_type)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة {name} بنجاح!**\n\n"
-        f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك'}\n"
-        f"🆔 المعرف: {game_id}\n\n"
-        f"🔹 الآن يمكنك إضافة خيارات لهذا التطبيق من خلال:\n"
-        f"🎮 إدارة خيارات الألعاب ← اختر {name}"
-    )
-    await state.clear()
+    try:
+        async with db_pool.acquire() as conn:
+            # التحقق من وجود الاسم مسبقاً
+            existing = await conn.fetchval(
+                "SELECT id FROM applications WHERE name = $1",
+                name
+            )
+            
+            if existing:
+                await callback.message.edit_text(
+                    f"❌ **فشل الإضافة**\n\n"
+                    f"تطبيق باسم **{name}** موجود مسبقاً.\n"
+                    f"الرجاء استخدام اسم مختلف."
+                )
+                await state.clear()
+                return
+            
+            # إضافة اللعبة إلى جدول applications
+            game_id = await conn.fetchval('''
+                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
+                VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+                RETURNING id
+            ''', name, 0.01, 1, 10, category_id, game_type)
+        
+        await callback.message.edit_text(
+            f"✅ **تم إضافة {name} بنجاح!**\n\n"
+            f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك'}\n"
+            f"🆔 المعرف: {game_id}\n\n"
+            f"🔹 الآن يمكنك إضافة خيارات لهذا التطبيق من خلال:\n"
+            f"🎮 إدارة خيارات الألعاب ← اختر {name}"
+        )
+        await state.clear()
+        
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ **حدث خطأ:** {str(e)}\n\n"
+            f"يرجى المحاولة مرة أخرى."
+        )
+        await state.clear()
 
 # ============= إضافة خيارات ألعاب جديدة =============
 
