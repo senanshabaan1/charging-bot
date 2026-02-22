@@ -346,7 +346,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
 
 @router.callback_query(F.data.startswith("var_"))
 async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """اختيار فئة فرعية (للألعاب والاشتراكات)"""
+    """اختيار فئة فرعية (للألعاب والاشتراكات) مع عرض الوصف"""
     variant_id = int(callback.data.split("_")[1])
     
     from database import get_product_option
@@ -384,114 +384,33 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
         'qty': quantity
     })
     
+    # بناء رسالة التفاصيل
+    details = f"📋 **{app['name']}**\n\n"
+    details += f"📦 **الخيار:** {option['name']}\n"
+    details += f"🔢 **الكمية:** {quantity}\n"
+    
+    # إضافة الوصف إذا وجد
+    if option.get('description'):
+        details += f"📝 **الوصف:**\n{option['description']}\n\n"
+    
+    if discount > 0:
+        details += f"💰 **السعر:** {total_syp:,.0f} ل.س (بدلاً من {original_total_syp:,.0f} ل.س)\n"
+        details += f"🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {original_total_syp - total_syp:,.0f} ل.س)\n\n"
+    else:
+        details += f"💰 **السعر:** {total_syp:,.0f} ل.س\n\n"
+    
     # رسالة تعليمات حسب نوع اللعبة
     app_name = app['name'].lower()
     if 'pubg' in app_name or 'free fire' in app_name:
-        instructions = "🎮 **يرجى إرسال ID اللاعب الخاص بك:**\n"
+        instructions = "🎮 **يرجى إرسال ID اللاعب الخاص بك:**"
     elif 'clash' in app_name:
-        instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**\n"
+        instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**"
     else:
-        instructions = "🎯 **يرجى إرسال الحساب المستهدف:**\n"
+        instructions = "🎯 **يرجى إرسال الحساب المستهدف:**"
     
     await callback.message.answer(
-        f"📋 **تفاصيل الطلب**\n\n"
-        f"📱 **التطبيق:** {app['name']}\n"
-        f"📦 **الفئة:** {option['name']}\n"
-        f"💰 **السعر:** {total_syp:,.0f} ل.س\n\n"
-        f"{instructions}",
+        f"{details}{instructions}",
         reply_markup=get_back_keyboard()
-    )
-    await state.set_state(OrderStates.target_id)
-
-@router.message(OrderStates.qty)
-async def get_qty(message: types.Message, state: FSMContext, db_pool):
-    """استقبال الكمية مع تطبيق الخصم"""
-    if message.text == "🔙 رجوع للقائمة":
-        await state.clear()
-        await message.answer("تم إلغاء الطلب.")
-        return
-    
-    if not message.text.isdigit():
-        return await message.answer(
-            "⚠️ يرجى إدخال رقم صحيح (كمية).",
-            reply_markup=get_back_keyboard()
-        )
-    
-    qty = int(message.text)
-    data = await state.get_data()
-    app = data['app']
-    current_rate = data.get('current_rate', 115)
-    discount = data.get('discount', 0)
-    vip_level = data.get('vip_level', 0)
-    min_units = data.get('min_units', 1) or 1
-    
-    if qty < min_units:
-        return await message.answer(
-            f"⚠️ أقل كمية مسموح بها هي {min_units}.",
-            reply_markup=get_back_keyboard()
-        )
-    
-    # استخدام السعر بعد الخصم
-    discounted_unit_price_usd = data.get('discounted_unit_price_usd', data.get('final_unit_price_usd'))
-    total_usd = qty * discounted_unit_price_usd
-    total_syp = total_usd * current_rate
-    
-    # السعر الأصلي للعرض
-    original_unit_price_usd = data.get('final_unit_price_usd')
-    original_total_usd = qty * original_unit_price_usd
-    original_total_syp = original_total_usd * current_rate
-    
-    async with db_pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT balance FROM users WHERE user_id = $1",
-            message.from_user.id
-        )
-        
-        if not user:
-            return await message.answer(
-                "❌ حسابك غير موجود في النظام.",
-                reply_markup=get_back_keyboard()
-            )
-        
-        if user['balance'] < total_syp:
-            return await message.answer(
-                f"⚠️ رصيدك غير كافي.\n"
-                f"💳 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
-                f"💰 المطلوب: {total_syp:,.0f} ل.س\n"
-                f"🔸 تحتاج: {total_syp - user['balance']:,.0f} ل.س",
-                reply_markup=get_back_keyboard()
-            )
-    
-    await state.update_data(
-        qty=qty, 
-        total_usd=total_usd, 
-        total_syp=total_syp,
-        original_total_syp=original_total_syp
-    )
-    
-    # رسالة مع تفاصيل الخصم
-    if discount > 0:
-        saved_amount = original_total_syp - total_syp
-        price_message = f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س (بدلاً من {original_total_syp:,.0f} ل.س)\n"
-        price_message += f"🎁 **وفرت:** {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
-    else:
-        price_message = f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س"
-    
-    # رسالة تعليمات حسب نوع اللعبة
-    app_name = app['name'].lower()
-    if 'pubg' in app_name or 'free fire' in app_name:
-        instructions = "🎮 **الرجاء إرسال ID اللاعب الخاص بك:**\n"
-    elif 'clash' in app_name:
-        instructions = "📧 **الرجاء إرسال إيميل Supercell ID الخاص بك:**\n"
-    else:
-        instructions = "🎯 **الرجاء إرسال الحساب المستهدف:**\n"
-    
-    await message.answer(
-        f"✅ **الكمية مقبولة**\n\n"
-        f"{price_message}\n\n"
-        f"{instructions}",
-        reply_markup=get_back_keyboard(),
-        parse_mode="Markdown"
     )
     await state.set_state(OrderStates.target_id)
 
