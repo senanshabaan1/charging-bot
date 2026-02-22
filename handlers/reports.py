@@ -362,10 +362,9 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         logger.error(f"❌ خطأ في daily_report: {e}")
         await callback.message.edit_text(f"❌ خطأ: {str(e)}")
-
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح المصحح"""
+    """تقرير الأرباح المصحح - نسخة ثابتة"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -376,19 +375,20 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
-        # 1. جلب جميع الطلبات المكتملة مع معلومات المستخدم
+        # 1. جلب جميع الطلبات المكتملة مع معلومات التطبيق
         orders = await conn.fetch('''
             SELECT 
                 o.id,
                 o.user_id,
                 o.app_id,
                 o.quantity,
-                o.total_amount_syp as final_price,
+                o.total_amount_syp,
+                o.unit_price_usd,
                 o.points_earned,
+                a.name as app_name,
                 a.unit_price_usd as base_price_usd,
                 a.profit_percentage,
-                u.vip_level,
-                u.discount_percent
+                u.vip_level
             FROM orders o
             JOIN applications a ON o.app_id = a.id
             JOIN users u ON o.user_id = u.user_id
@@ -402,68 +402,79 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
         # 2. حساب الإحصائيات
         total_orders = len(orders)
         total_units = sum(o['quantity'] for o in orders)
-        total_revenue = sum(o['final_price'] for o in orders)
+        total_revenue = sum(o['total_amount_syp'] for o in orders)
         
         total_expected_profit = 0
         total_actual_profit = 0
         total_discounts = 0
+        total_cost = 0  # إجمالي التكلفة
         
-        vip_stats = {}
+        vip_orders_count = 0
+        vip_discounts_total = 0
         
         for order in orders:
-            # السعر الأساسي بالدولار
-            base_price_usd = float(order['base_price_usd'])
+            # تحويل القيم إلى float
+            base_price_usd = float(order['base_price_usd'] or 0)
             profit_percentage = float(order['profit_percentage'] or 0)
+            quantity = order['quantity']
+            final_price_syp = float(order['total_amount_syp'])
             
-            # السعر المتوقع (بدون خصم)
+            # السعر المتوقع بالدولار (سعر البيع قبل الخصم)
             expected_price_usd = base_price_usd * (1 + profit_percentage / 100)
-            expected_price_syp = expected_price_usd * exchange_rate
             
-            # السعر الفعلي (بعد الخصم)
-            actual_price_syp = order['final_price']
-            
-            # الربح المتوقع = (سعر البيع المتوقع - سعر التكلفة) × الكمية
+            # التكلفة (سعر الشراء من المزود)
             cost_price_usd = base_price_usd
-            expected_profit_usd = (expected_price_usd - cost_price_usd) * order['quantity']
+            cost_syp = cost_price_usd * exchange_rate * quantity
+            
+            # الربح المتوقع = (سعر البيع المتوقع - التكلفة) × الكمية
+            expected_profit_usd = (expected_price_usd - cost_price_usd) * quantity
             expected_profit_syp = expected_profit_usd * exchange_rate
             
-            # الربح الفعلي = (سعر البيع الفعلي - سعر التكلفة) × الكمية
-            actual_profit_usd = (actual_price_syp / exchange_rate - cost_price_usd) * order['quantity']
+            # الربح الفعلي = (سعر البيع الفعلي - التكلفة)
+            # إذا ما في خصم، سعر البيع الفعلي = سعر البيع المتوقع
+            # نستنتج سعر البيع الفعلي من total_amount_syp
+            selling_price_syp = final_price_syp
+            selling_price_usd = selling_price_syp / exchange_rate
+            
+            actual_profit_usd = (selling_price_usd - cost_price_usd) * quantity
             actual_profit_syp = actual_profit_usd * exchange_rate
             
-            # الخصم الممنوح
-            discount_syp = expected_price_syp * order['quantity'] - actual_price_syp
+            # الخصم = (سعر البيع المتوقع - سعر البيع الفعلي) × الكمية
+            discount_usd = (expected_price_usd - selling_price_usd) * quantity
+            discount_syp = discount_usd * exchange_rate
+            
+            # التأكد من أن الخصم ليس سالباً (إذا كان السعر الفعلي أعلى من المتوقع)
+            if discount_syp < 0:
+                discount_syp = 0
+                # في هذه الحالة، الربح الفعلي أكبر من المتوقع
+                actual_profit_syp = expected_profit_syp + abs(discount_syp)
             
             total_expected_profit += expected_profit_syp
             total_actual_profit += actual_profit_syp
             total_discounts += discount_syp
+            total_cost += cost_syp
             
             # إحصائيات VIP
-            vip_level = order['vip_level'] or 0
-            if vip_level not in vip_stats:
-                vip_stats[vip_level] = {
-                    'orders': 0,
-                    'discounts': 0,
-                    'revenue': 0
-                }
-            vip_stats[vip_level]['orders'] += 1
-            vip_stats[vip_level]['discounts'] += discount_syp
-            vip_stats[vip_level]['revenue'] += actual_price_syp
+            if order['vip_level'] > 0:
+                vip_orders_count += 1
+                vip_discounts_total += discount_syp
         
         # 3. أكثر 5 تطبيقات شراء
-        top_apps = await conn.fetch('''
-            SELECT 
-                a.name,
-                COUNT(o.id) as order_count,
-                SUM(o.quantity) as total_units,
-                SUM(o.total_amount_syp) as revenue
-            FROM orders o
-            JOIN applications a ON o.app_id = a.id
-            WHERE o.status = 'completed'
-            GROUP BY a.id, a.name
-            ORDER BY revenue DESC
-            LIMIT 5
-        ''')
+        app_stats = {}
+        for order in orders:
+            app_name = order['app_name']
+            if app_name not in app_stats:
+                app_stats[app_name] = {
+                    'orders': 0,
+                    'units': 0,
+                    'revenue': 0
+                }
+            app_stats[app_name]['orders'] += 1
+            app_stats[app_name]['units'] += order['quantity']
+            app_stats[app_name]['revenue'] += order['total_amount_syp']
+        
+        # ترتيب التطبيقات حسب الإيرادات
+        top_apps = sorted(app_stats.items(), key=lambda x: x[1]['revenue'], reverse=True)[:5]
     
     # حساب النسب
     if total_revenue > 0:
@@ -493,29 +504,22 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     )
     
     # تحليل VIP
-    if vip_stats:
-        text += "👑 **تحليل VIP**\n"
-        vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
-        
-        for level in sorted(vip_stats.keys()):
-            stats = vip_stats[level]
-            icon = vip_icons[level] if level < len(vip_icons) else f"VIP {level}"
-            text += (
-                f"{icon}\n"
-                f"  • طلبات: {stats['orders']}\n"
-                f"  • خصومات: {stats['discounts']:,.0f} ل.س\n"
-            )
-        text += "\n"
+    if vip_orders_count > 0:
+        text += (
+            "👑 **تحليل VIP**\n"
+            f"• طلبات VIP: **{vip_orders_count}**\n"
+            f"• خصومات VIP: **{vip_discounts_total:,.0f} ل.س**\n\n"
+        )
     
     # أكثر التطبيقات شراء
     if top_apps:
         text += "📱 **الأكثر شراء**\n"
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-        for i, app in enumerate(top_apps):
+        for i, (app_name, stats) in enumerate(top_apps):
             medal = medals[i] if i < len(medals) else "•"
             text += (
-                f"{medal} **{app['name']}**\n"
-                f"  طلبات: {app['order_count']} | وحدات: {app['total_units']}\n"
+                f"{medal} **{app_name}**\n"
+                f"   طلبات: {stats['orders']} | وحدات: {stats['units']}\n"
             )
         text += "\n"
     
