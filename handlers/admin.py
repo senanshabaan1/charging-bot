@@ -1037,29 +1037,62 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     
     await message.answer(confirm_text)
     
-    # العودة لقائمة الخيارات بعد 3 ثواني
+    # العودة لقائمة الخيارات بعد 3 ثواني - بدون استخدام fake_callback
     await asyncio.sleep(3)
     
-    # إعادة عرض قائمة الخيارات
+    # إعادة عرض قائمة الخيارات باستخدام رسالة جديدة بدلاً من callback وهمي
     async with db_pool.acquire() as conn:
         product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
         if product:
-            # إنشاء callback وهمي لإعادة عرض الخيارات
-            fake_callback = types.CallbackQuery(
-                id='0',
-                from_user=message.from_user,
-                message=types.Message(
-                    message_id=0,
-                    date=datetime.now(),
-                    chat=types.Chat(id=message.from_user.id, type='private'),
-                    text=''
-                ),
-                data=f"prod_options_{product_id}",
-                bot=bot
+            # جلب الخيارات مباشرة وعرضها
+            options = await conn.fetch(
+                "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+                product_id
             )
-            # استدعاء دالة عرض الخيارات
-            from handlers.admin import show_product_options
-            await show_product_options(fake_callback, db_pool)
+            
+            text = f"📱 **{product['name']}**\n\n"
+            
+            if not options:
+                text += "⚠️ لا توجد خيارات لهذا المنتج."
+            else:
+                text += "**الخيارات الحالية:**\n\n"
+                for opt in options:
+                    text += f"🆔 **{opt['id']}** | **{opt['name']}**\n"
+                    text += f"📦 الكمية: {opt['quantity']}\n"
+                    text += f"💰 السعر: ${float(opt['price_usd']):.2f}\n"
+                    if opt.get('description'):
+                        text += f"📝 {opt['description']}\n"
+                    text += "➖➖➖➖➖➖\n"
+            
+            builder = InlineKeyboardBuilder()
+            builder.row(types.InlineKeyboardButton(
+                text="➕ إضافة خيار جديد",
+                callback_data=f"add_option_{product_id}"
+            ))
+            builder.row(types.InlineKeyboardButton(
+                text="📋 إضافة قوالب جاهزة",
+                callback_data=f"templates_menu_{product_id}"
+            ))
+            
+            for opt in options:
+                builder.row(types.InlineKeyboardButton(
+                    text=f"✏️ تعديل {opt['name']}",
+                    callback_data=f"edit_option_{opt['id']}"
+                ))
+                builder.row(types.InlineKeyboardButton(
+                    text=f"🗑️ حذف {opt['name']}",
+                    callback_data=f"del_option_{opt['id']}"
+                ))
+            
+            builder.row(types.InlineKeyboardButton(
+                text="🔙 رجوع",
+                callback_data="manage_options"
+            ))
+            
+            await message.answer(
+                text,
+                reply_markup=builder.as_markup()
+            )
     
     await state.clear()
 
