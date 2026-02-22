@@ -8,11 +8,11 @@ import config
 from datetime import datetime
 import asyncio
 import logging
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from handlers.deposit import get_damascus_time
 from aiogram import types
 from aiogram.utils import markdown as md
-from aiogram.enums import ParseMode  # ✅ صح
+from aiogram.enums import ParseMode
 import re
 
 # إعداد logging
@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = Router()
-# ============= أضف الدالة هنا =============
+
 def format_message_text(text):
     """تحويل النص من Markdown إلى HTML للتنسيق الصحيح"""
     if not text:
@@ -35,7 +35,7 @@ def format_message_text(text):
     # تحويل __نص__ إلى <u>نص</u>
     text = re.sub(r'__(.*?)__', r'<u>\1</u>', text)
     return text
-# ==========================================
+
 class AdminStates(StatesGroup):
     waiting_new_rate = State()
     waiting_broadcast_msg = State()
@@ -47,7 +47,6 @@ class AdminStates(StatesGroup):
     waiting_points_amount = State()
     waiting_redeem_action = State()
     waiting_redeem_notes = State()
-    # حالات جديدة
     waiting_product_name = State()
     waiting_product_price = State()
     waiting_product_min = State()
@@ -57,32 +56,56 @@ class AdminStates(StatesGroup):
     waiting_new_syriatel_numbers = State()
     waiting_reset_confirm = State()
     waiting_reset_rate = State()
-    waiting_admin_id = State()           # لإضافة مشرف جديد
-    waiting_admin_info = State()          # للبحث عن معلومات مشرف
-    waiting_admin_remove = State()        # لتأكيد إزالة مشرف
-    # ===== حالات جديدة لرفع مستوى VIP =====
-    waiting_vip_user_id = State()          # لإدخال آيدي المستخدم
-    waiting_vip_level = State()            # لإدخال مستوى VIP الجديد
-    waiting_vip_discount = State()         # لإدخال نسبة الخصم المخصصة
-    waiting_vip_downgrade_reason = State()  # سبب خفض المستوى
-    waiting_custom_message_user = State()    # آيدي المستخدم للرسالة
-    waiting_custom_message_text = State()    # نص الرسالة
-    waiting_new_option = State()
-    waiting_edit_option = State()
-    waiting_manual_options = State()
-    waiting_new_game_name = State()         # حالة إضافة لعبة جديدة
-    waiting_new_game_type = State() 
-    waiting_option_name = State()           # اسم الخيار الجديد
-    waiting_option_quantity = State()        # الكمية
-    waiting_option_supplier_price = State()  # سعر المورد
-    waiting_option_profit = State()          # نسبة الربح
-    waiting_option_description = State()     # الوصف
-    waiting_edit_option_field = State()          # حالة اختيار نوع اللعبة
+    waiting_admin_id = State()
+    waiting_admin_info = State()
+    waiting_admin_remove = State()
+    waiting_vip_user_id = State()
+    waiting_vip_level = State()
+    waiting_vip_discount = State()
+    waiting_vip_downgrade_reason = State()
+    waiting_custom_message_user = State()
+    waiting_custom_message_text = State()
+    waiting_new_game_name = State()
+    waiting_new_game_type = State()
+    
+    # حالات إدارة الخيارات
+    waiting_option_name = State()
+    waiting_option_quantity = State()
+    waiting_option_supplier_price = State()
+    waiting_option_profit = State()
+    waiting_option_description = State()
+    
+    # حالات تعديل الخيارات
+    waiting_edit_option_field = State()
+    waiting_edit_option_value = State()
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
 
-# في handlers/admin.py - أضف في دالة admin_panel بعد الأزرار الموجودة
+def get_cancel_keyboard():
+    """إنشاء زر إلغاء موحد"""
+    builder = ReplyKeyboardBuilder()
+    builder.row(types.KeyboardButton(text="❌ إلغاء"))
+    return builder.as_markup(resize_keyboard=True)
+
+@router.message(F.text == "❌ إلغاء")
+async def global_cancel_handler(message: types.Message, state: FSMContext):
+    """معالج الإلغاء الموحد"""
+    current_state = await state.get_state()
+    if current_state is not None:
+        await state.clear()
+    
+    from handlers.start import get_main_menu_keyboard
+    from database import is_admin_user
+    
+    is_admin_user_flag = await is_admin_user(None, message.from_user.id)
+    
+    await message.answer(
+        "✅ تم إلغاء العملية",
+        reply_markup=get_main_menu_keyboard(is_admin_user_flag)
+    )
+
+# ============= لوحة التحكم الرئيسية =============
 
 @router.message(Command("admin"))
 async def admin_panel(message: types.Message, db_pool):
@@ -94,67 +117,52 @@ async def admin_panel(message: types.Message, db_pool):
     status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
 
     kb = [
-        # الصف الأول
         [
             types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
             types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")
         ],
-        # الصف الثاني
         [
             types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
             types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")
         ],
-        # الصف الثالث
         [
             types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
             types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")
         ],
-        # الصف الرابع - إحصائيات المستخدمين
         [
             types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
             types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")
         ],
-        # الصف الخامس
         [
             types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
             types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points")
         ],
-        # الصف السادس
         [
             types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
             types.InlineKeyboardButton(text="📊 تقارير ونسخ احتياطي", callback_data="reports_menu")
         ],
-        # الصف السابع - أزرار المنتجات
         [
             types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
             types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product")
         ],
-        # الصف الثامن
         [
             types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
             types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products")
         ],
-        # الصف التاسع - أزرار سيرياتل
         [
             types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
             types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot")
         ],
-        # الصف العاشر - زر التصفير
         [
             types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
             types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
         ],
-        # الصف الحادي عشر
         [
             types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
             types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message")
         ],
-        # ===== الصف الجديد - إدارة المشرفين =====
-          [
+        [
             types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
-            types.InlineKeyboardButton(text="➕ إضافة خيارات ألعاب", callback_data="add_game_options")
-        ],
-          [
             types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options")
         ],
     ]
@@ -687,6 +695,8 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
     )
 # ============= إدارة خيارات المنتجات (للألعاب والاشتراكات) =============
 
+# ============= إدارة خيارات المنتجات =============
+
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
     """عرض المنتجات لإدارة خياراتها"""
@@ -714,7 +724,6 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     
-    # إضافة أزرار التطبيقات الموجودة
     for product in products:
         type_icon = "🎮" if product['type'] == 'game' else "📅"
         builder.row(types.InlineKeyboardButton(
@@ -722,22 +731,18 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
             callback_data=f"prod_options_{product['id']}"
         ))
     
-    # زر إضافة تطبيق جديد
     builder.row(types.InlineKeyboardButton(
         text="➕ إضافة لعبة أو اشتراك جديد",
         callback_data="add_new_game"
     ))
     
     builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data="back_to_admin"
+        text="🔙 رجوع للوحة التحكم",
+        callback_data="back_to_admin_panel"
     ))
     
     await callback.message.edit_text(
-        "🎮 **إدارة خيارات الألعاب (product_options)**\n\n"
-        "هذه الخيارات خاصة بالألعاب والاشتراكات:\n"
-        "• تحتوي على أوصاف إضافية\n"
-        "• مثال: 60 UC , 570 ماسة ",
+        text,
         reply_markup=builder.as_markup()
     )
 
@@ -772,23 +777,21 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
         text="➕ إضافة خيار جديد",
         callback_data=f"add_option_{product_id}"
     ))
-    builder.row(types.InlineKeyboardButton(
-        text="📋 إضافة قوالب جاهزة",
-        callback_data=f"templates_menu_{product_id}"
-    ))
     
     for opt in options:
-        builder.row(types.InlineKeyboardButton(
-            text=f"✏️ تعديل {opt['name']}",
-            callback_data=f"edit_option_{opt['id']}"
-        ))
-        builder.row(types.InlineKeyboardButton(
-            text=f"🗑️ حذف {opt['name']}",
-            callback_data=f"del_option_{opt['id']}"
-        ))
+        builder.row(
+            types.InlineKeyboardButton(
+                text=f"✏️ تعديل {opt['name']}",
+                callback_data=f"edit_option_{opt['id']}"
+            ),
+            types.InlineKeyboardButton(
+                text=f"🗑️ حذف {opt['name']}",
+                callback_data=f"delete_option_{opt['id']}"
+            )
+        )
     
     builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
+        text="🔙 رجوع للقائمة",
         callback_data="manage_options"
     ))
     
@@ -797,12 +800,11 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
         reply_markup=builder.as_markup()
     )
 
-
-# ============= إضافة خيار جديد بطريقة تفاعلية كاملة =============
+# ============= إضافة خيار جديد =============
 
 @router.callback_query(F.data.startswith("add_option_"))
-async def add_option_interactive_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء إضافة خيار جديد بطريقة تفاعلية خطوة بخطوة"""
+async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إضافة خيار جديد"""
     product_id = int(callback.data.split("_")[2])
     await state.update_data(product_id=product_id)
     
@@ -810,9 +812,15 @@ async def add_option_interactive_start(callback: types.CallbackQuery, state: FSM
         "➕ **إضافة خيار جديد - الخطوة 1/5**\n\n"
         "📝 **أدخل اسم الخيار:**\n"
         "مثال: `60 UC`\n"
-        "مثال: `570 ماسة`\n"
-        "مثال: `اشتراك شهر`\n\n"
-        "❌ أرسل /cancel للإلغاء"
+        "مثال: `570 ماسة`\n\n"
+        "❌ اضغط على زر الإلغاء للرجوع",
+        reply_markup=None
+    )
+    
+    # إرسال رسالة مع زر إلغاء
+    await callback.message.answer(
+        "أدخل اسم الخيار:",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_option_name)
 
@@ -822,26 +830,20 @@ async def add_option_step_name(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
-    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
-        await state.clear()
-        await message.answer("✅ تم إلغاء العملية")
-        return
-    
     name = message.text.strip()
     if len(name) < 2:
-        return await message.answer("❌ الاسم قصير جداً. أدخل اسم مناسب:")
+        await message.answer("❌ الاسم قصير جداً. أدخل اسم مناسب:", reply_markup=get_cancel_keyboard())
+        return
     
     await state.update_data(option_name=name)
     
     await message.answer(
         "➕ **إضافة خيار جديد - الخطوة 2/5**\n\n"
         f"📦 **أدخل الكمية:** (رقم فقط)\n"
-        f"هذه هي الكمية الكاملة للحزمة (وليس سعر الوحدة)\n"
         f"مثال: `60` لـ 60 UC\n"
-        f"مثال: `570` لـ 570 ماسة\n\n"
         f"الاسم: **{name}**\n\n"
-        f"❌ أرسل /cancel للإلغاء"
+        f"❌ اضغط على زر الإلغاء للرجوع",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_option_quantity)
 
@@ -851,16 +853,11 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
-    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
-        await state.clear()
-        await message.answer("✅ تم إلغاء العملية")
-        return
-    
     try:
         quantity = int(message.text.strip())
         if quantity <= 0:
-            return await message.answer("❌ الكمية يجب أن تكون أكبر من 0")
+            await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+            return
         
         await state.update_data(option_quantity=quantity)
         
@@ -870,17 +867,16 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
         await message.answer(
             "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
             "💰 **أدخل سعر المورد (بالدولار):**\n"
-            "هذا هو السعر الذي تشتري به هذه الحزمة كاملة من المورد\n"
             f"مثال: `0.99` لـ {quantity} وحدة\n"
-            f"مثال: `4.99` لـ {quantity} وحدة\n\n"
             f"الاسم: **{option_name}**\n"
             f"الكمية: **{quantity}**\n\n"
-            f"❌ أرسل /cancel للإلغاء"
+            f"❌ اضغط على زر الإلغاء للرجوع",
+            reply_markup=get_cancel_keyboard()
         )
         await state.set_state(AdminStates.waiting_option_supplier_price)
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح للكمية:")
+        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_option_supplier_price)
 async def add_option_step_supplier_price(message: types.Message, state: FSMContext, db_pool):
@@ -888,20 +884,14 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
-    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
-        await state.clear()
-        await message.answer("✅ تم إلغاء العملية")
-        return
-    
     try:
         supplier_price = float(message.text.strip())
         if supplier_price <= 0:
-            return await message.answer("❌ السعر يجب أن يكون أكبر من 0")
+            await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+            return
         
         await state.update_data(supplier_price=supplier_price)
         
-        # جلب نسبة الربح الافتراضية من التطبيق
         data = await state.get_data()
         product_id = data['product_id']
         
@@ -919,17 +909,16 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
             "➕ **إضافة خيار جديد - الخطوة 4/5**\n\n"
             "📈 **أدخل نسبة الربح (%):**\n"
             f"النسبة الافتراضية: **{default_profit}%**\n"
-            "هذه النسبة ستضاف على سعر المورد لحساب سعر البيع\n"
-            f"مثال: `{default_profit}`\n\n"
             f"الاسم: **{option_name}**\n"
             f"الكمية: **{quantity}**\n"
             f"سعر المورد: **${supplier_price:.3f}**\n\n"
-            f"❌ أرسل /cancel للإلغاء"
+            f"❌ اضغط على زر الإلغاء للرجوع",
+            reply_markup=get_cancel_keyboard()
         )
         await state.set_state(AdminStates.waiting_option_profit)
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح للسعر:")
+        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_option_profit)
 async def add_option_step_profit(message: types.Message, state: FSMContext):
@@ -937,16 +926,11 @@ async def add_option_step_profit(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
-    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
-        await state.clear()
-        await message.answer("✅ تم إلغاء العملية")
-        return
-    
     try:
         profit_percent = float(message.text.strip())
         if profit_percent < 0:
-            return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة")
+            await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+            return
         
         await state.update_data(profit_percent=profit_percent)
         
@@ -958,36 +942,26 @@ async def add_option_step_profit(message: types.Message, state: FSMContext):
         await message.answer(
             "➕ **إضافة خيار جديد - الخطوة 5/5**\n\n"
             "📝 **أدخل وصف الخيار:**\n"
-            "هذا الوصف سيظهر للمستخدم عند اختيار هذا الخيار\n"
-            "يمكنك كتابة أي تفاصيل إضافية مثل:\n"
-            "• مدة الشحن\n"
-            "• هدايا إضافية\n"
-            "• شروط خاصة\n\n"
+            "هذا الوصف سيظهر للمستخدم عند الشراء\n"
+            "أدخل الوصف (أو أرسل `-` لتخطي):\n\n"
             f"الاسم: **{option_name}**\n"
             f"الكمية: **{quantity}**\n"
             f"سعر المورد: **${supplier_price:.3f}**\n"
             f"نسبة الربح: **{profit_percent}%**\n\n"
-            "أدخل الوصف (أو أرسل `-` لتخطي):\n\n"
-            "❌ أرسل /cancel للإلغاء"
+            f"❌ اضغط على زر الإلغاء للرجوع",
+            reply_markup=get_cancel_keyboard()
         )
         await state.set_state(AdminStates.waiting_option_description)
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح:")
+        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_option_description)
-async def add_option_step_description(message: types.Message, state: FSMContext, db_pool, bot: Bot):
+async def add_option_step_description(message: types.Message, state: FSMContext, db_pool):
     """استلام الوصف وحفظ الخيار"""
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
-    if message.text in ["/cancel", "/الغاء", "/رجوع"]:
-        await state.clear()
-        await message.answer("✅ تم إلغاء العملية")
-        return
-    
-    # التحقق من التخطي
     description = None
     if message.text and message.text != "-":
         description = message.text.strip()
@@ -1008,7 +982,6 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     final_price_syp = final_price_usd * exchange_rate
     
     async with db_pool.acquire() as conn:
-        # إضافة الخيار
         option_id = await conn.fetchval('''
             INSERT INTO product_options 
             (product_id, name, quantity, price_usd, description, sort_order, is_active)
@@ -1016,13 +989,10 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
             RETURNING id
         ''', product_id, option_name, quantity, supplier_price, description, 0)
     
-    # رسالة التأكيد
     confirm_text = (
         f"✅ **تم إضافة الخيار بنجاح!**\n\n"
-        f"📱 **المنتج:** {product_id}\n"
         f"📦 **الخيار:** {option_name}\n"
         f"🔢 **الكمية:** {quantity}\n\n"
-        
         f"💰 **تفاصيل السعر:**\n"
         f"• سعر المورد: **${supplier_price:.3f}**\n"
         f"• نسبة الربح: **{profit_percent}%**\n"
@@ -1033,219 +1003,134 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     if description:
         confirm_text += f"📝 **الوصف:**\n{description}\n\n"
     
-    confirm_text += "🔹 يمكنك الآن رؤية هذا الخيار عند شراء التطبيق."
-    
-    await message.answer(confirm_text)
-    
-    # العودة لقائمة الخيارات بعد 3 ثواني - بدون استخدام fake_callback
-    await asyncio.sleep(3)
-    
-    # إعادة عرض قائمة الخيارات باستخدام رسالة جديدة بدلاً من callback وهمي
-    async with db_pool.acquire() as conn:
-        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
-        if product:
-            # جلب الخيارات مباشرة وعرضها
-            options = await conn.fetch(
-                "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
-                product_id
-            )
-            
-            text = f"📱 **{product['name']}**\n\n"
-            
-            if not options:
-                text += "⚠️ لا توجد خيارات لهذا المنتج."
-            else:
-                text += "**الخيارات الحالية:**\n\n"
-                for opt in options:
-                    text += f"🆔 **{opt['id']}** | **{opt['name']}**\n"
-                    text += f"📦 الكمية: {opt['quantity']}\n"
-                    text += f"💰 السعر: ${float(opt['price_usd']):.2f}\n"
-                    if opt.get('description'):
-                        text += f"📝 {opt['description']}\n"
-                    text += "➖➖➖➖➖➖\n"
-            
-            builder = InlineKeyboardBuilder()
-            builder.row(types.InlineKeyboardButton(
-                text="➕ إضافة خيار جديد",
-                callback_data=f"add_option_{product_id}"
-            ))
-            builder.row(types.InlineKeyboardButton(
-                text="📋 إضافة قوالب جاهزة",
-                callback_data=f"templates_menu_{product_id}"
-            ))
-            
-            for opt in options:
-                builder.row(types.InlineKeyboardButton(
-                    text=f"✏️ تعديل {opt['name']}",
-                    callback_data=f"edit_option_{opt['id']}"
-                ))
-                builder.row(types.InlineKeyboardButton(
-                    text=f"🗑️ حذف {opt['name']}",
-                    callback_data=f"del_option_{opt['id']}"
-                ))
-            
-            builder.row(types.InlineKeyboardButton(
-                text="🔙 رجوع",
-                callback_data="manage_options"
-            ))
-            
-            await message.answer(
-                text,
-                reply_markup=builder.as_markup()
-            )
+    await message.answer(confirm_text, reply_markup=None)
     
     await state.clear()
+    
+    # العودة لقائمة الخيارات
+    fake_callback = types.CallbackQuery(
+        id='0',
+        from_user=message.from_user,
+        message=types.Message(
+            message_id=0,
+            date=datetime.now(),
+            chat=types.Chat(id=message.from_user.id, type='private'),
+            text=''
+        ),
+        data=f"prod_options_{product_id}",
+        bot=message.bot
+    )
+    await show_product_options(fake_callback, db_pool)
 
-# ============= تعديل خيار بطريقة تفاعلية =============
+# ============= تعديل خيار =============
 
 @router.callback_query(F.data.startswith("edit_option_"))
-async def edit_option_interactive_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل خيار بطريقة تفاعلية"""
-    option_id = int(callback.data.split("_")[2])
+async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """عرض قائمة تعديل الخيار"""
+    try:
+        # نتأكد أن البيانات تحتوي على رقم وليس نص
+        parts = callback.data.split("_")
+        if len(parts) >= 3 and parts[2].isdigit():
+            option_id = int(parts[2])
+        else:
+            # إذا كان التنسيق edit_option_field_name_XXX نعالجه بشكل منفصل
+            return
     
-    from database import get_product_option
-    option = await get_product_option(db_pool, option_id)
-    
-    if not option:
-        return await callback.answer("❌ الخيار غير موجود", show_alert=True)
-    
-    await state.update_data(
-        option_id=option_id,
-        product_id=option['product_id']
-    )
-    
-    # عرض القائمة للاختيار
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="📝 تعديل الاسم", 
-        callback_data=f"edit_option_field_name_{option_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="🔢 تعديل الكمية", 
-        callback_data=f"edit_option_field_quantity_{option_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="💰 تعديل سعر المورد", 
-        callback_data=f"edit_option_field_price_{option_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="📈 تعديل نسبة الربح", 
-        callback_data=f"edit_option_field_profit_{option_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="📝 تعديل الوصف", 
-        callback_data=f"edit_option_field_desc_{option_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data=f"prod_options_{option['product_id']}"
-    ))
-    
-    text = (
-        f"✏️ **تعديل الخيار**\n\n"
-        f"**البيانات الحالية:**\n"
-        f"• الاسم: {option['name']}\n"
-        f"• الكمية: {option['quantity']}\n"
-        f"• سعر المورد: ${option['price_usd']:.3f}\n"
-    )
-    
-    if option.get('description'):
-        text += f"• الوصف: {option['description']}\n"
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=builder.as_markup()
-    )
-
-@router.callback_query(F.data.startswith("edit_option_field_name_"))
-async def edit_option_field_name(callback: types.CallbackQuery, state: FSMContext):
-    """تعديل اسم الخيار"""
-    option_id = int(callback.data.split("_")[3])
-    await state.update_data(edit_field='name', option_id=option_id)
-    
-    await callback.message.edit_text(
-        "✏️ **تعديل الاسم**\n\n"
-        "أدخل الاسم الجديد:\n"
-        "مثال: `60 UC`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_edit_option_field)
-
-@router.callback_query(F.data.startswith("edit_option_field_quantity_"))
-async def edit_option_field_quantity(callback: types.CallbackQuery, state: FSMContext):
-    """تعديل الكمية"""
-    option_id = int(callback.data.split("_")[3])
-    await state.update_data(edit_field='quantity', option_id=option_id)
-    
-    await callback.message.edit_text(
-        "✏️ **تعديل الكمية**\n\n"
-        "أدخل الكمية الجديدة (رقم فقط):\n"
-        "مثال: `60`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_edit_option_field)
-
-@router.callback_query(F.data.startswith("edit_option_field_price_"))
-async def edit_option_field_price(callback: types.CallbackQuery, state: FSMContext):
-    """تعديل سعر المورد"""
-    option_id = int(callback.data.split("_")[3])
-    await state.update_data(edit_field='price', option_id=option_id)
-    
-    await callback.message.edit_text(
-        "✏️ **تعديل سعر المورد**\n\n"
-        "أدخل السعر الجديد بالدولار (للحزمة كاملة):\n"
-        "مثال: `0.99`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_edit_option_field)
-
-@router.callback_query(F.data.startswith("edit_option_field_profit_"))
-async def edit_option_field_profit(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """تعديل نسبة الربح"""
-    option_id = int(callback.data.split("_")[3])
-    
-    # جلب نسبة الربح الافتراضية من التطبيق
-    async with db_pool.acquire() as conn:
-        option = await conn.fetchrow(
-            "SELECT product_id FROM product_options WHERE id = $1",
-            option_id
+        from database import get_product_option
+        option = await get_product_option(db_pool, option_id)
+        
+        if not option:
+            return await callback.answer("❌ الخيار غير موجود", show_alert=True)
+        
+        await state.update_data(
+            option_id=option_id,
+            product_id=option['product_id']
         )
-        if option:
-            app = await conn.fetchrow(
-                "SELECT profit_percentage FROM applications WHERE id = $1",
-                option['product_id']
-            )
-            default_profit = float(app['profit_percentage'] or 10) if app else 10
-    
-    await state.update_data(edit_field='profit', option_id=option_id)
-    
-    await callback.message.edit_text(
-        "✏️ **تعديل نسبة الربح**\n\n"
-        f"النسبة الافتراضية: **{default_profit}%**\n"
-        "أدخل النسبة الجديدة (رقم فقط):\n"
-        "مثال: `15`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_edit_option_field)
+        
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(
+            text="📝 تعديل الاسم", 
+            callback_data=f"edit_option_field_name_{option_id}"
+        ))
+        builder.row(types.InlineKeyboardButton(
+            text="🔢 تعديل الكمية", 
+            callback_data=f"edit_option_field_quantity_{option_id}"
+        ))
+        builder.row(types.InlineKeyboardButton(
+            text="💰 تعديل سعر المورد", 
+            callback_data=f"edit_option_field_price_{option_id}"
+        ))
+        builder.row(types.InlineKeyboardButton(
+            text="📈 تعديل نسبة الربح", 
+            callback_data=f"edit_option_field_profit_{option_id}"
+        ))
+        builder.row(types.InlineKeyboardButton(
+            text="📝 تعديل الوصف", 
+            callback_data=f"edit_option_field_desc_{option_id}"
+        ))
+        builder.row(types.InlineKeyboardButton(
+            text="🔙 رجوع", 
+            callback_data=f"prod_options_{option['product_id']}"
+        ))
+        
+        text = (
+            f"✏️ **تعديل الخيار**\n\n"
+            f"**البيانات الحالية:**\n"
+            f"• الاسم: {option['name']}\n"
+            f"• الكمية: {option['quantity']}\n"
+            f"• سعر المورد: ${option['price_usd']:.3f}\n"
+        )
+        
+        if option.get('description'):
+            text += f"• الوصف: {option['description']}\n"
+        
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        
+    except Exception as e:
+        logger.error(f"خطأ في edit_option_menu: {e}")
 
-@router.callback_query(F.data.startswith("edit_option_field_desc_"))
-async def edit_option_field_desc(callback: types.CallbackQuery, state: FSMContext):
-    """تعديل الوصف"""
-    option_id = int(callback.data.split("_")[3])
-    await state.update_data(edit_field='description', option_id=option_id)
-    
-    await callback.message.edit_text(
-        "✏️ **تعديل الوصف**\n\n"
-        "أدخل الوصف الجديد:\n"
-        "مثال: `شحن سريع مع ضمان`\n"
-        "أو أرسل `-` لحذف الوصف\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_edit_option_field)
+@router.callback_query(F.data.startswith("edit_option_field_"))
+async def edit_option_field_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل حقل معين"""
+    parts = callback.data.split("_")
+    # التنسيق: edit_option_field_name_123
+    if len(parts) >= 5:
+        field_type = parts[3]  # name, quantity, price, profit, desc
+        option_id = int(parts[4])
+        
+        field_names = {
+            'name': 'الاسم',
+            'quantity': 'الكمية',
+            'price': 'سعر المورد',
+            'profit': 'نسبة الربح',
+            'desc': 'الوصف'
+        }
+        
+        field_name = field_names.get(field_type, field_type)
+        
+        await state.update_data(
+            edit_field=field_type,
+            option_id=option_id
+        )
+        
+        instructions = {
+            'name': "أدخل الاسم الجديد:",
+            'quantity': "أدخل الكمية الجديدة (رقم فقط):",
+            'price': "أدخل سعر المورد الجديد (بالدولار):",
+            'profit': "أدخل نسبة الربح الجديدة (%):",
+            'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
+        }
+        
+        await callback.message.edit_text(
+            f"✏️ **تعديل {field_name}**\n\n"
+            f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
+            f"❌ أرسل /cancel للإلغاء"
+        )
+        await state.set_state(AdminStates.waiting_edit_option_value)
 
-@router.message(AdminStates.waiting_edit_option_field)
-async def edit_option_field_save(message: types.Message, state: FSMContext, db_pool):
-    """حفظ التعديل على الحقل المحدد"""
+@router.message(AdminStates.waiting_edit_option_value)
+async def edit_option_value_save(message: types.Message, state: FSMContext, db_pool):
+    """حفظ القيمة المعدلة"""
     if not is_admin(message.from_user.id):
         return
     
@@ -1254,33 +1139,44 @@ async def edit_option_field_save(message: types.Message, state: FSMContext, db_p
     field = data['edit_field']
     value = message.text.strip()
     
-    # التحقق من صحة المدخلات
     try:
+        update_value = None
+        field_name = ""
+        
         if field == 'name':
             if len(value) < 2:
-                return await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:")
+                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:", reply_markup=get_cancel_keyboard())
+                return
             update_value = value
+            field_name = "الاسم"
             
         elif field == 'quantity':
             quantity = int(value)
             if quantity <= 0:
-                return await message.answer("❌ الكمية يجب أن تكون أكبر من 0")
+                await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+                return
             update_value = quantity
+            field_name = "الكمية"
             
         elif field == 'price':
             price = float(value)
             if price <= 0:
-                return await message.answer("❌ السعر يجب أن يكون أكبر من 0")
+                await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+                return
             update_value = price
+            field_name = "سعر المورد"
             
         elif field == 'profit':
             profit = float(value)
             if profit < 0:
-                return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة")
+                await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+                return
             update_value = profit
+            field_name = "نسبة الربح"
             
-        elif field == 'description':
+        elif field == 'desc':
             update_value = None if value == '-' else value
+            field_name = "الوصف"
         
         else:
             await message.answer("❌ حقل غير معروف")
@@ -1290,8 +1186,7 @@ async def edit_option_field_save(message: types.Message, state: FSMContext, db_p
         # تحديث قاعدة البيانات
         async with db_pool.acquire() as conn:
             if field == 'profit':
-                # نسبة الربح تخزن في التطبيق وليس في الخيار
-                # هنا نحتاج لتحديث التطبيق نفسه
+                # نسبة الربح تخزن في التطبيق
                 option = await conn.fetchrow(
                     "SELECT product_id FROM product_options WHERE id = $1",
                     option_id
@@ -1308,38 +1203,94 @@ async def edit_option_field_save(message: types.Message, state: FSMContext, db_p
                     update_value, option_id
                 )
         
-        # جلب معلومات الخيار المحدث
-        from database import get_product_option
-        option = await get_product_option(db_pool, option_id)
-        
-        # حساب السعر النهائي للعرض
-        from database import get_exchange_rate
-        exchange_rate = await get_exchange_rate(db_pool)
-        
-        if option:
-            app = await conn.fetchrow(
-                "SELECT profit_percentage FROM applications WHERE id = $1",
-                option['product_id']
-            )
-            profit_percent = float(app['profit_percentage'] or 0) if app else 0
-            final_price_usd = option['price_usd'] * (1 + profit_percent / 100)
-            final_price_syp = final_price_usd * exchange_rate
-            
-            await message.answer(
-                f"✅ **تم التحديث بنجاح!**\n\n"
-                f"• {field}: {value}\n"
-                f"• السعر النهائي: **{final_price_syp:,.0f} ل.س**"
-            )
-        else:
-            await message.answer(f"✅ تم تحديث {field} بنجاح!")
-        
+        await message.answer(f"✅ تم تحديث {field_name} بنجاح!", reply_markup=None)
         await state.clear()
         
+        # العودة لقائمة الخيارات
+        async with db_pool.acquire() as conn:
+            option = await conn.fetchrow(
+                "SELECT product_id FROM product_options WHERE id = $1",
+                option_id
+            )
+            if option:
+                fake_callback = types.CallbackQuery(
+                    id='0',
+                    from_user=message.from_user,
+                    message=types.Message(
+                        message_id=0,
+                        date=datetime.now(),
+                        chat=types.Chat(id=message.from_user.id, type='private'),
+                        text=''
+                    ),
+                    data=f"prod_options_{option['product_id']}",
+                    bot=message.bot
+                )
+                await show_product_options(fake_callback, db_pool)
+        
     except ValueError:
-        await message.answer("❌ قيمة غير صالحة. يرجى إدخال قيمة صحيحة:")
+        await message.answer("❌ قيمة غير صالحة. يرجى إدخال قيمة صحيحة:", reply_markup=get_cancel_keyboard())
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
+
+# ============= حذف خيار =============
+
+@router.callback_query(F.data.startswith("delete_option_"))
+async def delete_option_confirm(callback: types.CallbackQuery, db_pool):
+    """تأكيد حذف خيار"""
+    option_id = int(callback.data.split("_")[2])
+    
+    from database import get_product_option
+    option = await get_product_option(db_pool, option_id)
+    
+    if not option:
+        return await callback.answer("❌ الخيار غير موجود", show_alert=True)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ نعم، احذف", callback_data=f"confirm_delete_option_{option_id}"),
+        types.InlineKeyboardButton(text="❌ لا", callback_data=f"prod_options_{option['product_id']}")
+    )
+    
+    await callback.message.edit_text(
+        f"⚠️ **تأكيد حذف الخيار**\n\n"
+        f"هل أنت متأكد من حذف هذا الخيار؟\n\n"
+        f"📦 **الاسم:** {option['name']}\n"
+        f"🔢 **الكمية:** {option['quantity']}\n"
+        f"💰 **السعر:** ${option['price_usd']:.2f}",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("confirm_delete_option_"))
+async def delete_option_execute(callback: types.CallbackQuery, db_pool):
+    """تنفيذ حذف الخيار"""
+    option_id = int(callback.data.split("_")[3])
+    
+    from database import get_product_option
+    option = await get_product_option(db_pool, option_id)
+    
+    if not option:
+        return await callback.answer("❌ الخيار غير موجود", show_alert=True)
+    
+    product_id = option['product_id']
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE product_options SET is_active = FALSE WHERE id = $1",
+            option_id
+        )
+    
+    await callback.answer("✅ تم حذف الخيار بنجاح")
+    
+    # العودة لقائمة الخيارات
+    fake_callback = types.CallbackQuery(
+        id='0',
+        from_user=callback.from_user,
+        message=callback.message,
+        data=f"prod_options_{product_id}",
+        bot=callback.bot
+    )
+    await show_product_options(fake_callback, db_pool)
 # ============= إضافة لعبة أو اشتراك جديد =============
 
 @router.callback_query(F.data == "add_new_game")
