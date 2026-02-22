@@ -831,12 +831,12 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
 
 @router.callback_query(F.data == "back_to_main")
-async def back_to_main(callback: types.CallbackQuery):
-    """العودة للقائمة الرئيسية"""
+async def back_to_main(callback: types.CallbackQuery, db_pool): # أضفنا db_pool
     from handlers.start import get_main_menu_keyboard
     from database import is_admin_user
     
-    is_admin = await is_admin_user(None, callback.from_user.id)  # 👈 تحتاج تمرير pool هنا
+    # تمرير db_pool بدلاً من None
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)  
     
     await callback.message.delete()
     await callback.message.answer(
