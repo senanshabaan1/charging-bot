@@ -1383,58 +1383,6 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
     )
     await state.clear()
 
-# ============= تعديل دالة manage_options_start لإضافة زر اللعبة الجديدة =============
-
-@router.callback_query(F.data == "manage_options")
-async def manage_options_start(callback: types.CallbackQuery, db_pool):
-    """عرض المنتجات لإدارة خياراتها"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    async with db_pool.acquire() as conn:
-        products = await conn.fetch('''
-            SELECT a.id, a.name, c.display_name, a.type
-            FROM applications a
-            LEFT JOIN categories c ON a.category_id = c.id
-            WHERE a.type IN ('game', 'subscription')
-            ORDER BY c.sort_order, a.name
-        ''')
-    
-    text = "🎮 **إدارة خيارات الألعاب والاشتراكات**\n\n"
-    
-    if not products:
-        text += "⚠️ لا توجد ألعاب أو اشتراكات حالياً."
-    else:
-        text += "**التطبيقات المتوفرة:**\n\n"
-        for p in products:
-            type_icon = "🎮" if p['type'] == 'game' else "📅"
-            text += f"{type_icon} **{p['name']}** - {p['display_name']}\n"
-    
-    builder = InlineKeyboardBuilder()
-    
-    # إضافة أزرار التطبيقات الموجودة
-    for product in products:
-        type_icon = "🎮" if product['type'] == 'game' else "📅"
-        builder.row(types.InlineKeyboardButton(
-            text=f"{type_icon} {product['name']}",
-            callback_data=f"prod_options_{product['id']}"
-        ))
-    
-    # زر إضافة تطبيق جديد
-    builder.row(types.InlineKeyboardButton(
-        text="➕ إضافة لعبة أو اشتراك جديد",
-        callback_data="add_new_game"
-    ))
-    
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data="back_to_admin"
-    ))
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=builder.as_markup()
-    )
 # ============= إضافة خيارات ألعاب جديدة =============
 
 @router.callback_query(F.data == "add_game_options")
