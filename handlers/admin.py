@@ -71,7 +71,13 @@ class AdminStates(StatesGroup):
     waiting_edit_option = State()
     waiting_manual_options = State()
     waiting_new_game_name = State()         # حالة إضافة لعبة جديدة
-    waiting_new_game_type = State()          # حالة اختيار نوع اللعبة
+    waiting_new_game_type = State() 
+    waiting_option_name = State()           # اسم الخيار الجديد
+    waiting_option_quantity = State()        # الكمية
+    waiting_option_supplier_price = State()  # سعر المورد
+    waiting_option_profit = State()          # نسبة الربح
+    waiting_option_description = State()     # الوصف
+    waiting_edit_option_field = State()          # حالة اختيار نوع اللعبة
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -972,6 +978,434 @@ async def templates_menu(callback: types.CallbackQuery, state: FSMContext):
         "📋 **اختر القالب الجاهز:**",
         reply_markup=builder.as_markup()
     )
+# ============= إضافة خيار جديد بطريقة تفاعلية =============
+
+@router.callback_query(F.data.startswith("add_option_"))
+async def add_option_interactive_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إضافة خيار جديد بطريقة تفاعلية"""
+    product_id = int(callback.data.split("_")[2])
+    await state.update_data(product_id=product_id)
+    
+    # جلب معلومات المنتج
+    from database import get_product
+    product = await get_product(callback.bot, product_id)  # تحتاج تعديل هذه الدالة
+    
+    await callback.message.edit_text(
+        "➕ **إضافة خيار جديد - الخطوة 1/5**\n\n"
+        "📝 **أدخل اسم الخيار:**\n"
+        "مثال: `60 UC`\n"
+        "مثال: `570 ماسة`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_option_name)
+
+@router.message(AdminStates.waiting_option_name)
+async def add_option_step_name(message: types.Message, state: FSMContext):
+    """استلام اسم الخيار"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    name = message.text.strip()
+    if len(name) < 2:
+        return await message.answer("❌ الاسم قصير جداً. أدخل اسم مناسب:")
+    
+    await state.update_data(option_name=name)
+    
+    await message.answer(
+        "➕ **إضافة خيار جديد - الخطوة 2/5**\n\n"
+        f"📦 **الكمية:** (أدخل الرقم فقط)\n"
+        f"مثال: `60`\n\n"
+        f"الاسم: **{name}**"
+    )
+    await state.set_state(AdminStates.waiting_option_quantity)
+
+@router.message(AdminStates.waiting_option_quantity)
+async def add_option_step_quantity(message: types.Message, state: FSMContext):
+    """استلام الكمية"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        quantity = int(message.text.strip())
+        if quantity <= 0:
+            return await message.answer("❌ الكمية يجب أن تكون أكبر من 0")
+        
+        await state.update_data(option_quantity=quantity)
+        
+        await message.answer(
+            "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
+            "💰 **سعر المورد (بالدولار):**\n"
+            "أدخل السعر الكامل للحزمة (وليس سعر الوحدة)\n"
+            f"مثال: `0.99` (لـ {quantity} وحدة)\n\n"
+            "هذا هو السعر الذي تشتري به من المورد"
+        )
+        await state.set_state(AdminStates.waiting_option_supplier_price)
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح للكمية:")
+
+@router.message(AdminStates.waiting_option_supplier_price)
+async def add_option_step_supplier_price(message: types.Message, state: FSMContext, db_pool):
+    """استلام سعر المورد"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        supplier_price = float(message.text.strip())
+        if supplier_price <= 0:
+            return await message.answer("❌ السعر يجب أن يكون أكبر من 0")
+        
+        await state.update_data(supplier_price=supplier_price)
+        
+        # جلب نسبة الربح الافتراضية من التطبيق
+        data = await state.get_data()
+        product_id = data['product_id']
+        
+        async with db_pool.acquire() as conn:
+            app = await conn.fetchrow(
+                "SELECT profit_percentage FROM applications WHERE id = $1",
+                product_id
+            )
+            default_profit = float(app['profit_percentage'] or 10) if app else 10
+        
+        await message.answer(
+            "➕ **إضافة خيار جديد - الخطوة 4/5**\n\n"
+            "📈 **نسبة الربح (%):**\n"
+            f"النسبة الافتراضية: **{default_profit}%**\n"
+            "أدخل النسبة المطلوبة (رقم فقط)\n"
+            f"مثال: `{default_profit}`\n\n"
+            "هذه النسبة ستضاف على سعر المورد"
+        )
+        await state.set_state(AdminStates.waiting_option_profit)
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح للسعر:")
+
+@router.message(AdminStates.waiting_option_profit)
+async def add_option_step_profit(message: types.Message, state: FSMContext, db_pool):
+    """استلام نسبة الربح"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        profit_percent = float(message.text.strip())
+        if profit_percent < 0:
+            return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة")
+        
+        await state.update_data(profit_percent=profit_percent)
+        
+        await message.answer(
+            "➕ **إضافة خيار جديد - الخطوة 5/5 (اختياري)**\n\n"
+            "📝 **الوصف:**\n"
+            "أدخل وصفاً للخيار (اختياري)\n"
+            "مثال: `شحن سريع`\n"
+            "مثال: `مع هدية خاصة`\n\n"
+            "أرسل `/skip` لتخطي هذه الخطوة"
+        )
+        await state.set_state(AdminStates.waiting_option_description)
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح:")
+
+@router.message(AdminStates.waiting_option_description)
+async def add_option_step_description(message: types.Message, state: FSMContext, db_pool):
+    """استلام الوصف وحفظ الخيار"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من التخطي
+    description = None
+    if message.text and message.text != "/skip":
+        description = message.text.strip()
+    
+    data = await state.get_data()
+    product_id = data['product_id']
+    option_name = data['option_name']
+    quantity = data['option_quantity']
+    supplier_price = data['supplier_price']
+    profit_percent = data['profit_percent']
+    
+    # جلب سعر الصرف
+    from database import get_exchange_rate
+    exchange_rate = await get_exchange_rate(db_pool)
+    
+    # حساب السعر النهائي
+    final_price_usd = supplier_price * (1 + profit_percent / 100)
+    final_price_syp = final_price_usd * exchange_rate
+    
+    async with db_pool.acquire() as conn:
+        # إضافة الخيار
+        option_id = await conn.fetchval('''
+            INSERT INTO product_options 
+            (product_id, name, quantity, price_usd, description, sort_order, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+            RETURNING id
+        ''', product_id, option_name, quantity, supplier_price, description, 0)
+    
+    # رسالة التأكيد
+    confirm_text = (
+        f"✅ **تم إضافة الخيار بنجاح!**\n\n"
+        f"📱 **المنتج:** {product_id}\n"
+        f"📦 **الخيار:** {option_name}\n"
+        f"🔢 **الكمية:** {quantity}\n\n"
+        
+        f"💰 **تفاصيل السعر:**\n"
+        f"• سعر المورد: **${supplier_price:.3f}**\n"
+        f"• نسبة الربح: **{profit_percent}%**\n"
+        f"• سعر البيع: **${final_price_usd:.3f}**\n"
+        f"• سعر البيع (ل.س): **{final_price_syp:,.0f} ل.س**\n\n"
+    )
+    
+    if description:
+        confirm_text += f"📝 **الوصف:** {description}\n"
+    
+    await message.answer(confirm_text)
+    await state.clear()
+
+# ============= تعديل خيار بطريقة تفاعلية =============
+
+@router.callback_query(F.data.startswith("edit_option_"))
+async def edit_option_interactive_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """بدء تعديل خيار بطريقة تفاعلية"""
+    option_id = int(callback.data.split("_")[2])
+    
+    from database import get_product_option
+    option = await get_product_option(db_pool, option_id)
+    
+    if not option:
+        return await callback.answer("❌ الخيار غير موجود", show_alert=True)
+    
+    await state.update_data(
+        option_id=option_id,
+        product_id=option['product_id']
+    )
+    
+    # عرض القائمة للاختيار
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="📝 تعديل الاسم", 
+        callback_data=f"edit_option_field_name_{option_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="🔢 تعديل الكمية", 
+        callback_data=f"edit_option_field_quantity_{option_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="💰 تعديل سعر المورد", 
+        callback_data=f"edit_option_field_price_{option_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="📈 تعديل نسبة الربح", 
+        callback_data=f"edit_option_field_profit_{option_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="📝 تعديل الوصف", 
+        callback_data=f"edit_option_field_desc_{option_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data=f"prod_options_{option['product_id']}"
+    ))
+    
+    text = (
+        f"✏️ **تعديل الخيار**\n\n"
+        f"**البيانات الحالية:**\n"
+        f"• الاسم: {option['name']}\n"
+        f"• الكمية: {option['quantity']}\n"
+        f"• سعر المورد: ${option['price_usd']:.3f}\n"
+    )
+    
+    if option.get('description'):
+        text += f"• الوصف: {option['description']}\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("edit_option_field_name_"))
+async def edit_option_field_name(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل اسم الخيار"""
+    option_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='name', option_id=option_id)
+    
+    await callback.message.edit_text(
+        "✏️ **تعديل الاسم**\n\n"
+        "أدخل الاسم الجديد:\n"
+        "مثال: `60 UC`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_edit_option_field)
+
+@router.callback_query(F.data.startswith("edit_option_field_quantity_"))
+async def edit_option_field_quantity(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل الكمية"""
+    option_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='quantity', option_id=option_id)
+    
+    await callback.message.edit_text(
+        "✏️ **تعديل الكمية**\n\n"
+        "أدخل الكمية الجديدة (رقم فقط):\n"
+        "مثال: `60`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_edit_option_field)
+
+@router.callback_query(F.data.startswith("edit_option_field_price_"))
+async def edit_option_field_price(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل سعر المورد"""
+    option_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='price', option_id=option_id)
+    
+    await callback.message.edit_text(
+        "✏️ **تعديل سعر المورد**\n\n"
+        "أدخل السعر الجديد بالدولار (للحزمة كاملة):\n"
+        "مثال: `0.99`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_edit_option_field)
+
+@router.callback_query(F.data.startswith("edit_option_field_profit_"))
+async def edit_option_field_profit(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """تعديل نسبة الربح"""
+    option_id = int(callback.data.split("_")[3])
+    
+    # جلب نسبة الربح الافتراضية من التطبيق
+    async with db_pool.acquire() as conn:
+        option = await conn.fetchrow(
+            "SELECT product_id FROM product_options WHERE id = $1",
+            option_id
+        )
+        if option:
+            app = await conn.fetchrow(
+                "SELECT profit_percentage FROM applications WHERE id = $1",
+                option['product_id']
+            )
+            default_profit = float(app['profit_percentage'] or 10) if app else 10
+    
+    await state.update_data(edit_field='profit', option_id=option_id)
+    
+    await callback.message.edit_text(
+        "✏️ **تعديل نسبة الربح**\n\n"
+        f"النسبة الافتراضية: **{default_profit}%**\n"
+        "أدخل النسبة الجديدة (رقم فقط):\n"
+        "مثال: `15`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_edit_option_field)
+
+@router.callback_query(F.data.startswith("edit_option_field_desc_"))
+async def edit_option_field_desc(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل الوصف"""
+    option_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='description', option_id=option_id)
+    
+    await callback.message.edit_text(
+        "✏️ **تعديل الوصف**\n\n"
+        "أدخل الوصف الجديد:\n"
+        "مثال: `شحن سريع مع ضمان`\n"
+        "أو أرسل `-` لحذف الوصف\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_edit_option_field)
+
+@router.message(AdminStates.waiting_edit_option_field)
+async def edit_option_field_save(message: types.Message, state: FSMContext, db_pool):
+    """حفظ التعديل على الحقل المحدد"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    option_id = data['option_id']
+    field = data['edit_field']
+    value = message.text.strip()
+    
+    # التحقق من صحة المدخلات
+    try:
+        if field == 'name':
+            if len(value) < 2:
+                return await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:")
+            update_value = value
+            
+        elif field == 'quantity':
+            quantity = int(value)
+            if quantity <= 0:
+                return await message.answer("❌ الكمية يجب أن تكون أكبر من 0")
+            update_value = quantity
+            
+        elif field == 'price':
+            price = float(value)
+            if price <= 0:
+                return await message.answer("❌ السعر يجب أن يكون أكبر من 0")
+            update_value = price
+            
+        elif field == 'profit':
+            profit = float(value)
+            if profit < 0:
+                return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة")
+            update_value = profit
+            
+        elif field == 'description':
+            update_value = None if value == '-' else value
+        
+        else:
+            await message.answer("❌ حقل غير معروف")
+            await state.clear()
+            return
+        
+        # تحديث قاعدة البيانات
+        async with db_pool.acquire() as conn:
+            if field == 'profit':
+                # نسبة الربح تخزن في التطبيق وليس في الخيار
+                # هنا نحتاج لتحديث التطبيق نفسه
+                option = await conn.fetchrow(
+                    "SELECT product_id FROM product_options WHERE id = $1",
+                    option_id
+                )
+                if option:
+                    await conn.execute(
+                        "UPDATE applications SET profit_percentage = $1 WHERE id = $2",
+                        update_value, option['product_id']
+                    )
+            else:
+                # تحديث الخيار مباشرة
+                await conn.execute(
+                    f"UPDATE product_options SET {field} = $1 WHERE id = $2",
+                    update_value, option_id
+                )
+        
+        # جلب معلومات الخيار المحدث
+        from database import get_product_option
+        option = await get_product_option(db_pool, option_id)
+        
+        # حساب السعر النهائي للعرض
+        from database import get_exchange_rate
+        exchange_rate = await get_exchange_rate(db_pool)
+        
+        if option:
+            app = await conn.fetchrow(
+                "SELECT profit_percentage FROM applications WHERE id = $1",
+                option['product_id']
+            )
+            profit_percent = float(app['profit_percentage'] or 0) if app else 0
+            final_price_usd = option['price_usd'] * (1 + profit_percent / 100)
+            final_price_syp = final_price_usd * exchange_rate
+            
+            await message.answer(
+                f"✅ **تم التحديث بنجاح!**\n\n"
+                f"• {field}: {value}\n"
+                f"• السعر النهائي: **{final_price_syp:,.0f} ل.س**"
+            )
+        else:
+            await message.answer(f"✅ تم تحديث {field} بنجاح!")
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ قيمة غير صالحة. يرجى إدخال قيمة صحيحة:")
+    except Exception as e:
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
 # ============= إضافة لعبة أو اشتراك جديد =============
 
 @router.callback_query(F.data == "add_new_game")
