@@ -70,6 +70,8 @@ class AdminStates(StatesGroup):
     waiting_new_option = State()
     waiting_edit_option = State()
     waiting_manual_options = State()
+    waiting_new_game_name = State()         # حالة إضافة لعبة جديدة
+    waiting_new_game_type = State()          # حالة اختيار نوع اللعبة
 
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
@@ -681,29 +683,44 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
-    """عرض المنتجات لإدارة خياراتها (جدول product_options)"""
+    """عرض المنتجات لإدارة خياراتها"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     async with db_pool.acquire() as conn:
         products = await conn.fetch('''
-            SELECT a.id, a.name, c.display_name 
+            SELECT a.id, a.name, c.display_name, a.type
             FROM applications a
             LEFT JOIN categories c ON a.category_id = c.id
-            WHERE a.type IN ('game', 'subscription')  -- فقط الألعاب والاشتراكات
+            WHERE a.type IN ('game', 'subscription')
             ORDER BY c.sort_order, a.name
         ''')
     
+    text = "🎮 **إدارة خيارات الألعاب والاشتراكات**\n\n"
+    
     if not products:
-        await callback.answer("❌ لا توجد ألعاب أو اشتراكات", show_alert=True)
-        return
+        text += "⚠️ لا توجد ألعاب أو اشتراكات حالياً."
+    else:
+        text += "**التطبيقات المتوفرة:**\n\n"
+        for p in products:
+            type_icon = "🎮" if p['type'] == 'game' else "📅"
+            text += f"{type_icon} **{p['name']}** - {p['display_name']}\n"
     
     builder = InlineKeyboardBuilder()
+    
+    # إضافة أزرار التطبيقات الموجودة
     for product in products:
+        type_icon = "🎮" if product['type'] == 'game' else "📅"
         builder.row(types.InlineKeyboardButton(
-            text=f"🎮 {product['name']} ({product['display_name']})",
+            text=f"{type_icon} {product['name']}",
             callback_data=f"prod_options_{product['id']}"
         ))
+    
+    # زر إضافة تطبيق جديد
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة لعبة أو اشتراك جديد",
+        callback_data="add_new_game"
+    ))
     
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع",
@@ -714,7 +731,7 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
         "🎮 **إدارة خيارات الألعاب (product_options)**\n\n"
         "هذه الخيارات خاصة بالألعاب والاشتراكات:\n"
         "• تحتوي على أوصاف إضافية\n"
-        "• مثال: 60 UC + هدية, 570 ماسة + 50 هدية",
+        "• مثال: 60 UC , 570 ماسة ",
         reply_markup=builder.as_markup()
     )
 
@@ -953,6 +970,150 @@ async def templates_menu(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.message.edit_text(
         "📋 **اختر القالب الجاهز:**",
+        reply_markup=builder.as_markup()
+    )
+# ============= إضافة لعبة أو اشتراك جديد =============
+
+@router.callback_query(F.data == "add_new_game")
+async def add_new_game_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """بدء إضافة لعبة أو اشتراك جديد"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    # جلب الأقسام
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT id, display_name FROM categories ORDER BY sort_order")
+    
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        builder.row(types.InlineKeyboardButton(
+            text=cat['display_name'],
+            callback_data=f"new_game_cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data="manage_options"
+    ))
+    
+    await callback.message.edit_text(
+        "➕ **إضافة لعبة أو اشتراك جديد**\n\n"
+        "اختر القسم أولاً:",
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("new_game_cat_"))
+async def new_game_get_name(callback: types.CallbackQuery, state: FSMContext):
+    """استلام اسم اللعبة الجديدة"""
+    cat_id = int(callback.data.split("_")[3])
+    await state.update_data(category_id=cat_id)
+    
+    await callback.message.edit_text(
+        "📝 **أدخل اسم اللعبة أو الاشتراك:**\n\n"
+        "مثال: `PUBG Mobile`\n"
+        "مثال: `Netflix Premium`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_new_game_name)
+
+@router.message(AdminStates.waiting_new_game_name)
+async def new_game_get_type(message: types.Message, state: FSMContext):
+    """اختيار نوع اللعبة"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    name = message.text.strip()
+    await state.update_data(game_name=name)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="🎮 لعبة", callback_data="new_game_type_game"),
+        types.InlineKeyboardButton(text="📅 اشتراك", callback_data="new_game_type_subscription")
+    )
+    
+    await message.answer(
+        f"📱 **الاسم:** {name}\n\n"
+        f"اختر النوع:",
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(AdminStates.waiting_new_game_type)
+
+@router.callback_query(F.data.startswith("new_game_type_"))
+async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """حفظ اللعبة الجديدة في قاعدة البيانات"""
+    game_type = callback.data.replace("new_game_type_", "")
+    
+    data = await state.get_data()
+    name = data['game_name']
+    category_id = data['category_id']
+    
+    async with db_pool.acquire() as conn:
+        # إضافة اللعبة إلى جدول applications
+        game_id = await conn.fetchval('''
+            INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+            RETURNING id
+        ''', name, 0.01, 1, 10, category_id, game_type)
+    
+    await callback.message.edit_text(
+        f"✅ **تم إضافة {name} بنجاح!**\n\n"
+        f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك'}\n"
+        f"🆔 المعرف: {game_id}\n\n"
+        f"🔹 الآن يمكنك إضافة خيارات لهذا التطبيق من خلال:\n"
+        f"🎮 إدارة خيارات الألعاب ← اختر {name}"
+    )
+    await state.clear()
+
+# ============= تعديل دالة manage_options_start لإضافة زر اللعبة الجديدة =============
+
+@router.callback_query(F.data == "manage_options")
+async def manage_options_start(callback: types.CallbackQuery, db_pool):
+    """عرض المنتجات لإدارة خياراتها"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        products = await conn.fetch('''
+            SELECT a.id, a.name, c.display_name, a.type
+            FROM applications a
+            LEFT JOIN categories c ON a.category_id = c.id
+            WHERE a.type IN ('game', 'subscription')
+            ORDER BY c.sort_order, a.name
+        ''')
+    
+    text = "🎮 **إدارة خيارات الألعاب والاشتراكات**\n\n"
+    
+    if not products:
+        text += "⚠️ لا توجد ألعاب أو اشتراكات حالياً."
+    else:
+        text += "**التطبيقات المتوفرة:**\n\n"
+        for p in products:
+            type_icon = "🎮" if p['type'] == 'game' else "📅"
+            text += f"{type_icon} **{p['name']}** - {p['display_name']}\n"
+    
+    builder = InlineKeyboardBuilder()
+    
+    # إضافة أزرار التطبيقات الموجودة
+    for product in products:
+        type_icon = "🎮" if product['type'] == 'game' else "📅"
+        builder.row(types.InlineKeyboardButton(
+            text=f"{type_icon} {product['name']}",
+            callback_data=f"prod_options_{product['id']}"
+        ))
+    
+    # زر إضافة تطبيق جديد
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة لعبة أو اشتراك جديد",
+        callback_data="add_new_game"
+    ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data="back_to_admin"
+    ))
+    
+    await callback.message.edit_text(
+        text,
         reply_markup=builder.as_markup()
     )
 # ============= إضافة خيارات ألعاب جديدة =============
