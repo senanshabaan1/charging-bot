@@ -238,7 +238,12 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     app_type = parts[2] if len(parts) > 2 else 'service'
     
     async with db_pool.acquire() as conn:
-        app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", app_id)
+        # التحقق من وجود التطبيق
+        app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1 AND is_active = TRUE", app_id)
+        
+        if not app:
+            await callback.answer("عذراً، هذا التطبيق غير متوفر حالياً.", show_alert=True)
+            return
         
         # جلب سعر الصرف الحالي ومستوى VIP
         from database import get_exchange_rate, get_user_vip
@@ -246,9 +251,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
         vip_level = user_vip.get('vip_level', 0)
-    
-    if not app:
-        return await callback.answer("عذراً، هذه الخدمة لم تعد متوفرة.", show_alert=True)
     
     # ✅ تحويل جميع القيم من Decimal إلى float
     app_dict = dict(app)
@@ -497,6 +499,11 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
     data = await state.get_data()
     
+    if not data:
+        await callback.answer("انتهت صلاحية الطلب، يرجى المحاولة مرة أخرى", show_alert=True)
+        await state.clear()
+        return
+    
     from database import get_points_per_order
     
     # جلب عدد النقاط من الإعدادات
@@ -510,6 +517,17 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     async with db_pool.acquire() as conn:
         # بدء transaction لضمان تكامل البيانات
         async with conn.transaction():
+            # التحقق من الرصيد أولاً
+            current_balance = await conn.fetchval(
+                "SELECT balance FROM users WHERE user_id = $1",
+                callback.from_user.id
+            )
+            
+            if current_balance < total_syp:
+                await callback.answer("❌ رصيد غير كافي", show_alert=True)
+                await state.clear()
+                return
+            
             # خصم الرصيد
             await conn.execute(
                 "UPDATE users SET balance = balance - $1, total_orders = total_orders + 1 WHERE user_id = $2",
@@ -547,7 +565,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'app_name': data['app']['name'],
                     'variant_name': variant['name'],
                     'quantity': int(variant.get('quantity', 1) or 1),
-                    'total_syp': data['total_syp'],
+                    'total_syp': total_syp,
                     'target_id': data['target_id'],
                 }
             else:
@@ -565,7 +583,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data['app']['name'],
                 data['qty'],
                 data['discounted_unit_price_usd'],
-                data['total_syp'],
+                total_syp,
                 data['target_id'],
                 points
                 )
@@ -576,7 +594,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'username': callback.from_user.username or 'غير معروف',
                     'app_name': data['app']['name'],
                     'quantity': data['qty'],
-                    'total_syp': data['total_syp'],
+                    'total_syp': total_syp,
                     'target_id': data['target_id'],
                 }
             
@@ -591,7 +609,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     # رسالة التأكيد مع تفاصيل الخصم
     if discount > 0:
-        saved_amount = data.get('original_total_syp', data['total_syp']) - data['total_syp']
+        saved_amount = data.get('original_total_syp', total_syp) - total_syp
         discount_text = f"\n🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
     else:
         discount_text = ""
