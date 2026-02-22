@@ -3,11 +3,22 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 from typing import Callable, Dict, Any, Awaitable
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
+# كاش لحالة البوت - خارج الكلاس
+bot_status_cache = {
+    'status': True, 
+    'last_check': 0,
+    'maintenance_message': 'البوت قيد الصيانة حالياً'
+}
+
+# مدة صلاحية الكاش بالثواني (60 ثانية)
+CACHE_TTL = 60
+
 class BotStatusMiddleware(BaseMiddleware):
-    """ميدل وير للتحقق من حالة البوت قبل معالجة الرسائل"""
+    """ميدل وير للتحقق من حالة البوت قبل معالجة الرسائل مع نظام كاش"""
     
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -19,7 +30,7 @@ class BotStatusMiddleware(BaseMiddleware):
         event: Message | CallbackQuery,
         data: Dict[str, Any]
     ) -> Any:
-        # التحقق من حالة البوت من قاعدة البيانات
+        # التحقق من حالة البوت من قاعدة البيانات مع استخدام الكاش
         from database import get_bot_status, get_maintenance_message
         
         # استثناء المشرفين من التحقق
@@ -32,13 +43,33 @@ class BotStatusMiddleware(BaseMiddleware):
         if is_admin:
             return await handler(event, data)
         
-        # التحقق من حالة البوت
-        bot_status = await get_bot_status(self.db_pool)
+        # استخدام الكاش - التحقق كل 60 ثانية فقط
+        current_time = time.time()
+        
+        # إذا مر وقت أقل من CACHE_TTL على آخر تحديث، استخدم القيمة المخزنة
+        if current_time - bot_status_cache['last_check'] < CACHE_TTL:
+            bot_status = bot_status_cache['status']
+            maintenance_msg = bot_status_cache.get('maintenance_message', 'البوت قيد الصيانة حالياً')
+        else:
+            # جلب البيانات الجديدة من قاعدة البيانات
+            try:
+                bot_status = await get_bot_status(self.db_pool)
+                maintenance_msg = await get_maintenance_message(self.db_pool)
+                
+                # تحديث الكاش
+                bot_status_cache['status'] = bot_status
+                bot_status_cache['maintenance_message'] = maintenance_msg
+                bot_status_cache['last_check'] = current_time
+                
+                logger.info(f"✅ تم تحديث كاش حالة البوت: {'يعمل' if bot_status else 'متوقف'}")
+            except Exception as e:
+                # في حالة خطأ قاعدة البيانات، استخدم آخر قيمة مخزنة
+                logger.error(f"❌ خطأ في جلب حالة البوت: {e}")
+                bot_status = bot_status_cache['status']
+                maintenance_msg = bot_status_cache.get('maintenance_message', 'البوت قيد الصيانة حالياً')
         
         if not bot_status:
             # البوت متوقف - إرسال رسالة الصيانة
-            maintenance_msg = await get_maintenance_message(self.db_pool)
-            
             if isinstance(event, Message):
                 await event.answer(f"⚠️ {maintenance_msg}")
             elif isinstance(event, CallbackQuery):
@@ -48,3 +79,35 @@ class BotStatusMiddleware(BaseMiddleware):
         
         # البوت يعمل - السماح بمعالجة الرسالة
         return await handler(event, data)
+
+
+# يمكنك إضافة دالة لتحديث الكاش يدوياً عند الحاجة
+async def refresh_bot_status_cache(db_pool):
+    """تحديث كاش حالة البوت يدوياً"""
+    from database import get_bot_status, get_maintenance_message
+    
+    try:
+        bot_status = await get_bot_status(db_pool)
+        maintenance_msg = await get_maintenance_message(db_pool)
+        
+        bot_status_cache['status'] = bot_status
+        bot_status_cache['maintenance_message'] = maintenance_msg
+        bot_status_cache['last_check'] = time.time()
+        
+        logger.info(f"✅ تم تحديث كاش حالة البوت يدوياً: {'يعمل' if bot_status else 'متوقف'}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ فشل تحديث كاش حالة البوت: {e}")
+        return False
+
+
+# يمكنك إضافة دالة لإعادة ضبط الكاش (للاختبار)
+def reset_bot_status_cache():
+    """إعادة ضبط كاش حالة البوت"""
+    global bot_status_cache
+    bot_status_cache = {
+        'status': True,
+        'last_check': 0,
+        'maintenance_message': 'البوت قيد الصيانة حالياً'
+    }
+    logger.info("🔄 تم إعادة ضبط كاش حالة البوت")
