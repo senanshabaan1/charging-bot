@@ -188,6 +188,10 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     
     await set_bot_status(db_pool, new_status)
     
+    # تحديث الكاش فوراً
+    from handlers.middleware import refresh_bot_status_cache
+    await refresh_bot_status_cache(db_pool)
+    
     status_text = "🟢 يعمل" if new_status else "🔴 متوقف"
     action_text = "تشغيل" if new_status else "إيقاف"
     
@@ -343,12 +347,15 @@ async def get_product_price(message: types.Message, state: FSMContext):
     """استلام سعر المنتج"""
     try:
         price = float(message.text)
-        await state.update_data(product_price=price)
-        await message.answer(
-            "📦 **أدخل الحد الأدنى للكمية:**\n"
-            "مثال: 100"
-        )
-        await state.set_state(AdminStates.waiting_product_min)
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001)")
+    
+    await state.update_data(product_price=price)
+    await message.answer(
+        "📦 **أدخل الحد الأدنى للكمية:**\n"
+        "مثال: 100"
+    )
+    await state.set_state(AdminStates.waiting_product_min)
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح")
 
@@ -357,12 +364,18 @@ async def get_product_min(message: types.Message, state: FSMContext):
     """استلام الحد الأدنى"""
     try:
         min_units = int(message.text)
-        await state.update_data(product_min=min_units)
-        await message.answer(
-            "📈 **أدخل نسبة الربح (%):**\n"
-            "مثال: 10"
-        )
-        await state.set_state(AdminStates.waiting_product_profit)
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
+    
+    if min_units <= 0:
+        return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0")
+    
+    await state.update_data(product_min=min_units)
+    await message.answer(
+        "📈 **أدخل نسبة الربح (%):**\n"
+        "مثال: 10"
+    )
+    await state.set_state(AdminStates.waiting_product_profit)
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح")
 
@@ -371,28 +384,31 @@ async def get_product_profit(message: types.Message, state: FSMContext, db_pool)
     """استلام نسبة الربح وحفظ المنتج"""
     try:
         profit = float(message.text)
-        data = await state.get_data()
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute('''
-                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type)
-                VALUES ($1, $2, $3, $4, $5, 'service')
-            ''', 
-            data['product_name'],
-            data['product_price'],
-            data['product_min'],
-            profit,
-            data['category_id']
-            )
-        
-        await message.answer(
-            f"✅ **تم إضافة المنتج بنجاح!**\n\n"
-            f"📱 الاسم: {data['product_name']}\n"
-            f"💰 السعر: ${data['product_price']}\n"
-            f"📦 الحد الأدنى: {data['product_min']}\n"
-            f"📈 الربح: {profit}%"
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10)")
+    
+    data = await state.get_data()
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type)
+            VALUES ($1, $2, $3, $4, $5, 'service')
+        ''', 
+        data['product_name'],
+        data['product_price'],
+        data['product_min'],
+        profit,
+        data['category_id']
         )
-        await state.clear()
+    
+    await message.answer(
+        f"✅ **تم إضافة المنتج بنجاح!**\n\n"
+        f"📱 الاسم: {data['product_name']}\n"
+        f"💰 السعر: ${data['product_price']}\n"
+        f"📦 الحد الأدنى: {data['product_min']}\n"
+        f"📈 الربح: {profit}%"
+    )
+    await state.clear()
         
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح")
@@ -855,25 +871,27 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
     
     try:
         quantity = int(message.text.strip())
-        if quantity <= 0:
-            await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
-            return
-        
-        await state.update_data(option_quantity=quantity)
-        
-        data = await state.get_data()
-        option_name = data.get('option_name', '')
-        
-        await message.answer(
-            "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
-            "💰 **أدخل سعر المورد (بالدولار):**\n"
-            f"مثال: `0.99` لـ {quantity} وحدة\n"
-            f"الاسم: **{option_name}**\n"
-            f"الكمية: **{quantity}**\n\n"
-            f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
-        )
-        await state.set_state(AdminStates.waiting_option_supplier_price)
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
+    
+    if quantity <= 0:
+        return await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+    
+    await state.update_data(option_quantity=quantity)
+    
+    data = await state.get_data()
+    option_name = data.get('option_name', '')
+    
+    await message.answer(
+        "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
+        "💰 **أدخل سعر المورد (بالدولار):**\n"
+        f"مثال: `0.99` لـ {quantity} وحدة\n"
+        f"الاسم: **{option_name}**\n"
+        f"الكمية: **{quantity}**\n\n"
+        f"❌ اضغط على زر الإلغاء للرجوع",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_option_supplier_price)
         
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
@@ -886,36 +904,38 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
     
     try:
         supplier_price = float(message.text.strip())
-        if supplier_price <= 0:
-            await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
-            return
-        
-        await state.update_data(supplier_price=supplier_price)
-        
-        data = await state.get_data()
-        product_id = data['product_id']
-        
-        async with db_pool.acquire() as conn:
-            app = await conn.fetchrow(
-                "SELECT profit_percentage FROM applications WHERE id = $1",
-                product_id
-            )
-            default_profit = float(app['profit_percentage'] or 10) if app else 10
-        
-        option_name = data.get('option_name', '')
-        quantity = data.get('option_quantity', 0)
-        
-        await message.answer(
-            "➕ **إضافة خيار جديد - الخطوة 4/5**\n\n"
-            "📈 **أدخل نسبة الربح (%):**\n"
-            f"النسبة الافتراضية: **{default_profit}%**\n"
-            f"الاسم: **{option_name}**\n"
-            f"الكمية: **{quantity}**\n"
-            f"سعر المورد: **${supplier_price:.3f}**\n\n"
-            f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للسعر:", reply_markup=get_cancel_keyboard())
+    
+    if supplier_price <= 0:
+        return await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+    
+    await state.update_data(supplier_price=supplier_price)
+    
+    data = await state.get_data()
+    product_id = data['product_id']
+    
+    async with db_pool.acquire() as conn:
+        app = await conn.fetchrow(
+            "SELECT profit_percentage FROM applications WHERE id = $1",
+            product_id
         )
-        await state.set_state(AdminStates.waiting_option_profit)
+        default_profit = float(app['profit_percentage'] or 10) if app else 10
+    
+    option_name = data.get('option_name', '')
+    quantity = data.get('option_quantity', 0)
+    
+    await message.answer(
+        "➕ **إضافة خيار جديد - الخطوة 4/5**\n\n"
+        "📈 **أدخل نسبة الربح (%):**\n"
+        f"النسبة الافتراضية: **{default_profit}%**\n"
+        f"الاسم: **{option_name}**\n"
+        f"الكمية: **{quantity}**\n"
+        f"سعر المورد: **${supplier_price:.3f}**\n\n"
+        f"❌ اضغط على زر الإلغاء للرجوع",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_option_profit)
         
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
@@ -928,30 +948,31 @@ async def add_option_step_profit(message: types.Message, state: FSMContext):
     
     try:
         profit_percent = float(message.text.strip())
-        if profit_percent < 0:
-            await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
-            return
-        
-        await state.update_data(profit_percent=profit_percent)
-        
-        data = await state.get_data()
-        option_name = data.get('option_name', '')
-        quantity = data.get('option_quantity', 0)
-        supplier_price = data.get('supplier_price', 0)
-        
-        await message.answer(
-            "➕ **إضافة خيار جديد - الخطوة 5/5**\n\n"
-            "📝 **أدخل وصف الخيار:**\n"
-            "هذا الوصف سيظهر للمستخدم عند الشراء\n"
-            "أدخل الوصف (أو أرسل `-` لتخطي):\n\n"
-            f"الاسم: **{option_name}**\n"
-            f"الكمية: **{quantity}**\n"
-            f"سعر المورد: **${supplier_price:.3f}**\n"
-            f"نسبة الربح: **{profit_percent}%**\n\n"
-            f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
-        )
-        await state.set_state(AdminStates.waiting_option_description)
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح لنسبة الربح:", reply_markup=get_cancel_keyboard())
+    
+    if profit_percent < 0:
+        return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+    
+    await state.update_data(profit_percent=profit_percent)
+    
+    data = await state.get_data()
+    option_name = data.get('option_name', '')
+    quantity = data.get('option_quantity', 0)
+    supplier_price = data.get('supplier_price', 0)
+    
+    await message.answer(
+        "➕ **إضافة خيار جديد - الخطوة 5/5**\n\n"
+        "📝 **أدخل وصف الخيار:**\n"
+        "أدخل الوصف (أو أرسل `-` لتخطي):\n\n"
+        f"الاسم: **{option_name}**\n"
+        f"الكمية: **{quantity}**\n"
+        f"سعر المورد: **${supplier_price:.3f}**\n"
+        f"نسبة الربح: **{profit_percent}%**\n\n"
+        f"❌ اضغط على زر الإلغاء للرجوع",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_option_description)
         
     except ValueError:
         await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
@@ -1642,11 +1663,13 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
     
     try:
         new_rate = float(message.text)
-        
-        from config import ADMIN_ID, MODERATORS
-        admin_ids = [ADMIN_ID] + MODERATORS
-        admin_ids_str = ','.join([str(id) for id in admin_ids if id])
-        
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118)")
+    
+    from config import ADMIN_ID, MODERATORS
+    admin_ids = [ADMIN_ID] + MODERATORS
+    admin_ids_str = ','.join([str(id) for id in admin_ids if id])
+            
         async with db_pool.acquire() as conn:
             # 1. مسح سجل النقاط
             await conn.execute("DELETE FROM points_history")
@@ -2007,38 +2030,41 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
     if not is_admin(message.from_user.id):
         return
     
+    # التحقق من صحة الإدخال
     try:
         new_rate = float(message.text)
-        
-        if new_rate <= 0:
-            return await message.answer("⚠️ يرجى إدخال رقم موجب")
-        
-        from database import set_exchange_rate
-        await set_exchange_rate(db_pool, new_rate)
-        
-        # تحديث المتغير العام في config
-        import config
-        config.USD_TO_SYP = new_rate
-        
-        await message.answer(
-            f"✅ **تم تحديث سعر الصرف بنجاح**\n\n"
-            f"💰 السعر الجديد: {new_rate:,.0f} ل.س = 1$"
-        )
-        
-        # إرسال إشعار للمشرفين الآخرين
-        from config import MODERATORS
-        for mod_id in MODERATORS:
-            if mod_id and mod_id != message.from_user.id:
-                try:
-                    await message.bot.send_message(
-                        mod_id,
-                        f"ℹ️ تم تغيير سعر الصرف بواسطة @{message.from_user.username}\n"
-                        f"💰 السعر الجديد: {new_rate:,.0f} ل.س"
-                    )
-                except:
-                    pass
-        
-        await state.clear()
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118)")
+    
+    if new_rate <= 0:
+        return await message.answer("⚠️ يرجى إدخال رقم موجب")
+    
+    from database import set_exchange_rate
+    await set_exchange_rate(db_pool, new_rate)
+    
+    # تحديث المتغير العام في config
+    import config
+    config.USD_TO_SYP = new_rate
+    
+    await message.answer(
+        f"✅ **تم تحديث سعر الصرف بنجاح**\n\n"
+        f"💰 السعر الجديد: {new_rate:,.0f} ل.س = 1$"
+    )
+    
+    # إرسال إشعار للمشرفين الآخرين
+    from config import MODERATORS
+    for mod_id in MODERATORS:
+        if mod_id and mod_id != message.from_user.id:
+            try:
+                await message.bot.send_message(
+                    mod_id,
+                    f"ℹ️ تم تغيير سعر الصرف بواسطة @{message.from_user.username}\n"
+                    f"💰 السعر الجديد: {new_rate:,.0f} ل.س"
+                )
+            except:
+                pass
+    
+    await state.clear()
         
     except ValueError:
         await message.answer("⚠️ يرجى إدخال رقم صحيح")
@@ -2049,267 +2075,208 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
 # إرسال رسالة للجميع
 @router.callback_query(F.data == "broadcast")
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("📢 **أدخل الرسالة التي تريد إرسالها للجميع:**")
+    """بدء إرسال رسالة للجميع"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.answer(
+        "📢 **إرسال رسالة للجميع**\n\n"
+        "أدخل الرسالة التي تريد إرسالها لجميع المستخدمين:\n\n"
+        "✏️ يمكنك استخدام Markdown للتنسيق:\n"
+        "• **نص عريض**\n"
+        "• *نص مائل*\n"
+        "• `كود`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
     await state.set_state(AdminStates.waiting_broadcast_msg)
 
 @router.message(AdminStates.waiting_broadcast_msg)
 async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
-    try:
-        original_text = message.text
-        logger.info(f"📝 النص الأصلي: {original_text}")
-
-        async with db_pool.acquire() as conn:
-            users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
-            user_count = len(users)
-
-            if user_count == 0:
-                await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
-                await state.clear()
-                return
-
-            # ✅ معاينة باستخدام Markdown (نفس طريقة الإرسال)
-            try:
-                await bot.send_message(
-                    message.from_user.id,
-                    f"📢 **معاينة الرسالة:**\n\n{original_text}",
-                    parse_mode=ParseMode.MARKDOWN  # 👈 استخدم MARKDOWN
-                )
-                logger.info("✅ المعاينة نجحت")
-            except Exception as e:
-                logger.error(f"❌ فشلت المعاينة: {e}")
-                await message.answer(
-                    f"❌ خطأ في تنسيق Markdown!\n\n{str(e)}\n\n"
-                    f"تأكد من كتابة:\n"
-                    f"• `**نص**` للنص العريض\n"
-                    f"• `*نص*` للنص المائل\n"
-                    f"• `` `نص` `` للكود"
-                )
-                await state.clear()
-                return
-
-            # تأكيد الإرسال
-            confirm_builder = InlineKeyboardBuilder()
-            confirm_builder.row(
-                types.InlineKeyboardButton(text="✅ تأكيد الإرسال للجميع", callback_data="confirm_broadcast_final"),
-                types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast")
-            )
-
-            await message.answer(
-                f"📊 عدد المستلمين: {user_count}\n\n"
-                f"هل أنت متأكد من إرسال الرسالة للجميع؟",
-                reply_markup=confirm_builder.as_markup()
-            )
-
-            await state.update_data(broadcast_text=original_text, broadcast_users=user_count)
-
-    except Exception as e:
-        logger.error(f"❌ خطأ عام: {e}")
-        await message.answer(f"❌ حدث خطأ: {str(e)}")
+    """إرسال رسالة لجميع المستخدمين مع إمكانية الإلغاء في أي وقت"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
         await state.clear()
+        await message.answer("✅ تم إلغاء الإرسال.")
+        return
+    
+    broadcast_text = message.text
+    
+    # جلب عدد المستخدمين
+    async with db_pool.acquire() as conn:
+        # جلب جميع المستخدمين غير المحظورين
+        users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
+        total_users = len(users)
+        
+        # جلب عدد المستخدمين المحظورين (للعرض فقط)
+        banned_count = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_banned")
+    
+    if total_users == 0:
+        await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
+        await state.clear()
+        return
+    
+    # معاينة الرسالة
+    try:
+        # تجربة إرسال معاينة للمشرف
+        await bot.send_message(
+            message.from_user.id,
+            f"📢 **معاينة الرسالة:**\n\n{broadcast_text}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # بناء أزرار التأكيد
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="✅ تأكيد الإرسال", callback_data="confirm_broadcast"),
+            types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast")
+        )
+        builder.row(
+            types.InlineKeyboardButton(text="📝 تعديل الرسالة", callback_data="edit_broadcast")
+        )
+        
+        await message.answer(
+            f"📊 **معلومات الإرسال**\n\n"
+            f"👥 عدد المستلمين: {total_users} مستخدم\n"
+            f"🚫 المحظورين: {banned_count} (لن يستلموا)\n\n"
+            f"هل أنت متأكد من إرسال الرسالة؟",
+            reply_markup=builder.as_markup()
+        )
+        
+        # حفظ البيانات في state
+        await state.update_data(
+            broadcast_text=broadcast_text,
+            total_users=total_users
+        )
+        
+    except Exception as e:
+        # إذا فشلت المعاينة بسبب تنسيق Markdown
+        await message.answer(
+            f"❌ **خطأ في تنسيق Markdown**\n\n"
+            f"الرسالة:\n{broadcast_text}\n\n"
+            f"الخطأ: {str(e)}\n\n"
+            f"تأكد من إغلاق جميع الرموز بشكل صحيح:\n"
+            f"• `**نص**` للنص العريض\n"
+            f"• `*نص*` للنص المائل\n"
+            f"• `` `نص` `` للكود"
+        )
+        # لا نمسح الـ state عشان يقدر يعدل
 
+@router.callback_query(F.data == "edit_broadcast")
+async def edit_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل رسالة البث"""
+    await callback.message.edit_text(
+        "📝 **أدخل الرسالة الجديدة:**\n\n"
+        "✏️ يمكنك استخدام Markdown للتنسيق:\n"
+        "• **نص عريض**\n"
+        "• *نص مائل*\n"
+        "• `كود`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    # نبقى في نفس الحالة waiting_broadcast_msg
+    await callback.answer()
 
-@router.callback_query(F.data == "confirm_broadcast_final")
-async def confirm_broadcast_final(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
+@router.callback_query(F.data == "confirm_broadcast")
+async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
     """تأكيد إرسال البث"""
     data = await state.get_data()
-    text = data.get('broadcast_text')
-    user_count = data.get('broadcast_users', 0)
+    broadcast_text = data.get('broadcast_text')
+    total_users = data.get('total_users', 0)
     
-    await callback.message.edit_text("⏳ جاري الإرسال...")
+    if not broadcast_text:
+        await callback.answer("❌ لا توجد رسالة للإرسال", show_alert=True)
+        await state.clear()
+        return
     
+    # تغيير نص الزر إلى "جاري الإرسال..."
+    await callback.message.edit_text("⏳ **جاري الإرسال...**\nقد يستغرق هذا بعض الوقت.")
+    
+    # جلب جميع المستخدمين
     async with db_pool.acquire() as conn:
         users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
     
-    success = 0
-    failed = 0
+    success_count = 0
+    failed_count = 0
+    failed_users = []
     
-    # ✅ استخدام Markdown مباشرة (لأنك كتبت **نص** و *نص*)
+    # إرسال الرسالة لكل مستخدم
     for i, user in enumerate(users):
-        if user['user_id'] == callback.from_user.id:
+        user_id = user['user_id']
+        
+        # نتخطى المشرف نفسه
+        if user_id == callback.from_user.id:
             continue
-            
+        
         try:
-            # إرسال مع Markdown (لأن النص مكتوب بـ ** و *)
+            # محاولة إرسال مع Markdown
             await bot.send_message(
-                user['user_id'],
-                f"📢 **رسالة من الإدارة:**\n\n{text}",
-                parse_mode=ParseMode.MARKDOWN  # 👈 استخدم MARKDOWN مش HTML
+                user_id,
+                f"📢 **رسالة من الإدارة:**\n\n{broadcast_text}",
+                parse_mode=ParseMode.MARKDOWN
             )
-            success += 1
+            success_count += 1
+            
         except Exception as e:
-            logger.error(f"❌ فشل Markdown للمستخدم {user['user_id']}: {e}")
-            # إذا فشل، نرسل نص عادي
+            # إذا فشل Markdown، نجرب إرسال نص عادي
             try:
                 await bot.send_message(
-                    user['user_id'],
-                    f"📢 رسالة من الإدارة:\n\n{text}"
+                    user_id,
+                    f"📢 رسالة من الإدارة:\n\n{broadcast_text}"
                 )
-                success += 1
-            except:
-                failed += 1
+                success_count += 1
+                logger.info(f"✅ تم الإرسال كنص عادي للمستخدم {user_id}")
+            except Exception as e2:
+                # إذا فشل أيضاً، نسجل الخطأ
+                failed_count += 1
+                failed_users.append(str(user_id))
+                logger.error(f"❌ فشل إرسال للمستخدم {user_id}: {e2}")
         
-        if i % 10 == 0 and success > 0:
-            await callback.message.edit_text(f"⏳ تم الإرسال: {success} / {len(users)}")
+        # تحديث التقدم كل 10 رسائل
+        if (i + 1) % 10 == 0:
+            await callback.message.edit_text(
+                f"⏳ **جاري الإرسال...**\n"
+                f"✅ تم: {success_count}\n"
+                f"❌ فشل: {failed_count}\n"
+                f"📊 المتبقي: {total_users - (i + 1)}"
+            )
         
+        # تأخير بسيط بين الرسائل
         await asyncio.sleep(0.05)
     
+    # رسالة النتيجة النهائية
     result_text = (
         f"✅ **تم إرسال الرسالة**\n\n"
-        f"📊 **الإحصائيات:**\n"
-        f"• ✅ نجح: {success}\n"
-        f"• ❌ فشل: {failed}\n\n"
+        f"📊 **نتيجة الإرسال:**\n"
+        f"• ✅ نجح: {success_count}\n"
+        f"• ❌ فشل: {failed_count}\n"
+        f"• 👥 الإجمالي: {total_users}\n\n"
     )
     
+    if failed_users:
+        # عرض أول 10 مستخدمين فشل الإرسال لهم
+        failed_sample = failed_users[:10]
+        result_text += f"⚠️ أمثلة على المستخدمين الذين فشل الإرسال لهم:\n"
+        result_text += f"`{', '.join(failed_sample)}`\n"
+        if len(failed_users) > 10:
+            result_text += f"... و{len(failed_users) - 10} آخرين\n"
+    
     await callback.message.edit_text(result_text)
+    
+    # تسجيل العملية في logs
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO logs (user_id, action, details, created_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+        ''', callback.from_user.id, 'broadcast', 
+           f'إرسال رسالة جماعية - نجح: {success_count}, فشل: {failed_count}')
+    
     await state.clear()
 
 @router.callback_query(F.data == "cancel_broadcast")
 async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
     """إلغاء البث"""
-    await state.clear()
-    await callback.message.edit_text("✅ تم إلغاء الإرسال.")
-
-@router.callback_query(F.data == "send_custom_message")
-async def send_custom_message_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء إرسال رسالة لمستخدم معين"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.message.edit_text(
-        "✉️ **إرسال رسالة لمستخدم معين**\n\n"
-        "أدخل آيدي المستخدم:\n"
-        "مثال: `123456789`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_custom_message_user)
-
-@router.message(AdminStates.waiting_custom_message_user)
-async def send_custom_message_get_text(message: types.Message, state: FSMContext, db_pool):
-    """استلام آيدي المستخدم وطلب نص الرسالة"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        user_id = int(message.text.strip())
-        
-        # التحقق من وجود المستخدم
-        async with db_pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT username, first_name FROM users WHERE user_id = $1",
-                user_id
-            )
-        
-        if not user:
-            await message.answer(
-                "❌ المستخدم غير موجود!\n"
-                "الرجاء إدخال آيدي صحيح أو أرسل /cancel للإلغاء"
-            )
-            return
-        
-        username = user['username'] or user['first_name'] or str(user_id)
-        
-        await state.update_data(target_user=user_id, target_username=username)
-        
-        await message.answer(
-            f"✉️ **إرسال رسالة إلى @{username}**\n\n"
-            f"أدخل نص الرسالة التي تريد إرسالها:\n\n"
-            f"يمكنك استخدام Markdown للتنسيق:\n"
-            f"• **نص عريض**\n"
-            f"• *نص مائل*\n"
-            f"• `كود`\n\n"
-            f"أو أرسل /cancel للإلغاء"
-        )
-        await state.set_state(AdminStates.waiting_custom_message_text)
-        
-    except ValueError:
-        await message.answer(
-            "❌ آيدي غير صالح!\n"
-            "الرجاء إدخال أرقام فقط أو أرسل /cancel للإلغاء"
-        )
-
-@router.message(AdminStates.waiting_custom_message_text)
-async def send_custom_message_final(message: types.Message, state: FSMContext, bot: Bot):
-    """إرسال الرسالة للمستخدم"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    data = await state.get_data()
-    user_id = data['target_user']
-    username = data['target_username']
-    text = message.text
-    
-    # تأكيد قبل الإرسال
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="✅ تأكيد الإرسال", callback_data="confirm_send_message"),
-        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_send_message")
-    )
-    
-    # حفظ نص الرسالة في الحالة
-    await state.update_data(message_text=text)
-    
-    # عرض معاينة
-    await message.answer(
-        f"✉️ **معاينة الرسالة**\n\n"
-        f"إلى: @{username} (`{user_id}`)\n\n"
-        f"**نص الرسالة:**\n{text}\n\n"
-        f"هل أنت متأكد من إرسالها؟",
-        reply_markup=builder.as_markup()
-    )
-
-@router.callback_query(F.data == "confirm_send_message")
-async def confirm_send_message(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
-    """تأكيد إرسال الرسالة"""
-    data = await state.get_data()
-    user_id = data['target_user']
-    username = data['target_username']
-    text = data['message_text']
-    
-    # تنسيق النص
-    formatted_text = format_message_text(text)
-    
-    try:
-        # إرسال مع HTML
-        await bot.send_message(
-            user_id,
-            f"<b>✉️ رسالة من الإدارة</b>\n\n{formatted_text}",
-            parse_mode="HTML"
-        )
-        
-        # تسجيل في logs
-        async with db_pool.acquire() as conn:
-            await conn.execute('''
-                INSERT INTO logs (user_id, action, details, created_at)
-                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-            ''', callback.from_user.id, 'send_message', f'رسالة إلى {user_id}: {text[:50]}...')
-        
-        result_text = f"✅ **تم إرسال الرسالة بنجاح**\n\nإلى: @{username} (`{user_id}`)"
-        
-        if formatted_text != text:
-            result_text += "\n\n✅ تم إرسالها مع تنسيق HTML"
-        
-        await callback.message.edit_text(result_text)
-        
-    except Exception as e:
-        # إذا فشل HTML، نرسل نص عادي
-        try:
-            await bot.send_message(
-                user_id,
-                f"✉️ رسالة من الإدارة:\n\n{text}"
-            )
-            await callback.message.edit_text(
-                f"✅ **تم إرسال الرسالة بنجاح (كنص عادي)**\n\nإلى: @{username} (`{user_id}`)"
-            )
-        except:
-            await callback.message.edit_text(
-                f"❌ **فشل إرسال الرسالة**\n\nالسبب: {str(e)}"
-            )
-    
-    await state.clear()
-
-@router.callback_query(F.data == "cancel_send_message")
-async def cancel_send_message(callback: types.CallbackQuery, state: FSMContext):
-    """إلغاء إرسال الرسالة"""
     await state.clear()
     await callback.message.edit_text("✅ تم إلغاء الإرسال.")
 
@@ -2351,42 +2318,45 @@ async def add_balance_amount(message: types.Message, state: FSMContext, db_pool)
 async def finalize_add_balance(message: types.Message, state: FSMContext, db_pool):
     try:
         amount = float(message.text)
-        data = await state.get_data()
-        user_id = data['target_user']
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE users SET balance = balance + $1, total_deposits = total_deposits + $1 WHERE user_id = $2",
-                amount, user_id
-            )
-            
-            user = await conn.fetchrow(
-                "SELECT username, balance, total_points FROM users WHERE user_id = $1",
-                user_id
-            )
-        
-        await message.answer(
-            f"✅ **تمت إضافة الرصيد بنجاح**\n\n"
-            f"👤 **المستخدم:** {user['username'] or 'بدون اسم'}\n"
-            f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
-            f"💳 **الرصيد الجديد:** {user['balance']:,.0f} ل.س\n"
-            f"⭐ **النقاط:** {user['total_points']}",
-            parse_mode="Markdown"
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 5000)")
+    
+    data = await state.get_data()
+    user_id = data['target_user']
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET balance = balance + $1, total_deposits = total_deposits + $1 WHERE user_id = $2",
+            amount, user_id
         )
         
-        # إرسال إشعار للمستخدم
-        try:
-            await message.bot.send_message(
-                user_id,
-                f"✅ **تم إضافة رصيد إلى حسابك!**\n\n"
-                f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
-                f"💳 **الرصيد الحالي:** {user['balance']:,.0f} ل.س",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
-        
-        await state.clear()
+        user = await conn.fetchrow(
+            "SELECT username, balance, total_points FROM users WHERE user_id = $1",
+            user_id
+        )
+    
+    await message.answer(
+        f"✅ **تمت إضافة الرصيد بنجاح**\n\n"
+        f"👤 **المستخدم:** {user['username'] or 'بدون اسم'}\n"
+        f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
+        f"💳 **الرصيد الجديد:** {user['balance']:,.0f} ل.س\n"
+        f"⭐ **النقاط:** {user['total_points']}",
+        parse_mode="Markdown"
+    )
+    
+    # إرسال إشعار للمستخدم
+    try:
+        await message.bot.send_message(
+            user_id,
+            f"✅ **تم إضافة رصيد إلى حسابك!**\n\n"
+            f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
+            f"💳 **الرصيد الحالي:** {user['balance']:,.0f} ل.س",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
+    
+    await state.clear()
     except Exception as e:
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
@@ -2707,59 +2677,62 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
     """إضافة النقاط للمستخدم"""
     try:
         points = int(message.text)
-        if points <= 0:
-            return await message.answer("⚠️ يرجى إدخال رقم موجب")
-        
-        data = await state.get_data()
-        user_id = data['target_user']
-        
-        async with db_pool.acquire() as conn:
-            # التحقق من وجود المستخدم
-            user = await conn.fetchrow(
-                "SELECT username, total_points FROM users WHERE user_id = $1",
-                user_id
-            )
-            
-            if not user:
-                return await message.answer("❌ المستخدم غير موجود")
-            
-            # إضافة النقاط للمستخدم
-            await conn.execute(
-                "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
-                points, user_id
-            )
-            
-            # تسجيل في سجل النقاط
-            await conn.execute('''
-                INSERT INTO points_history (user_id, points, action, description, created_at)
-                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-            ''', user_id, points, 'admin_add', f'إضافة نقاط من الأدمن: {points}')
-            
-            # جلب الرصيد الجديد
-            new_total = await conn.fetchval(
-                "SELECT total_points FROM users WHERE user_id = $1",
-                user_id
-            )
-        
-        await message.answer(
-            f"✅ **تم إضافة {points} نقطة للمستخدم {user_id}**\n\n"
-            f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
-            f"⭐ الرصيد السابق: {user['total_points']}\n"
-            f"⭐ الرصيد الجديد: {new_total}"
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
+    
+    if points <= 0:
+        return await message.answer("⚠️ يرجى إدخال رقم موجب")
+    
+    data = await state.get_data()
+    user_id = data['target_user']
+    
+    async with db_pool.acquire() as conn:
+        # التحقق من وجود المستخدم
+        user = await conn.fetchrow(
+            "SELECT username, total_points FROM users WHERE user_id = $1",
+            user_id
         )
         
-        # إرسال إشعار للمستخدم
-        try:
-            await message.bot.send_message(
-                user_id,
-                f"✅ **تم إضافة نقاط إلى رصيدك!**\n\n"
-                f"⭐ المبلغ المضاف: +{points} نقطة\n"
-                f"⭐ رصيدك الحالي: {new_total} نقطة"
-            )
-        except Exception as e:
-            logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
+        if not user:
+            return await message.answer("❌ المستخدم غير موجود")
         
-        await state.clear()
+        # إضافة النقاط للمستخدم
+        await conn.execute(
+            "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
+            points, user_id
+        )
+        
+        # تسجيل في سجل النقاط
+        await conn.execute('''
+            INSERT INTO points_history (user_id, points, action, description, created_at)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        ''', user_id, points, 'admin_add', f'إضافة نقاط من الأدمن: {points}')
+        
+        # جلب الرصيد الجديد
+        new_total = await conn.fetchval(
+            "SELECT total_points FROM users WHERE user_id = $1",
+            user_id
+        )
+    
+    await message.answer(
+        f"✅ **تم إضافة {points} نقطة للمستخدم {user_id}**\n\n"
+        f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
+        f"⭐ الرصيد السابق: {user['total_points']}\n"
+        f"⭐ الرصيد الجديد: {new_total}"
+    )
+    
+    # إرسال إشعار للمستخدم
+    try:
+        await message.bot.send_message(
+            user_id,
+            f"✅ **تم إضافة نقاط إلى رصيدك!**\n\n"
+            f"⭐ المبلغ المضاف: +{points} نقطة\n"
+            f"⭐ رصيدك الحالي: {new_total} نقطة"
+        )
+    except Exception as e:
+        logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
+    
+    await state.clear()
         
     except ValueError:
         await message.answer("⚠️ يرجى إدخال رقم صحيح")
