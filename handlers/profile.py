@@ -146,36 +146,77 @@ async def show_simple_profile(message: types.Message, user_id, balance, points, 
 
 @router.callback_query(F.data == "points_history")
 async def show_points_history(callback: types.CallbackQuery, db_pool):
-    """عرض سجل النقاط"""
+    """عرض سجل النقاط مع توقيت دمشق"""
     from database import get_points_history
     
-    history = await get_points_history(db_pool, callback.from_user.id, 15)
+    # جلب سجل النقاط مع توقيت دمشق (افتراضي 20 سجل)
+    history = await get_points_history(db_pool, callback.from_user.id, limit=20)
     
     if not history:
-        return await callback.answer("لا يوجد سجل نقاط بعد", show_alert=True)
+        return await callback.answer("❌ لا يوجد سجل نقاط حالياً", show_alert=True)
     
-    text = "📋 **سجل النقاط**\n\n"
+    # حساب الإحصائيات
     total_earned = 0
     total_spent = 0
     
-    for h in history:
-        date = h['created_at'].strftime("%Y-%m-%d %H:%M") if h['created_at'] else "تاريخ غير معروف"
-        sign = "➕" if h['points'] > 0 else "➖"
-        points_abs = abs(h['points'])
-        
-        if h['points'] > 0:
-            total_earned += h['points']
+    for item in history:
+        if item['points'] > 0:
+            total_earned += item['points']
         else:
-            total_spent += abs(h['points'])
+            total_spent += abs(item['points'])
+    
+    # بناء نص السجل
+    text = "⭐ **سجل النقاط (توقيت دمشق)**\n\n"
+    
+    for i, item in enumerate(history[:10], 1):  # عرض آخر 10 فقط
+        symbol = "➕" if item['points'] > 0 else "➖"
+        points_abs = abs(item['points'])
         
-        text += f"{sign} {date}\n   {points_abs} نقطة - {h['description']}\n\n"
+        # تحديد نوع الحركة
+        action_names = {
+            'order_completed': 'طلب مكتمل',
+            'order': 'طلب',
+            'referral': 'إحالة',
+            'admin_add': 'إضافة من الأدمن',
+            'redemption': 'استرداد نقاط',
+            'points_spent': 'خصم نقاط'
+        }
+        
+        action_text = action_names.get(item['action'], item['action'])
+        description = item.get('description', action_text)
+        
+        text += f"{i}. {symbol} **{points_abs} نقطة**\n"
+        text += f"   📝 {description}\n"
+        text += f"   📅 {item['date']}\n\n"
     
-    text += f"📊 **الإجمالي:**\n"
-    text += f"• النقاط المكتسبة: {total_earned}\n"
-    text += f"• النقاط المستخدمة: {total_spent}\n"
-    text += f"• الرصيد الحالي: {total_earned - total_spent}"
+    # إضافة الإحصائيات
+    text += "📊 **الإحصائيات:**\n"
+    text += f"• إجمالي المكتسب: {total_earned} نقطة\n"
+    text += f"• إجمالي المستخدم: {total_spent} نقطة\n"
+    text += f"• الرصيد الحالي: {total_earned - total_spent} نقطة"
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
+    # إضافة زر الرجوع
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للملف الشخصي", 
+        callback_data="back_to_profile"
+    ))
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+def get_back_inline(callback_data="back_to_profile"):
+    """إنشاء زر رجوع إنلاين"""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data=callback_data
+    ))
+    return builder.as_markup()
 
 @router.callback_query(F.data == "referral_link")
 async def show_referral_link(callback: types.CallbackQuery, db_pool):
