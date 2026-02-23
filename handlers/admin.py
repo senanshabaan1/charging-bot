@@ -818,6 +818,7 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
         types.CallbackQuery(
             id=callback.id,
             from_user=callback.from_user,
+            chat_instance="dummy",  # 👈 أضف هذا السطر
             message=callback.message,
             data=f"app_status_cat_{app_info['category_id']}"
         ), 
