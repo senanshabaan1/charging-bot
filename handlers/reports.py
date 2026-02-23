@@ -11,16 +11,23 @@ from openpyxl.styles import Font, PatternFill, Alignment
 import asyncio
 import logging
 import os
+import re
 from io import BytesIO
 from config import ADMIN_ID, MODERATORS
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
+from handlers.keyboards import get_back_inline_keyboard
+from database import get_report_settings, update_report_setting, get_exchange_rate
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 class ReportStates(StatesGroup):
     waiting_report_period = State()
-    waiting_report_time = State()  # 👈 أضفنا هذه الحالة
+    waiting_report_time = State()
+
+def is_admin(user_id):
+    """التحقق من صلاحيات المشرف"""
+    return user_id == ADMIN_ID or user_id in MODERATORS
 
 def remove_timezone_from_df(df):
     """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""
@@ -28,14 +35,14 @@ def remove_timezone_from_df(df):
         return df
     
     for col in df.columns:
-        # التحقق إذا كان العمود من نوع datetime
         if pd.api.types.is_datetime64_any_dtype(df[col]):
-            # إزالة الـ timezone إذا كان موجوداً
-            df[col] = pd.to_datetime(df[col]).dt.tz_localize(None)
+            try:
+                df[col] = pd.to_datetime(df[col]).dt.tz_localize(None)
+            except:
+                pass
     return df
 
-def is_admin(user_id):
-    return user_id == ADMIN_ID or user_id in MODERATORS
+# ============= توليد تقرير Excel =============
 
 async def generate_excel_report(db_pool, period='all'):
     """توليد تقرير Excel شامل"""
@@ -43,7 +50,7 @@ async def generate_excel_report(db_pool, period='all'):
         output = BytesIO()
         
         async with db_pool.acquire() as conn:
-            # تأكد من ضبط المنطقة الزمنية للاتصال
+            # ضبط المنطقة الزمنية
             await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
             
             # 1. تقرير المستخدمين
@@ -80,8 +87,8 @@ async def generate_excel_report(db_pool, period='all'):
                     COALESCE(a.name, o.app_name) as app_name, 
                     o.quantity, o.total_amount_syp,
                     o.points_earned, o.status, o.target_id,
-                    o.created_at as order_created_at,
-                    o.updated_at as order_updated_at
+                    o.created_at AT TIME ZONE 'Asia/Damascus' as created_at,
+                    o.updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
                 FROM orders o
                 LEFT JOIN applications a ON o.app_id = a.id
             '''
@@ -94,25 +101,25 @@ async def generate_excel_report(db_pool, period='all'):
             points_query = '''
                 SELECT 
                     id, user_id, points, action, description, 
-                    created_at as point_created_at
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at
                 FROM points_history 
             '''
             if period == 'day':
                 points_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
-            points_query += " ORDER BY point_created_at DESC LIMIT 1000"
+            points_query += " ORDER BY created_at DESC LIMIT 1000"
             points_df = pd.DataFrame(await conn.fetch(points_query))
             
             # 5. تقرير استرداد النقاط
             redemptions_query = '''
                 SELECT 
                     id, user_id, username, points, amount_usd, amount_syp,
-                    created_at as redemption_created_at,
-                    updated_at as redemption_updated_at
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at,
+                    updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
                 FROM redemption_requests 
             '''
             if period == 'day':
                 redemptions_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
-            redemptions_query += " ORDER BY redemption_created_at DESC"
+            redemptions_query += " ORDER BY created_at DESC"
             redemptions_df = pd.DataFrame(await conn.fetch(redemptions_query))
             
             # 6. إحصائيات عامة
@@ -143,61 +150,45 @@ async def generate_excel_report(db_pool, period='all'):
                         (SELECT COALESCE(SUM(points_earned), 0) FROM orders) as total_points_given
                 ''')
             
-            # فحص إذا كانت لا توجد بيانات لليوم (للتقرير اليومي)
-            if period == 'day' and stats['total_orders'] == 0 and stats['total_deposits'] == 0:
-                logger.info("📊 لا توجد بيانات لليوم - سيتم إنشاء تقرير فارغ")
-            
-            # ===== إزالة الـ timezone من جميع الـ DataFrames =====
-            def remove_timezone_from_df(df):
-                """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""
-                if df.empty:
-                    return df
-                
-                for col in df.columns:
-                    # التحقق إذا كان العمود من نوع datetime
-                    if pd.api.types.is_datetime64_any_dtype(df[col]):
-                        # إزالة الـ timezone إذا كان موجوداً
-                        df[col] = pd.to_datetime(df[col]).dt.tz_localize(None)
-                return df
-            
+            # إزالة المنطقة الزمنية من جميع البيانات
             users_df = remove_timezone_from_df(users_df)
             deposits_df = remove_timezone_from_df(deposits_df)
             orders_df = remove_timezone_from_df(orders_df)
             points_df = remove_timezone_from_df(points_df)
             redemptions_df = remove_timezone_from_df(redemptions_df)
-            # ===================================================
             
-            # إنشاء ملف Excel مع عدة sheets
+            # إنشاء ملف Excel
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Sheet 1: ملخص عام
-                summary_data = {
-                    'البيان': [
-                        'إجمالي المستخدمين',
-                        'مستخدمين جدد اليوم',
-                        'إجمالي الأرصدة',
-                        'إجمالي النقاط',
-                        'إجمالي الإيداعات',
-                        'قيمة الإيداعات (ل.س)',
-                        'إجمالي الطلبات',
-                        'قيمة الطلبات (ل.س)',
-                        'نقاط ممنوحة'
-                    ],
-                    'القيمة': [
-                        stats['total_users'],
-                        stats['new_users_today'],
-                        f"{stats['total_balance']:,.0f} ل.س",
-                        stats['total_points'],
-                        stats['total_deposits'],
-                        f"{stats['total_deposit_amount']:,.0f} ل.س",
-                        stats['total_orders'],
-                        f"{stats['total_order_amount']:,.0f} ل.س",
-                        stats['total_points_given']
-                    ]
-                }
-                summary_df = pd.DataFrame(summary_data)
-                summary_df.to_excel(writer, sheet_name='ملخص عام', index=False)
+                # ملخص عام
+                if stats:
+                    summary_data = {
+                        'البيان': [
+                            'إجمالي المستخدمين',
+                            'مستخدمين جدد اليوم',
+                            'إجمالي الأرصدة',
+                            'إجمالي النقاط',
+                            'إجمالي الإيداعات',
+                            'قيمة الإيداعات (ل.س)',
+                            'إجمالي الطلبات',
+                            'قيمة الطلبات (ل.س)',
+                            'نقاط ممنوحة'
+                        ],
+                        'القيمة': [
+                            stats['total_users'],
+                            stats['new_users_today'],
+                            f"{stats['total_balance']:,.0f} ل.س" if stats['total_balance'] else "0 ل.س",
+                            stats['total_points'] or 0,
+                            stats['total_deposits'] or 0,
+                            f"{stats['total_deposit_amount']:,.0f} ل.س" if stats['total_deposit_amount'] else "0 ل.س",
+                            stats['total_orders'] or 0,
+                            f"{stats['total_order_amount']:,.0f} ل.س" if stats['total_order_amount'] else "0 ل.س",
+                            stats['total_points_given'] or 0
+                        ]
+                    }
+                    summary_df = pd.DataFrame(summary_data)
+                    summary_df.to_excel(writer, sheet_name='ملخص عام', index=False)
                 
-                # باقي البيانات
+                # باقي الأوراق
                 if not users_df.empty:
                     users_df.to_excel(writer, sheet_name='المستخدمين', index=False)
                 if not deposits_df.empty:
@@ -211,39 +202,34 @@ async def generate_excel_report(db_pool, period='all'):
             
         output.seek(0)
         return output
+        
     except Exception as e:
         logger.error(f"❌ خطأ في توليد التقرير: {e}")
         import traceback
         traceback.print_exc()
         return None
 
+# ============= إرسال التقرير اليومي التلقائي =============
+
 async def send_daily_report(bot: Bot, db_pool):
     """إرسال التقرير اليومي للمشرفين"""
     try:
-        # جلب إعدادات التقارير
-        from database import get_report_settings
         settings = await get_report_settings(db_pool)
         
-        # التحقق إذا كان التقرير مفعل
         if settings.get('daily_report_enabled') != 'true':
-            logging.info("📊 التقرير اليومي معطل")
+            logger.info("📊 التقرير اليومي معطل")
             return
         
-        # توليد التقرير اليومي
         excel_file = await generate_excel_report(db_pool, 'day')
         
         if excel_file:
-            from config import ADMIN_ID, MODERATORS
-            
-            # تحديد المستلمين حسب الإعدادات
             recipients = []
             if settings.get('report_recipients') == 'owner_only':
-                recipients = [ADMIN_ID]  # المالك فقط
+                recipients = [ADMIN_ID]
             else:
-                recipients = [ADMIN_ID] + MODERATORS  # جميع المشرفين
+                recipients = [ADMIN_ID] + MODERATORS
             
-            # تنسيق التاريخ
-            today = datetime.now().strftime('%Y-%m-%d')
+            today = get_damascus_time_now().strftime('%Y-%m-%d')
             
             for admin_id in recipients:
                 if admin_id:
@@ -258,14 +244,14 @@ async def send_daily_report(bot: Bot, db_pool):
                             document=file,
                             caption=f"📊 **التقرير اليومي - {today}**\n\n"
                                    f"✅ تم توليد التقرير بنجاح\n"
-                                   f"⏰ وقت الإرسال: {datetime.now().strftime('%H:%M:%S')}"
+                                   f"⏰ وقت الإرسال: {get_damascus_time_now().strftime('%H:%M:%S')}"
                         )
                     except Exception as e:
                         logger.error(f"❌ فشل إرسال التقرير للمشرف {admin_id}: {e}")
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال التقرير اليومي: {e}")
 
-# ============= قائمة التقارير الرئيسية =============
+# ============= قائمة التقارير =============
 
 @router.callback_query(F.data == "reports_menu")
 async def reports_menu(callback: types.CallbackQuery):
@@ -296,14 +282,11 @@ async def reports_menu(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         "📊 **نظام التقارير والنسخ الاحتياطي**\n\n"
-        "اختر نوع التقرير المطلوب:\n"
-        "• تقارير شاملة بكل التفاصيل\n"
-        "• نسخ احتياطي يومي تلقائي\n"
-        "• إحصائيات دقيقة للأرباح",
+        "اختر نوع التقرير المطلوب:",
         reply_markup=builder.as_markup()
     )
 
-# ============= دوال التقارير =============
+# ============= التقارير المختلفة =============
 
 @router.callback_query(F.data == "full_report")
 async def full_report(callback: types.CallbackQuery, db_pool):
@@ -316,7 +299,7 @@ async def full_report(callback: types.CallbackQuery, db_pool):
     excel_file = await generate_excel_report(db_pool, 'all')
     
     if excel_file:
-        today = datetime.now().strftime('%Y-%m-%d_%H-%M')
+        today = get_damascus_time_now().strftime('%Y-%m-%d_%H-%M')
         
         file = types.BufferedInputFile(
             file=excel_file.getvalue(),
@@ -326,7 +309,7 @@ async def full_report(callback: types.CallbackQuery, db_pool):
         await callback.message.answer_document(
             document=file,
             caption=f"📊 **التقرير الشامل**\n"
-                   f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                   f"📅 {get_damascus_time_now().strftime('%Y-%m-%d %H:%M')}"
         )
     else:
         await callback.message.edit_text("❌ فشل في توليد التقرير")
@@ -343,7 +326,7 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
         excel_file = await generate_excel_report(db_pool, 'day')
         
         if excel_file:
-            today = datetime.now().strftime('%Y-%m-%d')
+            today = get_damascus_time_now().strftime('%Y-%m-%d')
             
             file = types.BufferedInputFile(
                 file=excel_file.getvalue(),
@@ -356,28 +339,22 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
                        f"📆 {today}"
             )
         else:
-            await callback.message.edit_text(
-                "❌ فشل في توليد التقرير\n"
-                "تحقق من السجلات (logs) لمعرفة التفاصيل."
-            )
+            await callback.message.edit_text("❌ فشل في توليد التقرير")
     except Exception as e:
         logger.error(f"❌ خطأ في daily_report: {e}")
         await callback.message.edit_text(f"❌ خطأ: {str(e)}")
 
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح المفصل مع تفاصيل كل تطبيق"""
+    """تقرير الأرباح المفصل"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.message.edit_text("⏳ جاري حساب الأرباح...")
     
-    # جلب سعر الصرف
-    from database import get_exchange_rate
     exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
-        # 1. جلب جميع الطلبات المكتملة مع معلومات التطبيق والمستخدم
         orders = await conn.fetch('''
             SELECT 
                 o.id,
@@ -406,10 +383,10 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             await callback.message.edit_text("📊 لا توجد مبيعات مكتملة بعد.")
             return
         
-        # 2. إحصائيات كل تطبيق
+        # إحصائيات التطبيقات
         app_stats = {}
         
-        # 3. إحصائيات حسب مستوى VIP
+        # إحصائيات VIP
         vip_stats = {}
         for level in range(0, 6):
             vip_stats[level] = {
@@ -420,14 +397,13 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
                 'discount_given': 0
             }
         
-        # 4. متغيرات عامة
+        # متغيرات عامة
         total_orders = len(orders)
         total_revenue = 0
         total_supplier_cost = 0
         total_profit = 0
         total_discount_given = 0
         
-        # 5. معالجة كل طلب
         for order in orders:
             app_name = order['app_name']
             quantity = order['quantity'] or 1
@@ -435,11 +411,9 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             vip_level = order['vip_level'] or 0
             user_discount = float(order['user_discount'] or 0)
             
-            # البحث عن سعر المورد لهذا الطلب
+            # البحث عن سعر المورد
             supplier_price_usd = None
-            variant_name = ""
             
-            # إذا كان الطلب من خلال خيار (variant)
             if order['variant_id']:
                 variant = await conn.fetchrow(
                     "SELECT price_usd FROM product_options WHERE id = $1",
@@ -448,19 +422,14 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
                 if variant:
                     supplier_price_usd = float(variant['price_usd'])
             
-            # إذا لم نجد سعر المورد، نستخدم السعر الافتراضي من التطبيق
             if supplier_price_usd is None:
                 default_price = float(order['default_price_usd'] or 0)
                 supplier_price_usd = default_price * quantity
             
-            # تكلفة المورد بالليرة
             supplier_cost_syp = supplier_price_usd * exchange_rate
-            
-            # الربح = سعر البيع - تكلفة المورد
             profit_syp = final_price_syp - supplier_cost_syp
             
             # حساب الخصم الممنوح
-            # السعر المتوقع بدون خصم
             app_profit_percent = float(order['app_profit_percent'] or 0) / 100
             expected_price_usd = supplier_price_usd * (1 + app_profit_percent)
             expected_price_syp = expected_price_usd * exchange_rate
@@ -475,7 +444,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             total_profit += profit_syp
             total_discount_given += discount_syp
             
-            # إضافة لإحصائيات التطبيق
+            # إحصائيات التطبيق
             if app_name not in app_stats:
                 app_stats[app_name] = {
                     'orders': 0,
@@ -494,19 +463,18 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             app_stats[app_name]['profit'] += profit_syp
             app_stats[app_name]['discount_given'] += discount_syp
             
-            # إضافة لإحصائيات VIP
+            # إحصائيات VIP
             vip_stats[vip_level]['orders'] += 1
             vip_stats[vip_level]['revenue'] += final_price_syp
             vip_stats[vip_level]['supplier_cost'] += supplier_cost_syp
             vip_stats[vip_level]['profit'] += profit_syp
             vip_stats[vip_level]['discount_given'] += discount_syp
     
-    # حساب النسب الإجمالية
+    # حساب النسب
     profit_margin = (total_profit / total_revenue * 100) if total_revenue > 0 else 0
     cost_percent = (total_supplier_cost / total_revenue * 100) if total_revenue > 0 else 0
     discount_percent = (total_discount_given / total_revenue * 100) if total_revenue > 0 else 0
     
-    # بناء نص التقرير
     text = (
         "💰 **تقرير الأرباح التفصيلي**\n"
         f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n"
@@ -514,10 +482,8 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
         "➖➖➖➖➖➖➖➖\n\n"
     )
     
-    # تفاصيل كل تطبيق
+    # تفاصيل التطبيقات
     text += "📱 **تفاصيل التطبيقات:**\n\n"
-    
-    # ترتيب التطبيقات حسب الإيرادات
     sorted_apps = sorted(app_stats.items(), key=lambda x: x[1]['revenue'], reverse=True)
     
     for app_name, stats in sorted_apps:
@@ -568,8 +534,6 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     
     # تقسيم النص إذا كان طويلاً
     if len(text) > 4000:
-        # إرسال كملف
-        from io import BytesIO
         file = BytesIO()
         file.write(text.encode('utf-8'))
         file.seek(0)
@@ -577,7 +541,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
         await callback.message.answer_document(
             types.BufferedInputFile(
                 file=file.getvalue(),
-                filename=f"profits_report_{datetime.now().strftime('%Y-%m-%d')}.txt"
+                filename=f"profits_report_{get_damascus_time_now().strftime('%Y-%m-%d')}.txt"
             ),
             caption="📊 تقرير الأرباح (نص طويل)"
         )
@@ -708,7 +672,7 @@ async def backup_database(callback: types.CallbackQuery, db_pool):
     excel_file = await generate_excel_report(db_pool, 'all')
     
     if excel_file:
-        today = datetime.now().strftime('%Y-%m-%d_%H-%M')
+        today = get_damascus_time_now().strftime('%Y-%m-%d_%H-%M')
         
         file = types.BufferedInputFile(
             file=excel_file.getvalue(),
@@ -718,11 +682,13 @@ async def backup_database(callback: types.CallbackQuery, db_pool):
         await callback.message.answer_document(
             document=file,
             caption=f"💾 **نسخة احتياطية كاملة**\n"
-                   f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                   f"📅 {get_damascus_time_now().strftime('%Y-%m-%d %H:%M')}\n\n"
                    f"✅ تم حفظ جميع البيانات"
         )
     else:
         await callback.message.edit_text("❌ فشل في إنشاء النسخة الاحتياطية")
+
+# ============= إعدادات التقارير =============
 
 @router.callback_query(F.data == "report_settings")
 async def report_settings(callback: types.CallbackQuery, db_pool):
@@ -730,39 +696,23 @@ async def report_settings(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_report_settings
     settings = await get_report_settings(db_pool)
     
-    # تحديد حالة التفعيل
     enabled_status = "✅ مفعل" if settings.get('daily_report_enabled') == 'true' else "❌ معطل"
-    
-    # تحديد المستلمين
     recipients_text = "👑 المالك فقط" if settings.get('report_recipients') == 'owner_only' else "👥 جميع المشرفين"
     
     builder = InlineKeyboardBuilder()
     builder.row(
-        types.InlineKeyboardButton(
-            text="🔁 تبديل التفعيل", 
-            callback_data="toggle_daily_report"
-        )
+        types.InlineKeyboardButton(text="🔁 تبديل التفعيل", callback_data="toggle_daily_report")
     )
     builder.row(
-        types.InlineKeyboardButton(
-            text="⏰ تغيير وقت التقرير", 
-            callback_data="change_report_time"
-        )
+        types.InlineKeyboardButton(text="⏰ تغيير وقت التقرير", callback_data="change_report_time")
     )
     builder.row(
-        types.InlineKeyboardButton(
-            text="👤 تغيير المستلمين", 
-            callback_data="change_recipients"
-        )
+        types.InlineKeyboardButton(text="👤 تغيير المستلمين", callback_data="change_recipients")
     )
     builder.row(
-        types.InlineKeyboardButton(
-            text="🔙 رجوع", 
-            callback_data="reports_menu"
-        )
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="reports_menu")
     )
     
     await callback.message.edit_text(
@@ -780,15 +730,11 @@ async def toggle_daily_report(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_report_settings, update_report_setting
     settings = await get_report_settings(db_pool)
-    
     current = settings.get('daily_report_enabled', 'true')
     new_value = 'false' if current == 'true' else 'true'
     
     await update_report_setting(db_pool, 'daily_report_enabled', new_value)
-    
-    # إعادة فتح قائمة الإعدادات
     await report_settings(callback, db_pool)
 
 @router.callback_query(F.data == "change_report_time")
@@ -800,19 +746,16 @@ async def change_report_time_start(callback: types.CallbackQuery, state: FSMCont
     await callback.message.edit_text(
         "⏰ **تغيير وقت التقرير اليومي**\n\n"
         "أدخل الوقت الجديد بصيغة HH:MM (مثال: 23:30)\n\n"
-        "⏱️ الوقت الحالي: 00:00\n\n"
         "❌ للإلغاء أرسل /cancel"
     )
     await state.set_state(ReportStates.waiting_report_time)
 
 @router.message(ReportStates.waiting_report_time)
-async def change_report_time_final(message: types.Message, state: FSMContext, db_pool, bot: Bot):  # أضف bot
+async def change_report_time_final(message: types.Message, state: FSMContext, db_pool):
     """حفظ وقت التقرير الجديد"""
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من صيغة الوقت
-    import re
     time_pattern = r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$'
     
     if not re.match(time_pattern, message.text.strip()):
@@ -824,46 +767,11 @@ async def change_report_time_final(message: types.Message, state: FSMContext, db
         return
     
     new_time = message.text.strip()
-    
-    from database import update_report_setting
     await update_report_setting(db_pool, 'report_time', new_time)
-    
-    # ===== إعادة جدولة التقرير اليومي =====
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from handlers.reports import send_daily_report
-    
-    # جلب الـ scheduler من الذاكرة (تحتاج لتخزينه مكان عام)
-    # هذا يتطلب تعديل في run_bot_webhook.py
     
     await message.answer(f"✅ تم تحديث وقت التقرير إلى {new_time}\n"
                          f"⏳ سيتم إرسال التقرير يومياً الساعة {new_time}")
     await state.clear()
-
-async def reschedule_daily_report(bot: Bot, db_pool):
-    """إعادة جدولة التقرير اليومي بعد تغيير الوقت"""
-    try:
-        from database import get_report_settings
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        import sys
-        
-        settings = await get_report_settings(db_pool)
-        report_time = settings.get('report_time', '00:00')
-        hour, minute = map(int, report_time.split(':'))
-        
-        # الوصول للـ scheduler من المتغير العام في run_bot_webhook
-        # هذا يعتمد على كيفية تنظيم الكود
-        scheduler = None
-        for job in sys.modules.keys():
-            if 'scheduler' in job:
-                # هذا مبسط - في الواقع نحتاج طريقة أفضل
-                pass
-        
-        # الحل الأسهل: إعادة تشغيل الجدولة من الصفر
-        # لكن هذا يتطلب إعادة تشغيل الدالة main
-        logging.info(f"📊 تم تحديث وقت التقرير إلى {report_time}")
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في إعادة جدولة التقرير: {e}")
 
 @router.callback_query(F.data == "change_recipients")
 async def change_recipients(callback: types.CallbackQuery, db_pool):
@@ -871,7 +779,6 @@ async def change_recipients(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_report_settings, update_report_setting
     settings = await get_report_settings(db_pool)
     current = settings.get('report_recipients', 'owner_only')
     
@@ -889,10 +796,7 @@ async def change_recipients(callback: types.CallbackQuery, db_pool):
         )
     )
     builder.row(
-        types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data="report_settings"
-        )
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="report_settings")
     )
     
     await callback.message.edit_text(
@@ -909,9 +813,7 @@ async def set_recipients(callback: types.CallbackQuery, db_pool):
         return await callback.answer("غير مصرح", show_alert=True)
     
     recipient_type = callback.data.replace("set_recipients_", "")
-    
-    from database import update_report_setting
     await update_report_setting(db_pool, 'report_recipients', recipient_type)
     
-    await callback.answer(f"✅ تم تحديث المستلمين")
+    await callback.answer("✅ تم تحديث المستلمين")
     await report_settings(callback, db_pool)
