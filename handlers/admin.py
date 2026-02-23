@@ -15,7 +15,7 @@ from aiogram.utils import markdown as md
 from aiogram.enums import ParseMode
 import re
 from handlers.keyboards import get_cancel_keyboard, get_back_keyboard, get_main_menu_keyboard
-from handlers.time_utils import get_damascus_time_now, DAMASCUS_TZ
+from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
