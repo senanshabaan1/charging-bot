@@ -8,6 +8,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 import logging
 from datetime import datetime
 import pytz
+from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
 
 # ضبط المنطقة الزمنية لدمشق
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
@@ -21,13 +22,6 @@ class OrderStates(StatesGroup):
     confirm = State()
     choosing_variant = State()
 
-def get_back_keyboard():
-    """إنشاء زر رجوع مع خيارات إضافية للخروج"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
-    builder.row(types.KeyboardButton(text="🏠 القائمة الرئيسية"))
-    builder.row(types.KeyboardButton(text="/cancel"))
-    return builder.as_markup(resize_keyboard=True)
 
 def get_damascus_time():
     """الحصول على الوقت الحالي بتوقيت دمشق"""
@@ -354,12 +348,12 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     # التحقق من الإلغاء أولاً
     if message.text in ["🔙 رجوع للقائمة", "/cancel", "/رجوع", "🏠 القائمة الرئيسية"]:
         await state.clear()
-        from handlers.start import get_main_menu_keyboard
+        # ✅ استخدم get_main_menu_keyboard المستوردة
         from database import is_admin_user
         is_admin = await is_admin_user(db_pool, message.from_user.id)
         await message.answer(
             "✅ تم إلغاء الطلب",
-            reply_markup=get_main_menu_keyboard(is_admin)
+            reply_markup=get_main_menu_keyboard(is_admin)  # 👈 مستوردة
         )
         return
 
@@ -574,12 +568,12 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     # التحقق من الإلغاء أولاً
     if message.text in ["🔙 رجوع للقائمة", "/cancel", "/رجوع", "🏠 القائمة الرئيسية"]:
         await state.clear()
-        from handlers.start import get_main_menu_keyboard
+        # ✅ استخدم get_main_menu_keyboard المستوردة
         from database import is_admin_user
         is_admin = await is_admin_user(db_pool, message.from_user.id)
         await message.answer(
             "✅ تم إلغاء الطلب",
-            reply_markup=get_main_menu_keyboard(is_admin)
+            reply_markup=get_main_menu_keyboard(is_admin)  # 👈 مستوردة
         )
         return
     
@@ -852,17 +846,16 @@ async def global_back_handler(message: types.Message, state: FSMContext, db_pool
         await state.clear()
     
     if message.text == "🏠 القائمة الرئيسية":
-        from handlers.start import get_main_menu_keyboard
         from database import is_admin_user
         
         is_admin = await is_admin_user(db_pool, message.from_user.id)
         
         await message.answer(
             "👋 أهلاً بك في القائمة الرئيسية",
-            reply_markup=get_main_menu_keyboard(is_admin)
+            reply_markup=get_main_menu_keyboard(is_admin)  # 👈 مستوردة
         )
     else:
         await message.answer(
             "✅ تم إلغاء العملية",
-            reply_markup=get_back_keyboard()
+            reply_markup=get_back_keyboard()  # 👈 مستوردة
         )
