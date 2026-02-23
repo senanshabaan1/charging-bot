@@ -15,6 +15,7 @@ from aiogram.utils import markdown as md
 from aiogram.enums import ParseMode
 import re
 from handlers.keyboards import get_cancel_keyboard, get_back_keyboard, get_main_menu_keyboard
+from handlers.time_utils import get_damascus_time_now, DAMASCUS_TZ
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
@@ -2983,7 +2984,7 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
             ''', user_id, amount)
         
         # استخدام توقيت دمشق للمستخدم
-        damascus_time = get_damascus_time()
+        damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
         
         # إرسال إشعار للمستخدم مع توقيت دمشق
         try:
@@ -3055,7 +3056,7 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
             ''', user_id)
         
         # استخدام توقيت دمشق للمستخدم
-        damascus_time = get_damascus_time()
+        damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
         
         # إرسال إشعار للمستخدم مع توقيت دمشق
         try:
