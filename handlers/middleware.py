@@ -43,6 +43,15 @@ class BotStatusMiddleware(BaseMiddleware):
         if is_admin:
             return await handler(event, data)
         
+        # التحقق من أوامر الإلغاء والبدء - السماح بها دائماً
+        if isinstance(event, Message):
+            if event.text and event.text.startswith(('/cancel', '/الغاء', '/رجوع', '/start', '/help')):
+                return await handler(event, data)
+        
+        if isinstance(event, CallbackQuery):
+            if event.data in ['back_to_main', 'back_to_admin', 'check_subscription', 'cancel']:
+                return await handler(event, data)
+        
         # استخدام الكاش - التحقق كل 60 ثانية فقط
         current_time = time.time()
         
@@ -81,7 +90,6 @@ class BotStatusMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-# يمكنك إضافة دالة لتحديث الكاش يدوياً عند الحاجة
 async def refresh_bot_status_cache(db_pool):
     """تحديث كاش حالة البوت يدوياً"""
     from database import get_bot_status, get_maintenance_message
@@ -101,7 +109,6 @@ async def refresh_bot_status_cache(db_pool):
         return False
 
 
-# يمكنك إضافة دالة لإعادة ضبط الكاش (للاختبار)
 def reset_bot_status_cache():
     """إعادة ضبط كاش حالة البوت"""
     global bot_status_cache
@@ -111,3 +118,15 @@ def reset_bot_status_cache():
         'maintenance_message': 'البوت قيد الصيانة حالياً'
     }
     logger.info("🔄 تم إعادة ضبط كاش حالة البوت")
+
+
+# دالة مساعدة للحصول على حالة البوت من الكاش
+def get_cached_bot_status():
+    """الحصول على حالة البوت من الكاش"""
+    return bot_status_cache.get('status', True)
+
+
+# دالة مساعدة للحصول على رسالة الصيانة من الكاش
+def get_cached_maintenance_message():
+    """الحصول على رسالة الصيانة من الكاش"""
+    return bot_status_cache.get('maintenance_message', 'البوت قيد الصيانة حالياً')
