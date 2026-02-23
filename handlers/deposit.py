@@ -6,12 +6,10 @@ from config import SYRIATEL_NUMS, SHAM_CASH_NUM, SHAM_CASH_NUM_USD, USDT_BEP20_W
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 import asyncio
 import logging
-from handlers.time_utils import get_damascus_time_now, DAMASCUS_TZ
+from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from datetime import datetime
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard
 
-# ضبط المنطقة الزمنية لدمشق
-DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 logger = logging.getLogger(__name__)
 router = Router()
