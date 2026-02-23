@@ -4,7 +4,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
 # ============= دوال الكيبورد العادية (Reply Keyboard) =============
 
-def get_main_menu_keyboard(is_admin_user=False):
+def get_main_menu_keyboard(is_admin_user: bool = False):
     """القائمة الرئيسية للمستخدمين"""
     builder = ReplyKeyboardBuilder()
     
@@ -22,13 +22,13 @@ def get_main_menu_keyboard(is_admin_user=False):
     return builder.as_markup(resize_keyboard=True)
 
 def get_cancel_keyboard():
-    """زر إلغاء موحد للمشرفين"""
+    """زر إلغاء موحد للمشرفين والمستخدمين"""
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="❌ إلغاء"))
     return builder.as_markup(resize_keyboard=True)
 
 def get_back_keyboard():
-    """زر رجوع للقائمة الرئيسية (للمستخدمين العاديين)"""
+    """زر رجوع للقائمة السابقة"""
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
     return builder.as_markup(resize_keyboard=True)
@@ -60,7 +60,7 @@ def get_deposit_keyboard():
 
 # ============= دوال الكيبورد الإنلاين (Inline Keyboard) =============
 
-def get_back_inline_keyboard(callback_data="back_to_main"):
+def get_back_inline_keyboard(callback_data: str = "back_to_main"):
     """زر رجوع إنلاين واحد"""
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
@@ -74,11 +74,11 @@ def get_back_to_admin_inline_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع للوحة التحكم", 
-        callback_data="back_to_admin_panel"
+        callback_data="back_to_admin"
     ))
     return builder.as_markup()
 
-def get_confirmation_keyboard(callback_yes="confirm", callback_no="cancel"):
+def get_confirmation_keyboard(callback_yes: str = "confirm", callback_no: str = "cancel"):
     """أزرار تأكيد وإلغاء"""
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -87,7 +87,7 @@ def get_confirmation_keyboard(callback_yes="confirm", callback_no="cancel"):
     )
     return builder.as_markup()
 
-def get_yes_no_keyboard(yes_data="yes", no_data="no"):
+def get_yes_no_keyboard(yes_data: str = "yes", no_data: str = "no"):
     """أزرار نعم/لا"""
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -96,9 +96,37 @@ def get_yes_no_keyboard(yes_data="yes", no_data="no"):
     )
     return builder.as_markup()
 
+def get_points_keyboard():
+    """كيبورد إنلاين خاص بنظام النقاط"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="📋 سجل النقاط", callback_data="points_history"),
+        types.InlineKeyboardButton(text="🎁 استرداد نقاط", callback_data="redeem_points")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link")
+    )
+    return builder.as_markup()
+
+def get_profile_keyboard():
+    """كيبورد إنلاين للملف الشخصي"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="📋 سجل النقاط", callback_data="points_history"),
+        types.InlineKeyboardButton(text="🎁 استرداد نقاط", callback_data="redeem_points")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link"),
+        types.InlineKeyboardButton(text="📊 إحصائياتي", callback_data="my_stats")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="📋 آخر 5 طلبات", callback_data="recent_orders")
+    )
+    return builder.as_markup()
+
 # ============= دوال مساعدة =============
 
-async def send_message_with_back_keyboard(bot, chat_id, text, parse_mode=None):
+async def send_message_with_back_keyboard(bot, chat_id: int, text: str, parse_mode: str = None):
     """إرسال رسالة مع كيبورد رجوع"""
     await bot.send_message(
         chat_id,
@@ -107,11 +135,20 @@ async def send_message_with_back_keyboard(bot, chat_id, text, parse_mode=None):
         parse_mode=parse_mode
     )
 
-async def send_message_with_cancel_keyboard(bot, chat_id, text, parse_mode=None):
-    """إرسال رسالة مع كيبورد إلغاء (للمشرفين)"""
+async def send_message_with_cancel_keyboard(bot, chat_id: int, text: str, parse_mode: str = None):
+    """إرسال رسالة مع كيبورد إلغاء"""
     await bot.send_message(
         chat_id,
         text,
         reply_markup=get_cancel_keyboard(),
+        parse_mode=parse_mode
+    )
+
+async def send_message_with_main_menu_keyboard(bot, chat_id: int, text: str, is_admin: bool = False, parse_mode: str = None):
+    """إرسال رسالة مع القائمة الرئيسية"""
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=get_main_menu_keyboard(is_admin),
         parse_mode=parse_mode
     )
