@@ -524,8 +524,5 @@ async def profile_back_handler(message: types.Message, state: FSMContext, db_poo
     await message.answer(
         "👋 أهلاً بك في القائمة الرئيسية",
         reply_markup=get_main_menu_keyboard(is_admin)
-<<<<<<< HEAD
     )
-=======
-    )
->>>>>>> 2aa797ec6118ae1d843988473efaf2b431e6ce38
+
