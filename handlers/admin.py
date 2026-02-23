@@ -703,6 +703,110 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
         ), 
         db_pool
     )
+# ============= إدارة خيارات المنتجات =============
+
+@router.callback_query(F.data == "manage_options")
+async def manage_options_start(callback: types.CallbackQuery, db_pool):
+    """عرض المنتجات لإدارة خياراتها"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        products = await conn.fetch('''
+            SELECT a.id, a.name, c.display_name, a.type
+            FROM applications a
+            LEFT JOIN categories c ON a.category_id = c.id
+            WHERE a.type IN ('game', 'subscription')
+            ORDER BY c.sort_order, a.name
+        ''')
+    
+    text = "🎮 **إدارة خيارات الألعاب والاشتراكات**\n\n"
+    
+    if not products:
+        text += "⚠️ لا توجد ألعاب أو اشتراكات حالياً."
+    else:
+        text += "**التطبيقات المتوفرة:**\n\n"
+        for p in products:
+            type_icon = "🎮" if p['type'] == 'game' else "📅"
+            text += f"{type_icon} **{p['name']}** - {p['display_name']}\n"
+    
+    builder = InlineKeyboardBuilder()
+    
+    for product in products:
+        type_icon = "🎮" if product['type'] == 'game' else "📅"
+        builder.row(types.InlineKeyboardButton(
+            text=f"{type_icon} {product['name']}",
+            callback_data=f"prod_options_{product['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة لعبة أو اشتراك جديد",
+        callback_data="add_new_game"
+    ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للوحة التحكم",
+        callback_data="back_to_admin_panel"
+    ))
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("prod_options_"))
+async def show_product_options(callback: types.CallbackQuery, db_pool):
+    """عرض خيارات منتج معين"""
+    product_id = int(callback.data.split("_")[2])
+    
+    async with db_pool.acquire() as conn:
+        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+        options = await conn.fetch(
+            "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+            product_id
+        )
+    
+    text = f"📱 **{product['name']}**\n\n"
+    
+    if not options:
+        text += "⚠️ لا توجد خيارات لهذا المنتج."
+    else:
+        text += "**الخيارات الحالية:**\n\n"
+        for opt in options:
+            text += f"🆔 **{opt['id']}** | **{opt['name']}**\n"
+            text += f"📦 الكمية: {opt['quantity']}\n"
+            text += f"💰 السعر: ${float(opt['price_usd']):.2f}\n"
+            if opt.get('description'):
+                text += f"📝 {opt['description']}\n"
+            text += "➖➖➖➖➖➖\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة خيار جديد",
+        callback_data=f"add_option_{product_id}"
+    ))
+    
+    for opt in options:
+        builder.row(
+            types.InlineKeyboardButton(
+                text=f"✏️ تعديل {opt['name']}",
+                callback_data=f"edit_option_{opt['id']}"
+            ),
+            types.InlineKeyboardButton(
+                text=f"🗑️ حذف {opt['name']}",
+                callback_data=f"delete_option_{opt['id']}"
+            )
+        )
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للقائمة",
+        callback_data="manage_options"
+    ))
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup()
+    )
 # ============= إدارة خيارات المنتجات (للألعاب والاشتراكات) =============
 
 @router.callback_query(F.data.startswith("add_option_"))
