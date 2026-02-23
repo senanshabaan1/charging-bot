@@ -1227,7 +1227,7 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
 
 @router.callback_query(F.data.startswith("edit_fld_"))
 async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء تعديل حقل معين - نسخة مبسطة"""
+    """بدء تعديل حقل معين - بدون محاولة تعديل الرسالة"""
     try:
         # تحليل callback data: edit_fld_name_123
         parts = callback.data.split("_")
@@ -1265,8 +1265,8 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
             'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
         }
         
-        # إرسال رسالة طلب الإدخال
-        await callback.message.edit_text(
+        # إرسال رسالة جديدة بدلاً من تعديل القديمة
+        await callback.message.answer(
             f"✏️ **تعديل {field_name}**\n\n"
             f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
             f"📝 أرسل القيمة الجديدة الآن\n"
@@ -1285,7 +1285,7 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_edit_option_value)
 async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
-    """حفظ القيمة المعدلة - نسخة محسنة"""
+    """حفظ القيمة المعدلة - نسخة نهائية بدون محاولة تعديل رسائل قديمة"""
     if not is_admin(message.from_user.id):
         return
     
@@ -1377,7 +1377,15 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                         "UPDATE applications SET profit_percentage = $1 WHERE id = $2",
                         update_value, option['product_id']
                     )
-                    await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
+                    
+                    # جلب اسم المنتج للعرض
+                    product = await conn.fetchrow(
+                        "SELECT name FROM applications WHERE id = $1",
+                        option['product_id']
+                    )
+                    product_name = product['name'] if product else "المنتج"
+                    
+                    await message.answer(f"✅ تم تحديث {field_name} للمنتج **{product_name}** بنجاح!")
                 else:
                     await message.answer("❌ لم يتم العثور على الخيار")
                     await state.clear()
@@ -1388,39 +1396,34 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                     f"UPDATE product_options SET {field} = $1 WHERE id = $2",
                     update_value, option_id
                 )
-                await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
+                
+                # جلب معلومات الخيار بعد التحديث
+                updated_option = await conn.fetchrow(
+                    "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
+                    option_id
+                )
+                
+                await message.answer(
+                    f"✅ **تم التحديث بنجاح!**\n\n"
+                    f"📦 المنتج: **{updated_option['product_name']}**\n"
+                    f"🔧 الخيار: **{updated_option['name']}**\n"
+                    f"📝 الحقل المعدل: **{field_name}**\n"
+                    f"📊 القيمة الجديدة: **{update_value}**"
+                )
         
         await state.clear()
         
-        # العودة لقائمة الخيارات
-        async with db_pool.acquire() as conn:
-            option = await conn.fetchrow(
-                "SELECT product_id FROM product_options WHERE id = $1",
-                option_id
-            )
-            if option:
-                # استدعاء دالة عرض الخيارات مباشرة
-                from handlers.admin import show_product_options
-                
-                # إنشاء كائن callback بسيط
-                class FakeCallback:
-                    def __init__(self, user, message, data, bot):
-                        self.from_user = user
-                        self.message = message
-                        self.data = data
-                        self.bot = bot
-                    
-                    async def answer(self, text=None, show_alert=False):
-                        pass
-                
-                fake_callback = FakeCallback(
-                    user=message.from_user,
-                    message=message,
-                    data=f"prod_options_{option['product_id']}",
-                    bot=message.bot
-                )
-                
-                await show_product_options(fake_callback, db_pool)
+        # إرسال رسالة منفصلة للعودة للقائمة (بدون محاولة تعديل الرسالة القديمة)
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(
+            text="🔙 العودة لقائمة الخيارات",
+            callback_data=f"prod_options_{updated_option['product_id'] if 'updated_option' in locals() else option['product_id']}"
+        ))
+        
+        await message.answer(
+            "🔍 اختر ما تريد فعله الآن:",
+            reply_markup=builder.as_markup()
+        )
         
     except Exception as e:
         logger.error(f"❌ خطأ في حفظ التعديل: {e}")
