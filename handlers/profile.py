@@ -147,32 +147,50 @@ async def show_simple_profile(message: types.Message, user_id, balance, points, 
 @router.callback_query(F.data == "points_history")
 async def show_points_history(callback: types.CallbackQuery, db_pool):
     """عرض سجل النقاط مع توقيت دمشق"""
-    from database import get_points_history
-    
-    # جلب سجل النقاط مع توقيت دمشق (افتراضي 20 سجل)
-    history = await get_points_history(db_pool, callback.from_user.id, limit=20)
+    async with db_pool.acquire() as conn:
+        # ضبط المنطقة الزمنية للاتصال
+        await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+        
+        # جلب سجل النقاط مع تحويل التوقيت
+        history = await conn.fetch('''
+            SELECT points, action, description, 
+                   (created_at AT TIME ZONE 'Asia/Damascus') as created_at_local
+            FROM points_history
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT 20
+        ''', callback.from_user.id)
+        
+        # جلب إحصائيات
+        stats = await conn.fetchrow('''
+            SELECT 
+                COALESCE(SUM(CASE WHEN points > 0 THEN points ELSE 0 END), 0) as total_earned,
+                COALESCE(SUM(CASE WHEN points < 0 THEN ABS(points) ELSE 0 END), 0) as total_spent
+            FROM points_history
+            WHERE user_id = $1
+        ''', callback.from_user.id)
     
     if not history:
         return await callback.answer("❌ لا يوجد سجل نقاط حالياً", show_alert=True)
     
-    # حساب الإحصائيات
-    total_earned = 0
-    total_spent = 0
+    total_earned = stats['total_earned'] if stats else 0
+    total_spent = stats['total_spent'] if stats else 0
     
-    for item in history:
-        if item['points'] > 0:
-            total_earned += item['points']
-        else:
-            total_spent += abs(item['points'])
-    
-    # بناء نص السجل
     text = "⭐ **سجل النقاط (توقيت دمشق)**\n\n"
     
-    for i, item in enumerate(history[:10], 1):  # عرض آخر 10 فقط
+    for i, item in enumerate(history[:10], 1):
         symbol = "➕" if item['points'] > 0 else "➖"
         points_abs = abs(item['points'])
         
-        # تحديد نوع الحركة
+        # تنسيق التاريخ
+        if item['created_at_local']:
+            if hasattr(item['created_at_local'], 'strftime'):
+                date = item['created_at_local'].strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                date = str(item['created_at_local'])
+        else:
+            date = "وقت غير معروف"
+        
         action_names = {
             'order_completed': 'طلب مكتمل',
             'order': 'طلب',
@@ -187,18 +205,16 @@ async def show_points_history(callback: types.CallbackQuery, db_pool):
         
         text += f"{i}. {symbol} **{points_abs} نقطة**\n"
         text += f"   📝 {description}\n"
-        text += f"   📅 {item['date']}\n\n"
+        text += f"   🕐 {date}\n\n"
     
-    # إضافة الإحصائيات
     text += "📊 **الإحصائيات:**\n"
     text += f"• إجمالي المكتسب: {total_earned} نقطة\n"
     text += f"• إجمالي المستخدم: {total_spent} نقطة\n"
     text += f"• الرصيد الحالي: {total_earned - total_spent} نقطة"
     
-    # ✅ استخدام الدالة المستوردة بدلاً من إنشاء الكيبورد يدوياً
     await callback.message.edit_text(
         text,
-        reply_markup=get_back_inline_keyboard("back_to_profile"),  # 👈 مستوردة
+        reply_markup=get_back_inline_keyboard("back_to_profile"),
         parse_mode="Markdown"
     )
 
