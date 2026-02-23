@@ -1030,4 +1030,74 @@ async def get_bot_stats(pool):
             }
     except Exception as e:
         logger.error(f"❌ خطأ في جلب الإحصائيات: {e}")
-        return None
+# أضف هذا في ملف database.py في نهاية الملف
+
+async def fix_points_history_table(pool):
+    """إصلاح جدول النقاط للتأكد من وجود الأعمدة المطلوبة - للتوافق مع run_bot_webhook.py"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود الأعمدة وإضافتها إذا لزم الأمر
+            await conn.execute('ALTER TABLE points_history ADD COLUMN IF NOT EXISTS action TEXT')
+            await conn.execute('ALTER TABLE points_history ADD COLUMN IF NOT EXISTS description TEXT')
+            logger.info("✅ تم التأكد من وجود أعمدة points_history")
+            
+            # إضافة إعدادات النقاط إذا لم تكن موجودة
+            settings = [
+                ('points_per_referral', '1'),
+                ('points_per_order', '1'),
+                ('redemption_rate', '100'),
+            ]
+            
+            for key, value in settings:
+                await conn.execute('''
+                    INSERT INTO bot_settings (key, value, description) 
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (key) DO UPDATE SET value = $2
+                ''', key, value, f'نقاط {key}')
+            
+            logger.info("✅ تم التأكد من وجود إعدادات النقاط")
+            return True
+    except Exception as e:
+        logger.error(f"❌ خطأ في إصلاح جدول النقاط: {e}")
+        return False
+# ============= دوال المستخدمين (إضافية) =============
+
+async def save_user(pool, user_id, username=None, first_name=None, last_name=None):
+    """
+    حفظ أو تحديث بيانات المستخدم في قاعدة البيانات.
+    يتم استدعاؤها عند بدء المحادثة أو عند تحديث بيانات المستخدم.
+    """
+    try:
+        async with pool.acquire() as conn:
+            # التحقق مما إذا كان المستخدم موجوداً مسبقاً
+            existing = await conn.fetchval(
+                "SELECT user_id FROM users WHERE user_id = $1",
+                user_id
+            )
+
+            if existing:
+                # تحديث بيانات المستخدم الحالي
+                await conn.execute('''
+                    UPDATE users 
+                    SET username = $1, first_name = $2, last_name = $3, last_activity = CURRENT_TIMESTAMP
+                    WHERE user_id = $4
+                ''', username, first_name, last_name, user_id)
+                logger.info(f"🔄 تم تحديث بيانات المستخدم {user_id}")
+            else:
+                # إضافة مستخدم جديد مع إنشاء كود إحالة له
+                await conn.execute('''
+                    INSERT INTO users 
+                    (user_id, username, first_name, last_name, balance, created_at, last_activity)
+                    VALUES ($1, $2, $3, $4, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', user_id, username, first_name, last_name)
+                logger.info(f"✅ تم إضافة مستخدم جديد {user_id}")
+                
+                # إنشاء كود إحالة للمستخدم الجديد (اختياري، يمكنك إضافته لاحقاً)
+                # من الأفضل استدعاء generate_referral_code بشكل منفصل إذا أردت إنشاء الكود فوراً
+                # await generate_referral_code(pool, user_id)
+
+            return True
+    except Exception as e:
+        logger.error(f"❌ خطأ في حفظ/تحديث المستخدم {user_id}: {e}")
+        return False
+      
