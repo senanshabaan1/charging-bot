@@ -1635,14 +1635,6 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         f"البوت الآن جاهز للبدء من جديد!"
     )
     await state.clear()
-        
-    except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح")
-    except Exception as e:
-        await message.answer(f"❌ حدث خطأ: {str(e)}")
-        await state.clear()
-
-
 
 @router.callback_query(F.data == "cancel_del")
 async def cancel_action(callback: types.CallbackQuery):
