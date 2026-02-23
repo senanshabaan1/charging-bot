@@ -8,6 +8,7 @@ import asyncio
 import logging
 import pytz
 from datetime import datetime
+from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard
 
 # ضبط المنطقة الزمنية لدمشق
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
@@ -20,10 +21,6 @@ class DepStates(StatesGroup):
     waiting_tx = State()
     waiting_photo = State()
 
-def get_back_keyboard():
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
-    return builder.as_markup(resize_keyboard=True)
 
 def get_damascus_time():
     """الحصول على الوقت الحالي بتوقيت دمشق"""
@@ -48,7 +45,7 @@ async def back_from_deposit(callback: types.CallbackQuery):
     await callback.message.delete()
     await callback.message.answer(
         "تم العودة للقائمة الرئيسية.",
-        reply_markup=get_back_keyboard()
+        reply_markup=get_main_menu_keyboard()  # 👈 استخدم الدالة المستوردة
     )
 @router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel"]))
 async def deposit_back_handler(message: types.Message, state: FSMContext):
@@ -59,13 +56,14 @@ async def deposit_back_handler(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer(
             "✅ تم إلغاء عملية الشحن",
-            reply_markup=get_back_keyboard()
+            reply_markup=get_back_keyboard()  # 👈 استخدم الدالة المستوردة
         )
     else:
         await message.answer(
             "👋 أنت في القائمة الرئيسية",
-            reply_markup=get_back_keyboard()
+            reply_markup=get_main_menu_keyboard()  # 👈 استخدم الدالة المستوردة
         )
+
 @router.callback_query(F.data.startswith("m_"))
 async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء عملية الشحن - مع جلب سعر الصرف من قاعدة البيانات"""
