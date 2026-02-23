@@ -7,7 +7,7 @@ from config import ORDERS_GROUP, USD_TO_SYP
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 import logging
 from datetime import datetime
-import pytz
+from handlers.time_utils import get_damascus_time_now, DAMASCUS_TZ
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
 
 # ضبط المنطقة الزمنية لدمشق
@@ -24,8 +24,7 @@ class OrderStates(StatesGroup):
 
 
 def get_damascus_time():
-    """الحصول على الوقت الحالي بتوقيت دمشق"""
-    return datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')
+    return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S'))
 
 async def send_order_to_group(bot: Bot, order_data: dict):
     """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
