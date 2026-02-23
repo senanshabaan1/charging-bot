@@ -1150,60 +1150,76 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
 # ============= تعديل خيار =============
 
 @router.callback_query(F.data.startswith("edit_option_"))
-async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """عرض قائمة تعديل الخيار"""
+async def edit_option_menu_fixed(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """عرض قائمة تعديل الخيار - نسخة مصححة"""
     try:
-        # نتأكد أن البيانات تحتوي على رقم وليس نص
+        # استخراج option_id من callback data
         parts = callback.data.split("_")
         if len(parts) >= 3 and parts[2].isdigit():
             option_id = int(parts[2])
         else:
-            # إذا كان التنسيق edit_option_field_name_XXX نعالجه بشكل منفصل
+            await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
             return
-    
+        
+        # جلب معلومات الخيار من قاعدة البيانات
         from database import get_product_option
         option = await get_product_option(db_pool, option_id)
         
         if not option:
             return await callback.answer("❌ الخيار غير موجود", show_alert=True)
         
+        # حفظ البيانات في state
         await state.update_data(
             option_id=option_id,
             product_id=option['product_id']
         )
         
+        # بناء أزرار التعديل
         builder = InlineKeyboardBuilder()
+        
+        # زر تعديل الاسم
         builder.row(types.InlineKeyboardButton(
             text="📝 تعديل الاسم", 
-            callback_data=f"edit_option_field_name_{option_id}"
+            callback_data=f"edit_opt_field_name_{option_id}"
         ))
+        
+        # زر تعديل الكمية
         builder.row(types.InlineKeyboardButton(
             text="🔢 تعديل الكمية", 
-            callback_data=f"edit_option_field_quantity_{option_id}"
+            callback_data=f"edit_opt_field_quantity_{option_id}"
         ))
+        
+        # زر تعديل السعر
         builder.row(types.InlineKeyboardButton(
-            text="💰 تعديل سعر المورد", 
-            callback_data=f"edit_option_field_price_{option_id}"
+            text="💰 تعديل السعر", 
+            callback_data=f"edit_opt_field_price_{option_id}"
         ))
+        
+        # زر تعديل الربح
         builder.row(types.InlineKeyboardButton(
-            text="📈 تعديل نسبة الربح", 
-            callback_data=f"edit_option_field_profit_{option_id}"
+            text="📈 تعديل الربح", 
+            callback_data=f"edit_opt_field_profit_{option_id}"
         ))
+        
+        # زر تعديل الوصف
         builder.row(types.InlineKeyboardButton(
             text="📝 تعديل الوصف", 
-            callback_data=f"edit_option_field_desc_{option_id}"
+            callback_data=f"edit_opt_field_desc_{option_id}"
         ))
+        
+        # زر الرجوع
         builder.row(types.InlineKeyboardButton(
             text="🔙 رجوع", 
             callback_data=f"prod_options_{option['product_id']}"
         ))
         
+        # نص المعلومات
         text = (
             f"✏️ **تعديل الخيار**\n\n"
             f"**البيانات الحالية:**\n"
             f"• الاسم: {option['name']}\n"
             f"• الكمية: {option['quantity']}\n"
-            f"• سعر المورد: ${option['price_usd']:.3f}\n"
+            f"• السعر: ${option['price_usd']:.3f}\n"
         )
         
         if option.get('description'):
@@ -1212,92 +1228,140 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
         await callback.message.edit_text(text, reply_markup=builder.as_markup())
         
     except Exception as e:
-        logger.error(f"خطأ في edit_option_menu: {e}")
+        logger.error(f"❌ خطأ في edit_option_menu_fixed: {e}")
+        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-@router.callback_query(F.data.startswith("edit_option_field_"))
-async def edit_option_field_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء تعديل حقل معين"""
-    parts = callback.data.split("_")
-    # التنسيق: edit_option_field_name_123
-    if len(parts) >= 5:
-        field_type = parts[3]  # name, quantity, price, profit, desc
-        option_id = int(parts[4])
+
+@router.callback_query(F.data.startswith("edit_opt_field_"))
+async def edit_option_field_start_fixed(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل حقل معين - نسخة مصححة"""
+    try:
+        # تحليل callback data: edit_opt_field_name_123
+        parts = callback.data.split("_")
         
+        if len(parts) >= 5:
+            # التنسيق: edit_opt_field_name_123
+            field_type = parts[3]  # name, quantity, price, profit, desc
+            option_id = int(parts[4])
+        elif len(parts) == 4:
+            # التنسيق: edit_opt_field_name_123 (إذا كان الـ prefix مختلف)
+            field_type = parts[2]
+            option_id = int(parts[3])
+        else:
+            await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
+            return
+        
+        # أسماء الحقول للتنسيق
         field_names = {
             'name': 'الاسم',
             'quantity': 'الكمية',
-            'price': 'سعر المورد',
+            'price': 'السعر',
             'profit': 'نسبة الربح',
             'desc': 'الوصف'
         }
         
         field_name = field_names.get(field_type, field_type)
         
+        # حفظ البيانات في state
         await state.update_data(
             edit_field=field_type,
             option_id=option_id
         )
         
+        # تعليمات الإدخال حسب نوع الحقل
         instructions = {
             'name': "أدخل الاسم الجديد:",
             'quantity': "أدخل الكمية الجديدة (رقم فقط):",
-            'price': "أدخل سعر المورد الجديد (بالدولار):",
+            'price': "أدخل السعر الجديد (بالدولار):",
             'profit': "أدخل نسبة الربح الجديدة (%):",
             'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
         }
         
+        # إرسال رسالة طلب الإدخال
         await callback.message.edit_text(
             f"✏️ **تعديل {field_name}**\n\n"
             f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
-            f"❌ أرسل /cancel للإلغاء"
+            f"❌ للإلغاء أرسل /cancel"
         )
+        
         await state.set_state(AdminStates.waiting_edit_option_value)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في edit_option_field_start_fixed: {e}")
+        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+
 
 @router.message(AdminStates.waiting_edit_option_value)
-async def edit_option_value_save(message: types.Message, state: FSMContext, db_pool):
-    """حفظ القيمة المعدلة"""
+async def edit_option_value_save_fixed(message: types.Message, state: FSMContext, db_pool):
+    """حفظ القيمة المعدلة - نسخة مصححة"""
     if not is_admin(message.from_user.id):
         return
     
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
+    # استرجاع البيانات من state
     data = await state.get_data()
-    option_id = data['option_id']
-    field = data['edit_field']
+    option_id = data.get('option_id')
+    field = data.get('edit_field')
+    
+    if not option_id or not field:
+        await message.answer("❌ بيانات غير صالحة. الرجاء البدء من جديد.")
+        await state.clear()
+        return
+    
     value = message.text.strip()
     
     try:
         update_value = None
         field_name = ""
         
+        # معالجة حسب نوع الحقل
         if field == 'name':
             if len(value) < 2:
-                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:", reply_markup=get_cancel_keyboard())
+                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول (على الأقل حرفين):")
                 return
             update_value = value
             field_name = "الاسم"
             
         elif field == 'quantity':
-            quantity = int(value)
-            if quantity <= 0:
-                await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+            try:
+                quantity = int(value)
+                if quantity <= 0:
+                    await message.answer("❌ الكمية يجب أن تكون أكبر من 0:")
+                    return
+                update_value = quantity
+                field_name = "الكمية"
+            except ValueError:
+                await message.answer("❌ يرجى إدخال رقم صحيح للكمية:")
                 return
-            update_value = quantity
-            field_name = "الكمية"
             
         elif field == 'price':
-            price = float(value)
-            if price <= 0:
-                await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+            try:
+                price = float(value)
+                if price <= 0:
+                    await message.answer("❌ السعر يجب أن يكون أكبر من 0:")
+                    return
+                update_value = price
+                field_name = "السعر"
+            except ValueError:
+                await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):")
                 return
-            update_value = price
-            field_name = "سعر المورد"
             
         elif field == 'profit':
-            profit = float(value)
-            if profit < 0:
-                await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+            try:
+                profit = float(value)
+                if profit < 0:
+                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:")
+                    return
+                update_value = profit
+                field_name = "نسبة الربح"
+            except ValueError:
+                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):")
                 return
-            update_value = profit
-            field_name = "نسبة الربح"
             
         elif field == 'desc':
             update_value = None if value == '-' else value
@@ -1311,7 +1375,7 @@ async def edit_option_value_save(message: types.Message, state: FSMContext, db_p
         # تحديث قاعدة البيانات
         async with db_pool.acquire() as conn:
             if field == 'profit':
-                # نسبة الربح تخزن في التطبيق
+                # نسبة الربح تخزن في التطبيق (المنتج)
                 option = await conn.fetchrow(
                     "SELECT product_id FROM product_options WHERE id = $1",
                     option_id
@@ -1321,14 +1385,17 @@ async def edit_option_value_save(message: types.Message, state: FSMContext, db_p
                         "UPDATE applications SET profit_percentage = $1 WHERE id = $2",
                         update_value, option['product_id']
                     )
+                    await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
+                else:
+                    await message.answer("❌ لم يتم العثور على الخيار")
             else:
                 # تحديث الخيار مباشرة
                 await conn.execute(
                     f"UPDATE product_options SET {field} = $1 WHERE id = $2",
                     update_value, option_id
                 )
+                await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
         
-        await message.answer(f"✅ تم تحديث {field_name} بنجاح!", reply_markup=None)
         await state.clear()
         
         # العودة لقائمة الخيارات
@@ -1338,6 +1405,7 @@ async def edit_option_value_save(message: types.Message, state: FSMContext, db_p
                 option_id
             )
             if option:
+                # إنشاء callback وهمي للعودة لقائمة الخيارات
                 fake_callback = types.CallbackQuery(
                     id='0',
                     from_user=message.from_user,
@@ -1350,11 +1418,12 @@ async def edit_option_value_save(message: types.Message, state: FSMContext, db_p
                     data=f"prod_options_{option['product_id']}",
                     bot=message.bot
                 )
+                # استدعاء دالة عرض الخيارات
+                from handlers.admin import show_product_options
                 await show_product_options(fake_callback, db_pool)
         
-    except ValueError:
-        await message.answer("❌ قيمة غير صالحة. يرجى إدخال قيمة صحيحة:", reply_markup=get_cancel_keyboard())
     except Exception as e:
+        logger.error(f"❌ خطأ في حفظ التعديل: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
