@@ -2224,8 +2224,6 @@ async def finalize_add_balance(message: types.Message, state: FSMContext, db_poo
     
     await state.clear()
     
-        await message.answer(f"❌ **حدث خطأ:** {str(e)}")
-        await state.clear()
 
 @router.callback_query(F.data == "bot_stats")
 async def show_bot_stats(callback: types.CallbackQuery, db_pool):
