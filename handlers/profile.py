@@ -23,10 +23,11 @@ async def show_profile(message: types.Message, db_pool):
     """عرض الملف الشخصي للمستخدم"""
     user_id = message.from_user.id
     
-    # جلب إحصائيات المستخدم
-    stats = await get_user_full_stats(db_pool, user_id)
+    # استخدم get_user_profile بدلاً من get_user_full_stats
+    from database import get_user_profile
+    profile = await get_user_profile(db_pool, user_id)
     
-    if not stats:
+    if not profile:
         # إذا لم توجد إحصائيات، نعرض بيانات بسيطة
         points = await get_user_points(db_pool, user_id)
         balance = 0
@@ -43,7 +44,7 @@ async def show_profile(message: types.Message, db_pool):
         await show_simple_profile(message, user_id, balance, points, db_pool)
         return
     
-    user = stats['user']
+    user = profile['user']
     
     # جلب الإعدادات
     redemption_rate = await get_redemption_rate(db_pool)
@@ -413,11 +414,11 @@ async def process_redeem(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "my_stats")
 async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
     """عرض إحصائيات مفصلة"""
-    from database import get_user_full_stats
+    from database import get_user_profile
     
-    stats = await get_user_full_stats(db_pool, callback.from_user.id)
+    profile = await get_user_profile(db_pool, callback.from_user.id)
     
-    if not stats:
+    if not profile:
         await callback.answer("لا توجد إحصائيات كافية بعد", show_alert=True)
         return
     
@@ -425,22 +426,22 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
         "📊 **إحصائياتك التفصيلية**\n\n"
         
         "💰 **الإيداعات:**\n"
-        f"• إجمالي الإيداعات: {stats['deposits'].get('total_count', 0)} عملية\n"
-        f"• إجمالي المبالغ: {stats['deposits'].get('total_amount', 0):,.0f} ل.س\n"
-        f"• الإيداعات المقبولة: {stats['deposits'].get('approved_count', 0)} عملية\n"
-        f"• قيمة المقبولة: {stats['deposits'].get('approved_amount', 0):,.0f} ل.س\n\n"
+        f"• إجمالي الإيداعات: {profile['deposits'].get('total_count', 0)} عملية\n"
+        f"• إجمالي المبالغ: {profile['deposits'].get('total_amount', 0):,.0f} ل.س\n"
+        f"• الإيداعات المقبولة: {profile['deposits'].get('approved_count', 0)} عملية\n"
+        f"• قيمة المقبولة: {profile['deposits'].get('approved_amount', 0):,.0f} ل.س\n\n"
         
         "🛒 **الطلبات:**\n"
-        f"• إجمالي الطلبات: {stats['orders'].get('total_count', 0)} طلب\n"
-        f"• إجمالي المبالغ: {stats['orders'].get('total_amount', 0):,.0f} ل.س\n"
-        f"• الطلبات المكتملة: {stats['orders'].get('completed_count', 0)} طلب\n"
-        f"• قيمة المكتملة: {stats['orders'].get('completed_amount', 0):,.0f} ل.س\n"
-        f"• نقاط من الطلبات: {stats['orders'].get('total_points_earned', 0)} نقطة\n\n"
+        f"• إجمالي الطلبات: {profile['orders'].get('total_count', 0)} طلب\n"
+        f"• إجمالي المبالغ: {profile['orders'].get('total_amount', 0):,.0f} ل.س\n"
+        f"• الطلبات المكتملة: {profile['orders'].get('completed_count', 0)} طلب\n"
+        f"• قيمة المكتملة: {profile['orders'].get('completed_amount', 0):,.0f} ل.س\n"
+        f"• نقاط من الطلبات: {profile['orders'].get('total_points_earned', 0)} نقطة\n\n"
         
         "👥 **الإحالات:**\n"
-        f"• عدد المحالين: {stats['referrals'].get('total_referrals', 0)}\n"
-        f"• إيداعات المحالين: {stats['referrals'].get('referrals_deposits', 0):,.0f} ل.س\n"
-        f"• طلبات المحالين: {stats['referrals'].get('referrals_orders', 0)}"
+        f"• عدد المحالين: {profile['referrals'].get('total_referrals', 0)}\n"
+        f"• إيداعات المحالين: {profile['referrals'].get('referrals_deposits', 0):,.0f} ل.س\n"
+        f"• طلبات المحالين: {profile['referrals'].get('referrals_orders', 0)}"
     )
     
     await callback.message.edit_text(
@@ -448,23 +449,22 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
         reply_markup=get_back_inline_keyboard("back_to_profile"),
         parse_mode="Markdown"
     )
-
 # ============= آخر الطلبات =============
 
 @router.callback_query(F.data == "recent_orders")
 async def show_recent_orders(callback: types.CallbackQuery, db_pool):
     """عرض آخر 5 طلبات"""
-    from database import get_user_full_stats
+    from database import get_user_profile
     
-    stats = await get_user_full_stats(db_pool, callback.from_user.id)
+    profile = await get_user_profile(db_pool, callback.from_user.id)
     
-    if not stats or not stats.get('recent_orders'):
+    if not profile or not profile.get('recent_orders'):
         await callback.answer("لا توجد طلبات حديثة", show_alert=True)
         return
     
     text = "📋 **آخر 5 طلبات**\n\n"
     
-    for order in stats['recent_orders']:
+    for order in profile['recent_orders']:
         date = "تاريخ غير معروف"
         if order['created_at']:
             if hasattr(order['created_at'], 'strftime'):
