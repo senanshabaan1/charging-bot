@@ -287,6 +287,130 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
     await message.answer(text, parse_mode="Markdown")
     await state.clear()
 
+@router.callback_query(F.data == "send_custom_message")
+async def send_custom_message_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إرسال رسالة لمستخدم محدد"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.answer(
+        "✉️ **إرسال رسالة لمستخدم محدد**\n\n"
+        "أدخل آيدي المستخدم (ID) أو اليوزر نيم:\n"
+        "مثال: `123456789` أو `@username`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_custom_message_user)
+@router.message(AdminStates.waiting_custom_message_user)
+async def get_custom_message_user(message: types.Message, state: FSMContext, db_pool):
+    """استقبال آيدي المستخدم"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
+    search_term = message.text.strip()
+    
+    # البحث عن المستخدم
+    async with db_pool.acquire() as conn:
+        # محاولة البحث بالآيدي
+        try:
+            user_id = int(search_term)
+            user = await conn.fetchrow(
+                "SELECT user_id, username, first_name FROM users WHERE user_id = $1",
+                user_id
+            )
+        except ValueError:
+            # البحث باليوزر نيم
+            username = search_term.replace('@', '')
+            user = await conn.fetchrow(
+                "SELECT user_id, username, first_name FROM users WHERE username = $1",
+                username
+            )
+    
+    if not user:
+        await message.answer(
+            "❌ **المستخدم غير موجود**\n\n"
+            "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.\n"
+            "أو أرسل /cancel للإلغاء"
+        )
+        return
+    
+    # حفظ معلومات المستخدم
+    await state.update_data(
+        target_user=user['user_id'],
+        target_username=user['username'] or user['first_name'] or str(user['user_id'])
+    )
+    
+    await message.answer(
+        f"👤 **المستخدم المستهدف:** @{user['username'] or 'غير معروف'}\n"
+        f"🆔 **الآيدي:** `{user['user_id']}`\n\n"
+        f"📝 **أدخل الرسالة التي تريد إرسالها:**\n\n"
+        f"✏️ يمكنك استخدام Markdown للتنسيق:\n"
+        f"• **نص عريض**\n"
+        f"• *نص مائل*\n"
+        f"• `كود`"
+    )
+    await state.set_state(AdminStates.waiting_custom_message_text)
+@router.message(AdminStates.waiting_custom_message_text)
+async def send_custom_message_text(message: types.Message, state: FSMContext, bot: Bot):
+    """إرسال الرسالة للمستخدم المحدد"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    # التحقق من الإلغاء
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
+    custom_text = message.text
+    data = await state.get_data()
+    target_user = data['target_user']
+    target_username = data['target_username']
+    
+    try:
+        # محاولة إرسال مع Markdown
+        await bot.send_message(
+            target_user,
+            f"✉️ **رسالة خاصة من الإدارة**\n\n{custom_text}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        await message.answer(
+            f"✅ **تم إرسال الرسالة بنجاح!**\n\n"
+            f"👤 إلى: @{target_username}\n"
+            f"🆔 الآيدي: `{target_user}`\n\n"
+            f"📝 نص الرسالة:\n{custom_text}"
+        )
+        
+    except Exception as e:
+        # إذا فشل Markdown، نجرب إرسال نص عادي
+        try:
+            await bot.send_message(
+                target_user,
+                f"✉️ رسالة خاصة من الإدارة:\n\n{custom_text}"
+            )
+            
+            await message.answer(
+                f"✅ **تم إرسال الرسالة (كنص عادي) بنجاح!**\n\n"
+                f"👤 إلى: @{target_username}\n"
+                f"🆔 الآيدي: `{target_user}`\n\n"
+                f"📝 نص الرسالة:\n{custom_text}"
+            )
+            
+        except Exception as e2:
+            await message.answer(
+                f"❌ **فشل إرسال الرسالة**\n\n"
+                f"الخطأ: {str(e2)}\n\n"
+                f"تأكد من أن المستخدم لم يحظر البوت."
+            )
+    
+    await state.clear()
+
 # ============= إدارة المنتجات =============
 @router.callback_query(F.data == "add_product")
 async def add_product_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
