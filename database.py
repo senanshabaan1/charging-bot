@@ -42,7 +42,40 @@ async def set_database_timezone(pool):
     except Exception as e:
         logger.error(f"❌ خطأ في ضبط توقيت قاعدة البيانات: {e}")
         return False
+# ============= دوال تحديث المنطقة الزمنية =============
 
+async def update_old_records_timezone(pool):
+    """
+    تحديث السجلات القديمة لإضافة المنطقة الزمنية - للتوافق مع run_bot_webhook.py
+    """
+    try:
+        async with pool.acquire() as conn:
+            # تحديث طلبات الإيداع القديمة
+            await conn.execute('''
+                UPDATE deposit_requests 
+                SET updated_at = created_at 
+                WHERE updated_at IS NULL
+            ''')
+            
+            # تحديث الطلبات القديمة
+            await conn.execute('''
+                UPDATE orders 
+                SET updated_at = created_at 
+                WHERE updated_at IS NULL
+            ''')
+            
+            # تحديث طلبات الاسترداد القديمة
+            await conn.execute('''
+                UPDATE redemption_requests 
+                SET updated_at = created_at 
+                WHERE updated_at IS NULL
+            ''')
+            
+            logger.info("✅ تم تحديث المنطقة الزمنية للسجلات القديمة")
+            return True
+    except Exception as e:
+        logger.error(f"❌ خطأ في تحديث المنطقة الزمنية للسجلات القديمة: {e}")
+        return False
 # ============= تهيئة قاعدة البيانات =============
 
 async def init_db():
