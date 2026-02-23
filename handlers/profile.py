@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import USD_TO_SYP, ADMIN_ID
 from datetime import datetime
 import logging
+from handlers.keyboards import get_back_inline_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -143,7 +144,6 @@ async def show_simple_profile(message: types.Message, user_id, balance, points, 
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
-
 @router.callback_query(F.data == "points_history")
 async def show_points_history(callback: types.CallbackQuery, db_pool):
     """عرض سجل النقاط مع توقيت دمشق"""
@@ -195,28 +195,12 @@ async def show_points_history(callback: types.CallbackQuery, db_pool):
     text += f"• إجمالي المستخدم: {total_spent} نقطة\n"
     text += f"• الرصيد الحالي: {total_earned - total_spent} نقطة"
     
-    # إضافة زر الرجوع
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع للملف الشخصي", 
-        callback_data="back_to_profile"
-    ))
-    
+    # ✅ استخدام الدالة المستوردة بدلاً من إنشاء الكيبورد يدوياً
     await callback.message.edit_text(
         text,
-        reply_markup=builder.as_markup(),
+        reply_markup=get_back_inline_keyboard("back_to_profile"),  # 👈 مستوردة
         parse_mode="Markdown"
     )
-def get_back_inline(callback_data="back_to_profile"):
-    """إنشاء زر رجوع إنلاين"""
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data=callback_data
-    ))
-    return builder.as_markup()
 
 @router.callback_query(F.data == "referral_link")
 async def show_referral_link(callback: types.CallbackQuery, db_pool):
@@ -301,6 +285,7 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
             callback_data=f"redeem_{points_needed}_{syp_amount}_{exchange_rate}"
         ))
     
+    # ✅ استخدام الدالة المستوردة لزر الرجوع
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع", 
         callback_data="back_to_profile"
@@ -315,7 +300,6 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
     )
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
-
 @router.callback_query(F.data.startswith("redeem_"))
 async def process_redeem(callback: types.CallbackQuery, db_pool):
     """معالجة طلب الاسترداد"""
@@ -347,7 +331,8 @@ async def process_redeem(callback: types.CallbackQuery, db_pool):
                 f"💰 المبلغ: {amount_syp:,.0f} ل.س\n"
                 f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n\n"
                 f"⏳ في انتظار موافقة الإدارة.\n"
-                f"📋 رقم الطلب: #{request_id}"
+                f"📋 رقم الطلب: #{request_id}",
+                reply_markup=get_back_inline_keyboard("back_to_profile")  # 👈 مستوردة
             )
             
             # إشعار المشرفين
@@ -406,7 +391,11 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
         f"• طلبات المحالين: {stats['referrals'].get('referrals_orders', 0)}"
     )
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("back_to_profile"),  # 👈 مستوردة
+        parse_mode="Markdown"
+    )
 
 @router.callback_query(F.data == "recent_orders")
 async def show_recent_orders(callback: types.CallbackQuery, db_pool):
@@ -438,8 +427,11 @@ async def show_recent_orders(callback: types.CallbackQuery, db_pool):
         text += f"   الحالة: {order['status']}\n"
         text += f"   التاريخ: {date}\n\n"
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
-
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("back_to_profile"),  # 👈 مستوردة
+        parse_mode="Markdown"
+    )
 @router.callback_query(F.data == "back_to_profile")
 async def back_to_profile(callback: types.CallbackQuery, db_pool):
     """العودة إلى الملف الشخصي"""
