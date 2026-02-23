@@ -24,7 +24,7 @@ class DepStates(StatesGroup):
 
 def get_damascus_time():
     """الحصول على الوقت الحالي بتوقيت دمشق"""
-    return datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')
+    return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 @router.message(F.text == "💰 شحن المحفظة")
 async def choose_meth(message: types.Message):
