@@ -24,7 +24,7 @@ class OrderStates(StatesGroup):
 
 
 def get_damascus_time():
-    return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S'))
+    return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 async def send_order_to_group(bot: Bot, order_data: dict):
     """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
