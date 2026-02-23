@@ -1,11 +1,14 @@
 # handlers/start.py
 from aiogram import Router, types, F
-from aiogram.filters import CommandStart, Command  # أضف Command هنا
-from aiogram.fsm.context import FSMContext  # أضف FSMContext
+from aiogram.filters import CommandStart, Command
+from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from config import ADMIN_ID, MODERATORS, USD_TO_SYP
 import logging
 from datetime import datetime
+import pytz
+import random
+import string
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
 from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
 
@@ -39,7 +42,7 @@ async def notify_admins(bot, message_text, db_pool=None):
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
 
-# ========== أضف الكود الجديد هنا ==========
+# ========== دوال الإلغاء ==========
 
 @router.message(Command("cancel"))
 @router.message(Command("الغاء"))
@@ -69,7 +72,6 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
         is_admin_user = is_admin(message.from_user.id)
         
         if current_state:
-            # نص عادي بدون Markdown معقد
             cancel_text = (
                 f"✅ تم إلغاء العملية الحالية\n\n"
                 f"🕐 {current_time}\n"
@@ -82,15 +84,15 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
                 f"🔸 اختر ما تريد من القائمة."
             )
         
-        # إرسال بدون Markdown مؤقتاً
         await message.answer(
             cancel_text,
             reply_markup=get_main_menu_keyboard(is_admin_user)
-            # 👈 حذفنا parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"خطأ في دالة الإلغاء: {e}")
         await message.answer("حدث خطأ، حاول مرة أخرى.")
+
+# ========== أمر البدء الرئيسي ==========
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, db_pool):
@@ -111,18 +113,15 @@ async def cmd_start(message: types.Message, db_pool):
     is_new_user = False
     
     # ========== التحقق من اشتراك القناة ==========
-    channel_username = "@LINKcharger22"  # اسم القناة بدون https
+    channel_username = "@LINKcharger22"
     try:
         member = await message.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
         is_member = member.status in ["member", "administrator", "creator"]
     except Exception as e:
-        # إذا كان البوت ليس مشرفاً في القناة أو القناة خاصة، قد يحدث خطأ
         print(f"⚠️ خطأ في التحقق من القناة: {e}")
-        # نعطي المستخدم فرصة، أو نطلب منه الاشتراك بطريقة أخرى
-        is_member = False  # للأمان نعتبره غير مشترك
+        is_member = False
     
     if not is_member:
-        # المستخدم غير مشترك، نطلب منه الاشتراك
         join_button = InlineKeyboardBuilder()
         join_button.row(types.InlineKeyboardButton(
             text="📢 انضم إلى القناة",
@@ -140,7 +139,7 @@ async def cmd_start(message: types.Message, db_pool):
             reply_markup=join_button.as_markup(),
             parse_mode="Markdown"
         )
-        return  # نوقف التنفيذ هنا
+        return
     # =============================================
     
     async with db_pool.acquire() as conn:
@@ -153,32 +152,31 @@ async def cmd_start(message: types.Message, db_pool):
         
         if not user:
             is_new_user = True
-            # مستخدم جديد - إنشاء حساب
+            
+            # ===== إنشاء كود إحالة فريد =====
+            new_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            
+            # التأكد من عدم تكرار الكود
+            while True:
+                check = await conn.fetchval(
+                    "SELECT user_id FROM users WHERE referral_code = $1",
+                    new_code
+                )
+                if not check:
+                    break
+                new_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            # ================================
+            
+            # مستخدم جديد - إنشاء حساب مع referral_code
             try:
                 await conn.execute('''
                     INSERT INTO users 
-                    (user_id, username, balance, created_at, is_banned)
-                    VALUES ($1, $2, 0, CURRENT_TIMESTAMP, FALSE)
-                ''', user_id, username)
-                print(f"✅ تم إنشاء مستخدم جديد: {user_id}")
+                    (user_id, username, first_name, last_name, balance, referral_code, created_at, is_banned)
+                    VALUES ($1, $2, $3, $4, 0, $5, CURRENT_TIMESTAMP, FALSE)
+                ''', user_id, username, first_name, last_name, new_code)
+                print(f"✅ تم إنشاء مستخدم جديد: {user_id} بكود إحالة {new_code}")
             except Exception as e:
                 print(f"خطأ في إنشاء مستخدم: {e}")
-            
-            # محاولة إضافة الأعمدة الإضافية
-            try:
-                await conn.execute(
-                    "UPDATE users SET first_name = $1, last_name = $2 WHERE user_id = $3",
-                    first_name, last_name, user_id
-                )
-            except:
-                pass
-            
-            # إنشاء كود إحالة
-            try:
-                from database import generate_referral_code
-                await generate_referral_code(db_pool, user_id)
-            except Exception as e:
-                print(f"خطأ في إنشاء كود إحالة: {e}")
             
             # ========== نص الترحيب للمستخدم الجديد ==========
             welcome_text = (
@@ -200,7 +198,7 @@ async def cmd_start(message: types.Message, db_pool):
                     
                     # البحث عن المستخدم الذي قام بالإحالة
                     referrer = await conn.fetchrow(
-                        "SELECT user_id FROM users WHERE referral_code = $1",
+                        "SELECT user_id, total_points FROM users WHERE referral_code = $1",
                         referral_code
                     )
                     
@@ -213,30 +211,26 @@ async def cmd_start(message: types.Message, db_pool):
                             referrer['user_id'], user_id
                         )
                         
-                        # زيادة عدد المحالين
-                        await conn.execute(
-                            "UPDATE users SET referral_count = referral_count + 1 WHERE user_id = $1",
-                            referrer['user_id']
-                        )
-                        
                         # الحصول على قيمة النقاط من الإعدادات
                         points = await conn.fetchval(
-                            "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
-                        )
-                        points = int(points) if points else 1
+                            "SELECT value::integer FROM bot_settings WHERE key = 'points_per_referral'"
+                        ) or 1
                         
-                        # إضافة نقاط للمستخدم الذي قام بالإحالة
-                        await conn.execute(
-                            "UPDATE users SET total_points = total_points + $1, referral_earnings = referral_earnings + $1 WHERE user_id = $2",
-                            points, referrer['user_id']
-                        )
+                        # تحديث عدد المحالين وإضافة النقاط
+                        await conn.execute('''
+                            UPDATE users 
+                            SET referral_count = referral_count + 1,
+                                total_points = total_points + $1,
+                                referral_earnings = referral_earnings + $1
+                            WHERE user_id = $2
+                        ''', points, referrer['user_id'])
                         
                         # تسجيل في سجل النقاط
                         try:
                             await conn.execute('''
                                 INSERT INTO points_history (user_id, points, action, description, created_at)
                                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-                            ''', referrer['user_id'], points, 'referral', f'نقاط إحالة للمستخدم {user_id}')
+                            ''', referrer['user_id'], points, 'referral', f'إحالة المستخدم {user_id}')
                             print(f"✅ تم تسجيل النقاط في سجل النقاط")
                         except Exception as e:
                             print(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
@@ -245,11 +239,16 @@ async def cmd_start(message: types.Message, db_pool):
                         
                         # إرسال إشعار للمستخدم الذي قام بالإحالة
                         try:
+                            new_points = await conn.fetchval(
+                                "SELECT total_points FROM users WHERE user_id = $1",
+                                referrer['user_id']
+                            )
                             await message.bot.send_message(
                                 referrer['user_id'],
-                                f"🎉 مستخدم جديد سجل عبر رابط الإحالة الخاص بك!\n\n"
-                                f"👤 المستخدم: @{username or 'غير معروف'}\n"
-                                f"⭐ لقد حصلت على {points} نقاط إضافية!"
+                                f"🎉 **مبروك! لديك إحالة جديدة**\n\n"
+                                f"👤 المستخدم: @{username or first_name or 'مستخدم جديد'}\n"
+                                f"⭐ نقاط مكتسبة: +{points}\n"
+                                f"💰 رصيد النقاط الحالي: {new_points}"
                             )
                             print(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
                         except Exception as e:
@@ -286,7 +285,6 @@ async def cmd_start(message: types.Message, db_pool):
             
             # جلب الرصيد والنقاط بأمان
             try:
-                # جلب الرصيد
                 balance_row = await conn.fetchrow(
                     "SELECT balance, is_banned FROM users WHERE user_id = $1",
                     user_id
@@ -332,6 +330,8 @@ async def cmd_start(message: types.Message, db_pool):
         reply_markup=get_main_menu_keyboard(is_admin(user_id))
     )
 
+# ========== التحقق من اشتراك القناة ==========
+
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription(callback: types.CallbackQuery, db_pool):
     """التحقق من اشتراك المستخدم بعد الانضمام للقناة"""
@@ -346,16 +346,19 @@ async def check_subscription(callback: types.CallbackQuery, db_pool):
         is_member = False
     
     if is_member:
-        # المستخدم مشترك الآن، نرسل له الترحيب وندعو الدالة الأصلية
         await callback.message.delete()
         await cmd_start(callback.message, db_pool)
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
 
+# ========== العودة للقائمة الرئيسية ==========
+
 @router.message(F.text == "🔙 رجوع للقائمة")
 async def back_to_main_menu(message: types.Message, db_pool):
     """معالجة زر الرجوع للقائمة الرئيسية"""
     await cmd_start(message, db_pool)
+
+# ========== الملف الشخصي ==========
 
 @router.message(F.text == "👤 حسابي")
 async def my_account(message: types.Message, db_pool):
@@ -453,6 +456,8 @@ async def my_account(message: types.Message, db_pool):
         parse_mode="Markdown"
     )
 
+# ========== رابط الإحالة ==========
+
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
     """عرض رابط الإحالة مع سعر الصرف الحالي"""
@@ -515,6 +520,8 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
 
+# ========== معلومات النقاط ==========
+
 @router.callback_query(F.data == "show_points")
 async def show_points_info(callback: types.CallbackQuery, db_pool):
     """عرض معلومات النقاط مع توقيت دمشق"""
@@ -559,14 +566,12 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
     text += f"📊 **إجمالي المستخدم:** {abs(total_used)}\n\n"
     
     if last_update:
-        # 👇 استخدام الدالة من time_utils
         last_update_str = format_damascus_time(last_update)
         text += f"🕐 **آخر تحديث:** {last_update_str}\n\n"
     
     if recent:
         text += "**آخر الحركات (بتوقيت دمشق):**\n"
         for r in recent:
-            # 👇 استخدام الدالة من time_utils
             date = format_damascus_time(r['created_at'])
             sign = "➕" if r['points'] > 0 else "➖"
             emoji = "✅" if r['points'] > 0 else "❌"
@@ -579,6 +584,8 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+# ========== سجل النقاط المبسط ==========
 
 @router.callback_query(F.data == "points_history_simple")
 async def points_history_simple(callback: types.CallbackQuery, db_pool):
@@ -640,12 +647,10 @@ async def points_history_simple(callback: types.CallbackQuery, db_pool):
         text += f"📊 **إجمالي المكتسب:** {total_earned} | **المستخدم:** {abs(total_used)}\n"
         
         if last_update:
-            # 👇 استخدام الدالة من time_utils
             last_update_str = format_damascus_time(last_update)
             text += f"🕐 **آخر تحديث:** {last_update_str}\n\n"
         
         for h in history:
-            # 👇 استخدام الدالة من time_utils
             date = format_damascus_time(h['created_at'])
             
             sign = "➕" if h['points'] > 0 else "➖"
@@ -660,6 +665,8 @@ async def points_history_simple(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+# ========== قائمة استرداد النقاط ==========
 
 @router.callback_query(F.data == "redeem_points_menu")
 async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
@@ -717,6 +724,8 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
+# ========== معالجة طلب الاسترداد ==========
+
 @router.callback_query(F.data.startswith("redeem_"))
 async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
     """معالجة طلب الاسترداد - مع توقيت دمشق"""
@@ -742,7 +751,6 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         if error:
             await callback.answer(f"❌ {error}", show_alert=True)
         else:
-            # 👇 استخدام الدالة من time_utils
             current_time = get_damascus_time_now().strftime("%Y-%m-%d %H:%M:%S")
             
             await callback.message.edit_text(
@@ -778,6 +786,8 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 
     except Exception as e:
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+
+# ========== العودة للملف الشخصي ==========
 
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
@@ -864,6 +874,8 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         parse_mode="Markdown"
     )
 
+# ========== لوحة تحكم المشرفين ==========
+
 @router.message(F.text == "🛠 لوحة التحكم")
 async def admin_control_panel(message: types.Message, db_pool):
     """لوحة تحكم المشرفين"""
@@ -892,6 +904,8 @@ async def admin_control_panel(message: types.Message, db_pool):
             "🔸 اختر الإجراء المطلوب:",
             reply_markup=builder.as_markup()
         )
+
+# ========== المساعدة ==========
 
 @router.message(F.text == "❓ مساعدة")
 async def show_help(message: types.Message):
