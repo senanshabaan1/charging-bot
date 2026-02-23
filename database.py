@@ -661,6 +661,101 @@ async def generate_referral_code(pool, user_id):
         )
         return code
 
+# في database.py - أضف في قسم الإحالة
+
+async def check_duplicate_referral(pool, referrer_id, referred_id):
+    """التحقق من عدم تكرار الإحالة"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من السجل
+            count = await conn.fetchval('''
+                SELECT COUNT(*) FROM points_history 
+                WHERE user_id = $1 
+                  AND action = 'referral' 
+                  AND description LIKE $2
+            ''', referrer_id, f'%{referred_id}%')
+            
+            if count > 0:
+                return True, "تمت إحالة هذا المستخدم مسبقاً"
+            
+            # التحقق من referred_by
+            referred_by = await conn.fetchval(
+                "SELECT referred_by FROM users WHERE user_id = $1",
+                referred_id
+            )
+            
+            if referred_by:
+                return True, f"المستخدم لديه إحالة سابقة ({referred_by})"
+            
+            return False, None
+    except Exception as e:
+        logging.error(f"❌ خطأ في التحقق من تكرار الإحالة: {e}")
+        return True, str(e)
+
+async def get_referral_stats(pool, user_id):
+    """إحصائيات مفصلة عن الإحالات"""
+    try:
+        async with pool.acquire() as conn:
+            # عدد المحالين الفريدين
+            unique_referrals = await conn.fetchval('''
+                SELECT COUNT(DISTINCT description) 
+                FROM points_history 
+                WHERE user_id = $1 AND action = 'referral'
+            ''', user_id) or 0
+            
+            # آخر 5 إحالات
+            recent = await conn.fetch('''
+                SELECT description, created_at 
+                FROM points_history 
+                WHERE user_id = $1 AND action = 'referral'
+                ORDER BY created_at DESC
+                LIMIT 5
+            ''', user_id)
+            
+            # مجموع النقاط من الإحالات
+            total_points = await conn.fetchval('''
+                SELECT COALESCE(SUM(points), 0)
+                FROM points_history 
+                WHERE user_id = $1 AND action = 'referral'
+            ''', user_id) or 0
+            
+            return {
+                'unique_referrals': unique_referrals,
+                'total_points': total_points,
+                'recent': recent
+            }
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب إحصائيات الإحالة: {e}")
+        return None
+# في database.py - كشف النشاط المشبوه
+
+async def detect_suspicious_referrals(pool, user_id, threshold=5):
+    """كشف محاولات الإحالة المشبوهة (نفس المستخدم عدة مرات)"""
+    try:
+        async with pool.acquire() as conn:
+            # البحث عن أنماط مشبوهة
+            suspicious = await conn.fetch('''
+                SELECT 
+                    description,
+                    COUNT(*) as attempts,
+                    MIN(created_at) as first_attempt,
+                    MAX(created_at) as last_attempt
+                FROM points_history 
+                WHERE user_id = $1 
+                  AND action = 'referral'
+                GROUP BY description
+                HAVING COUNT(*) > $2
+                ORDER BY attempts DESC
+            ''', user_id, threshold)
+            
+            if suspicious:
+                logging.warning(f"⚠️ نشاط إحالة مشبوه للمستخدم {user_id}: {suspicious}")
+                
+            return suspicious
+    except Exception as e:
+        logging.error(f"❌ خطأ في كشف النشاط المشبوه: {e}")
+        return []
+
 async def add_points(pool, user_id, points, action, description):
     """إضافة نقاط للمستخدم وتسجيلها في السجل"""
     try:
@@ -727,8 +822,10 @@ async def add_points_history(db_pool, user_id, points, action, description):
         logging.error(f"❌ خطأ في إضافة سجل نقاط للمستخدم {user_id}: {e}")
         return False
 
+# في database.py - تحديث دالة process_referral
+
 async def process_referral(pool, referred_user_id, referrer_code):
-    """معالجة الإحالة عند تسجيل مستخدم جديد"""
+    """معالجة الإحالة عند تسجيل مستخدم جديد - مع منع التكرار"""
     try:
         async with pool.acquire() as conn:
             # البحث عن المستخدم الذي قام بالإحالة
@@ -737,34 +834,70 @@ async def process_referral(pool, referred_user_id, referrer_code):
                 referrer_code
             )
             
-            if referrer and referrer['user_id'] != referred_user_id:
-                # تسجيل من أحال المستخدم
-                await conn.execute(
-                    "UPDATE users SET referred_by = $1, referral_count = referral_count + 1 WHERE user_id = $2",
-                    referrer['user_id'], referred_user_id
-                )
-                
-                # الحصول على قيمة النقاط من الإعدادات
-                points = await conn.fetchval(
-                    "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
-                )
-                points = int(points) if points else 1
-                
-                # إضافة نقاط للمستخدم الذي قام بالإحالة
-                await add_points(pool, referrer['user_id'], points, 'referral', 
-                                 f'نقاط إحالة للمستخدم {referred_user_id}')
-                
-                # تحديث أرباح الإحالة
-                await conn.execute(
-                    "UPDATE users SET referral_earnings = referral_earnings + $1 WHERE user_id = $2",
-                    points, referrer['user_id']
-                )
-                
-                return referrer['user_id']
-            return None
+            if not referrer or referrer['user_id'] == referred_user_id:
+                return None, "كود إحالة غير صالح"
+            
+            # التحقق من عدم وجود إحالة سابقة
+            existing = await conn.fetchval(
+                "SELECT referred_by FROM users WHERE user_id = $1",
+                referred_user_id
+            )
+            
+            if existing:
+                return None, f"المستخدم لديه إحالة سابقة ({existing})"
+            
+            # التحقق من عدم تكرار الإحالة في السجل
+            already_referred = await conn.fetchval('''
+                SELECT COUNT(*) FROM points_history 
+                WHERE user_id = $1 
+                  AND action = 'referral' 
+                  AND description LIKE $2
+            ''', referrer['user_id'], f'%{referred_user_id}%')
+            
+            if already_referred > 0:
+                return None, "تمت إحالة هذا المستخدم مسبقاً"
+            
+            # ====== تطبيق الإحالة ======
+            # تحديث بيانات المُحيل
+            points = await conn.fetchval(
+                "SELECT value::integer FROM bot_settings WHERE key = 'points_per_referral'"
+            ) or 1
+            
+            await conn.execute('''
+                UPDATE users 
+                SET referral_count = referral_count + 1,
+                    total_points = total_points + $1,
+                    referral_earnings = referral_earnings + $1
+                WHERE user_id = $2
+            ''', points, referrer['user_id'])
+            
+            # تحديث المستخدم الجديد
+            await conn.execute(
+                "UPDATE users SET referred_by = $1 WHERE user_id = $2",
+                referrer['user_id'], referred_user_id
+            )
+            
+            # تسجيل في سجل النقاط
+            await conn.execute('''
+                INSERT INTO points_history (user_id, points, action, description)
+                VALUES ($1, $2, $3, $4)
+            ''', referrer['user_id'], points, 'referral', f'إحالة المستخدم {referred_user_id}')
+            
+            # جلب الرصيد الجديد
+            new_points = await conn.fetchval(
+                "SELECT total_points FROM users WHERE user_id = $1",
+                referrer['user_id']
+            )
+            
+            return {
+                'referrer_id': referrer['user_id'],
+                'points': points,
+                'new_total': new_points
+            }, None
+            
     except Exception as e:
-        logging.error(f"❌ خطأ في معالجة الإحالة: {e}")
-        return None
+        logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
+        return None, str(e)
 
 async def get_user_points(pool, user_id):
     """جلب عدد نقاط المستخدم"""
