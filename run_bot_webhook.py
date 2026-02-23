@@ -9,12 +9,12 @@ from config import TOKEN, ADMIN_ID
 from database import (
     init_db, get_pool, fix_points_history_table, 
     set_database_timezone, update_old_records_timezone, 
-    get_report_settings, get_bot_status, get_maintenance_message,
-    DAMASCUS_TZ
+    get_report_settings, DAMASCUS_TZ
 )
 from handlers import (
     start, deposit, services, admin, reports, profile
 )
+from handlers.middleware import BotStatusMiddleware, refresh_bot_status_cache
 import pytz
 from datetime import datetime
 from aiogram.types import BotCommand
@@ -55,6 +55,9 @@ async def on_startup(bot: Bot, base_url: str, db_pool):
     try:
         # تعيين الأوامر
         await set_bot_commands(bot)
+        
+        # تحديث كاش حالة البوت
+        await refresh_bot_status_cache(db_pool)
         
         # تعيين webhook
         webhook_url = f"{base_url}/webhook"
@@ -111,51 +114,6 @@ async def init_scheduler(bot: Bot, db_pool):
         logger.info(f"✅ تم تفعيل التقرير اليومي (الساعة {report_time})")
     except Exception as e:
         logger.error(f"❌ خطأ في تهيئة الجدولة: {e}")
-
-# ============= Middleware للتحقق من حالة البوت =============
-
-async def is_user_admin(user_id):
-    """التحقق من صلاحيات المستخدم"""
-    from config import ADMIN_ID, MODERATORS
-    return user_id == ADMIN_ID or user_id in MODERATORS
-
-async def bot_status_middleware(handler, event, data):
-    """ميدل وير موحد للتحقق من حالة البوت"""
-    # التحقق من أوامر الإلغاء - تمريرها فوراً
-    if hasattr(event, 'text') and event.text:
-        if event.text.startswith(('/cancel', '/الغاء', '/رجوع', '/start', '/help')):
-            return await handler(event, data)
-    
-    # التحقق من الكولباك - السماح ببعض الأزرار الأساسية
-    if hasattr(event, 'data') and event.data:
-        if event.data in ['back_to_main', 'back_to_admin', 'check_subscription']:
-            return await handler(event, data)
-    
-    pool = data.get('db_pool')
-    if not pool:
-        return await handler(event, data)
-    
-    user = event.from_user
-    
-    # التحقق من حالة البوت
-    try:
-        bot_status = await get_bot_status(pool)
-        
-        # إذا البوت متوقف والمستخدم ليس مشرف
-        if not bot_status and not await is_user_admin(user.id):
-            msg = await get_maintenance_message(pool)
-            
-            if isinstance(event, types.Message):
-                await event.answer(f"🛠 {msg}")
-            elif isinstance(event, types.CallbackQuery):
-                await event.answer(msg, show_alert=True)
-            return
-    except Exception as e:
-        logger.error(f"❌ خطأ في ميدل وير الحالة: {e}")
-    
-    return await handler(event, data)
-
-# ============================================================
 
 async def main():
     """الدالة الرئيسية لتشغيل البوت"""
@@ -221,9 +179,9 @@ async def main():
         # إنشاء البوت
         bot = Bot(token=TOKEN)
         
-        # إضافة الميدل وير الموحد
-        dp.message.middleware()(bot_status_middleware)
-        dp.callback_query.middleware()(bot_status_middleware)
+        # ✅ إضافة ميدل وير باستخدام الكلاس من ملف middleware.py
+        dp.message.middleware(BotStatusMiddleware(db_pool))
+        dp.callback_query.middleware(BotStatusMiddleware(db_pool))
         
         # تهيئة الجدولة
         await init_scheduler(bot, db_pool)
