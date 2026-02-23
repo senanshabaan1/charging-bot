@@ -187,7 +187,6 @@ async def cmd_start(message: types.Message, db_pool):
                 "• 🔗 دعوة أصدقائك وكسب نقاط إضافية\n\n"
                 "🔹 لبدء الاستخدام، اختر من القائمة أدناه."
             )
-            # ================================================
 
             # ========== معالجة الإحالة للمستخدم الجديد ==========
             if referral_code:
@@ -203,54 +202,88 @@ async def cmd_start(message: types.Message, db_pool):
                     if referrer and referrer['user_id'] != user_id:
                         print(f"✅ تم العثور على المُحيل: {referrer['user_id']}")
 
-                        # تسجيل من أحال المستخدم
-                        await conn.execute(
-                            "UPDATE users SET referred_by = $1 WHERE user_id = $2",
-                            referrer['user_id'], user_id
+                        # ========== التحقق من التكرار ==========
+                        # 1. التحقق مما إذا كان هذا المستخدم قد سبق له الدخول عبر إحالة
+                        existing_referral = await conn.fetchval(
+                            "SELECT referred_by FROM users WHERE user_id = $1",
+                            user_id
                         )
-
-                        # زيادة عدد المحالين
-                        await conn.execute(
-                            "UPDATE users SET referral_count = referral_count + 1 WHERE user_id = $1",
-                            referrer['user_id']
-                        )
-
-                        # الحصول على قيمة النقاط من الإعدادات
-                        points = await conn.fetchval(
-                            "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
-                        )
-                        points = int(points) if points else 1
-
-                        # إضافة نقاط للمستخدم الذي قام بالإحالة
-                        await conn.execute(
-                            "UPDATE users SET total_points = total_points + $1, referral_earnings = referral_earnings + $1 WHERE user_id = $2",
-                            points, referrer['user_id']
-                        )
-
-                        # تسجيل في سجل النقاط
-                        try:
-                            await conn.execute('''
-                                INSERT INTO points_history (user_id, points, action, description, created_at)
-                                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-                            ''', referrer['user_id'], points, 'referral', f'نقاط إحالة للمستخدم {user_id}')
-                            print(f"✅ تم تسجيل النقاط في سجل النقاط")
-                        except Exception as e:
-                            print(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
-
-                        welcome_text += f"\n\n🎁 تم تسجيل دخولك عن طريق رابط إحالة! صديقك حصل على {points} نقاط إضافية."
-
-                        # إرسال إشعار للمستخدم الذي قام بالإحالة
-                        try:
-                            await message.bot.send_message(
-                                referrer['user_id'],
-                                f"🎉 **مبروك!**\n\n"
-                                f"@{message.from_user.username or 'مستخدم جديد'} سجل في البوت عبر رابط الإحالة الخاص بك!\n"
-                                f"⭐ لقد حصلت على {points} نقاط إضافية.\n\n"
-                                f"💰 رصيد نقاطك الحالي: {(await conn.fetchval('SELECT total_points FROM users WHERE user_id = $1', referrer['user_id'])) or 0}"
+            
+                        # 2. التحقق مما إذا كان هذا المُحيل قد قام بإحالة هذا المستخدم سابقاً
+                        already_referred = await conn.fetchval('''
+                            SELECT COUNT(*) FROM points_history 
+                            WHERE user_id = $1 
+                              AND action = 'referral' 
+                              AND description LIKE $2
+                        ''', referrer['user_id'], f'%{user_id}%')
+            
+                        if existing_referral:
+                            print(f"⚠️ المستخدم {user_id} لديه إحالة سابقة: {existing_referral}")
+                            welcome_text += f"\n\n🔗 لديك إحالة مسجلة مسبقاً، لا يمكن تكرارها."
+            
+                        elif already_referred > 0:
+                            print(f"⚠️ المُحيل {referrer['user_id']} حاول إعادة إحالة {user_id}")
+                            # يمكن إرسال تحذير للمشرف أو تجاهل
+                            try:
+                                await message.bot.send_message(
+                                    ADMIN_ID,
+                                    f"⚠️ **محاولة تكرار إحالة مشبوهة**\n\n"
+                                    f"👤 المُحيل: {referrer['user_id']}\n"
+                                    f"👤 المستهدف: {user_id}\n"
+                                    f"📅 التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                                )
+                            except:
+                                pass
+             
+                        else:
+                            # تسجيل من أحال المستخدم
+                            await conn.execute(
+                                "UPDATE users SET referred_by = $1 WHERE user_id = $2",
+                                referrer['user_id'], user_id
                             )
-                            print(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
-                        except Exception as e:
-                            print(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
+
+                            # زيادة عدد المحالين
+                            await conn.execute(
+                                "UPDATE users SET referral_count = referral_count + 1 WHERE user_id = $1",
+                                referrer['user_id']
+                            )
+
+                            # الحصول على قيمة النقاط من الإعدادات
+                            points = await conn.fetchval(
+                                "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
+                            )
+                            points = int(points) if points else 1
+
+                            # إضافة نقاط للمستخدم الذي قام بالإحالة
+                            await conn.execute(
+                                "UPDATE users SET total_points = total_points + $1, referral_earnings = referral_earnings + $1 WHERE user_id = $2",
+                                points, referrer['user_id']
+                            )
+
+                            # تسجيل في سجل النقاط
+                            try:
+                                await conn.execute('''
+                                    INSERT INTO points_history (user_id, points, action, description, created_at)
+                                    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                                ''', referrer['user_id'], points, 'referral', f'نقاط إحالة للمستخدم {user_id}')
+                                print(f"✅ تم تسجيل النقاط في سجل النقاط")
+                            except Exception as e:
+                                print(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
+
+                            welcome_text += f"\n\n🎁 تم تسجيل دخولك عن طريق رابط إحالة! صديقك حصل على {points} نقاط إضافية."
+
+                            # إرسال إشعار للمستخدم الذي قام بالإحالة
+                            try:
+                                await message.bot.send_message(
+                                    referrer['user_id'],
+                                    f"🎉 **مبروك!**\n\n"
+                                    f"@{message.from_user.username or 'مستخدم جديد'} سجل في البوت عبر رابط الإحالة الخاص بك!\n"
+                                    f"⭐ لقد حصلت على {points} نقاط إضافية.\n\n"
+                                    f"💰 رصيد نقاطك الحالي: {(await conn.fetchval('SELECT total_points FROM users WHERE user_id = $1', referrer['user_id'])) or 0}"
+                                )
+                                print(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
+                            except Exception as e:
+                                print(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
 
                     else:
                         print(f"⚠️ لم يتم العثور على مُحيل للكود: {referral_code} أو هو نفس المستخدم")
@@ -259,7 +292,7 @@ async def cmd_start(message: types.Message, db_pool):
                     print(f"❌ خطأ في معالجة الإحالة: {e}")
                     import traceback
                     traceback.print_exc()
-            # =================================================
+         # =================================================
 
         else:
             # مستخدم موجود - تحديث المعلومات
