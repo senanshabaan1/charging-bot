@@ -1285,7 +1285,7 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_edit_option_value)
 async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
-    """حفظ القيمة المعدلة - نسخة نهائية بدون محاولة تعديل رسائل قديمة"""
+    """حفظ القيمة المعدلة - مع أسماء الأعمدة الصحيحة"""
     if not is_admin(message.from_user.id):
         return
     
@@ -1310,14 +1310,16 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
     try:
         update_value = None
         field_name = ""
+        db_column = ""  # اسم العمود في قاعدة البيانات
         
-        # معالجة حسب نوع الحقل
+        # معالجة حسب نوع الحقل مع أسماء الأعمدة الصحيحة
         if field == 'name':
             if len(value) < 2:
                 await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول (على الأقل حرفين):")
                 return
             update_value = value
             field_name = "الاسم"
+            db_column = "name"  # ✅ صحيح
             
         elif field == 'quantity':
             try:
@@ -1327,6 +1329,7 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                     return
                 update_value = quantity
                 field_name = "الكمية"
+                db_column = "quantity"  # ✅ صحيح
             except ValueError:
                 await message.answer("❌ يرجى إدخال رقم صحيح للكمية:")
                 return
@@ -1339,6 +1342,7 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                     return
                 update_value = price
                 field_name = "سعر المورد"
+                db_column = "price_usd"  # ✅ التصحيح: price_usd وليس price
             except ValueError:
                 await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):")
                 return
@@ -1351,6 +1355,8 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                     return
                 update_value = profit
                 field_name = "نسبة الربح"
+                # نسبة الربح في جدول applications
+                db_column = "profit_percentage"
             except ValueError:
                 await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):")
                 return
@@ -1358,6 +1364,7 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
         elif field == 'desc':
             update_value = None if value == '-' else value
             field_name = "الوصف"
+            db_column = "description"  # ✅ التصحيح: description وليس desc
         
         else:
             await message.answer("❌ حقل غير معروف")
@@ -1367,14 +1374,14 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
         # تحديث قاعدة البيانات
         async with db_pool.acquire() as conn:
             if field == 'profit':
-                # نسبة الربح تخزن في التطبيق (المنتج)
+                # نسبة الربح تخزن في جدول applications
                 option = await conn.fetchrow(
                     "SELECT product_id FROM product_options WHERE id = $1",
                     option_id
                 )
                 if option:
                     await conn.execute(
-                        "UPDATE applications SET profit_percentage = $1 WHERE id = $2",
+                        f"UPDATE applications SET {db_column} = $1 WHERE id = $2",
                         update_value, option['product_id']
                     )
                     
@@ -1391,11 +1398,10 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                     await state.clear()
                     return
             else:
-                # تحديث الخيار مباشرة
-                await conn.execute(
-                    f"UPDATE product_options SET {field} = $1 WHERE id = $2",
-                    update_value, option_id
-                )
+                # تحديث الخيار مباشرة في جدول product_options
+                # ✅ استخدام علامات اقتباس مزدوجة لتجنب مشاكل الكلمات المحجوزة
+                query = f'UPDATE product_options SET "{db_column}" = $1 WHERE id = $2'
+                await conn.execute(query, update_value, option_id)
                 
                 # جلب معلومات الخيار بعد التحديث
                 updated_option = await conn.fetchrow(
@@ -1403,33 +1409,47 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                     option_id
                 )
                 
-                await message.answer(
-                    f"✅ **تم التحديث بنجاح!**\n\n"
-                    f"📦 المنتج: **{updated_option['product_name']}**\n"
-                    f"🔧 الخيار: **{updated_option['name']}**\n"
-                    f"📝 الحقل المعدل: **{field_name}**\n"
-                    f"📊 القيمة الجديدة: **{update_value}**"
-                )
+                if updated_option:
+                    await message.answer(
+                        f"✅ **تم التحديث بنجاح!**\n\n"
+                        f"📦 المنتج: **{updated_option['product_name']}**\n"
+                        f"🔧 الخيار: **{updated_option['name']}**\n"
+                        f"📝 الحقل المعدل: **{field_name}**\n"
+                        f"📊 القيمة الجديدة: **{update_value}**"
+                    )
+                else:
+                    await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
         
         await state.clear()
         
-        # إرسال رسالة منفصلة للعودة للقائمة (بدون محاولة تعديل الرسالة القديمة)
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(
-            text="🔙 العودة لقائمة الخيارات",
-            callback_data=f"prod_options_{updated_option['product_id'] if 'updated_option' in locals() else option['product_id']}"
-        ))
+        # العودة لقائمة الخيارات
+        if 'updated_option' in locals() and updated_option:
+            product_id = updated_option['product_id']
+        else:
+            # جلب product_id من قاعدة البيانات
+            async with db_pool.acquire() as conn:
+                opt = await conn.fetchrow(
+                    "SELECT product_id FROM product_options WHERE id = $1",
+                    option_id
+                )
+                product_id = opt['product_id'] if opt else None
         
-        await message.answer(
-            "🔍 اختر ما تريد فعله الآن:",
-            reply_markup=builder.as_markup()
-        )
+        if product_id:
+            builder = InlineKeyboardBuilder()
+            builder.row(types.InlineKeyboardButton(
+                text="🔙 العودة لقائمة الخيارات",
+                callback_data=f"prod_options_{product_id}"
+            ))
+            
+            await message.answer(
+                "🔍 اختر ما تريد فعله الآن:",
+                reply_markup=builder.as_markup()
+            )
         
     except Exception as e:
         logger.error(f"❌ خطأ في حفظ التعديل: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
-
 # ============= حذف خيار =============
 
 @router.callback_query(F.data.startswith("delete_option_"))
