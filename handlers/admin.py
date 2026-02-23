@@ -3,19 +3,19 @@ from aiogram import Router, F, types, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from config import ADMIN_ID, MODERATORS, USD_TO_SYP, DEPOSIT_GROUP, ORDERS_GROUP
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.enums import ParseMode
+from config import ADMIN_ID, MODERATORS, DEPOSIT_GROUP, ORDERS_GROUP
 import config
 from datetime import datetime
 import asyncio
 import logging
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from handlers.deposit import get_damascus_time
-from aiogram import types
-from aiogram.utils import markdown as md
-from aiogram.enums import ParseMode
 import re
-from handlers.keyboards import get_cancel_keyboard, get_back_keyboard, get_main_menu_keyboard
-from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
+import random
+import string
+
+from handlers.time_utils import get_damascus_time_now
+from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard, get_cancel_keyboard
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
@@ -23,89 +23,115 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+# ============= دوال مساعدة =============
+
+def is_admin(user_id):
+    """التحقق من صلاحيات المشرف"""
+    return user_id == ADMIN_ID or user_id in MODERATORS
+
 def format_message_text(text):
-    """تحويل النص من Markdown إلى HTML للتنسيق الصحيح"""
+    """تحويل النص من Markdown إلى HTML"""
     if not text:
         return text
-        
-    # تحويل **نص** إلى <b>نص</b>
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    # تحويل *نص* إلى <i>نص</i>
     text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-    # تحويل `نص` إلى <code>نص</code>
     text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
-    # تحويل __نص__ إلى <u>نص</u>
     text = re.sub(r'__(.*?)__', r'<u>\1</u>', text)
     return text
 
+async def safe_edit_message(message, text, reply_markup=None):
+    """تعديل الرسالة بأمان مع معالجة الأخطاء"""
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup)
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup)
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في تعديل الرسالة: {e}")
+        return False
+
+# ============= حالات FSM =============
+
 class AdminStates(StatesGroup):
+    # الإعدادات العامة
     waiting_new_rate = State()
-    waiting_broadcast_msg = State()
+    waiting_maintenance_msg = State()
+    waiting_new_syriatel_numbers = State()
+    
+    # إدارة المستخدمين
     waiting_user_id = State()
     waiting_balance_amount = State()
     waiting_user_info = State()
-    waiting_maintenance_msg = State()
-    waiting_points_settings = State()
     waiting_points_amount = State()
+    
+    # إدارة النقاط
+    waiting_points_settings = State()
     waiting_redeem_action = State()
     waiting_redeem_notes = State()
+    
+    # إدارة المنتجات
     waiting_product_name = State()
     waiting_product_price = State()
     waiting_product_min = State()
     waiting_product_profit = State()
     waiting_product_category = State()
     waiting_product_id = State()
-    waiting_new_syriatel_numbers = State()
-    waiting_reset_confirm = State()
-    waiting_reset_rate = State()
-    waiting_admin_id = State()
-    waiting_admin_info = State()
-    waiting_admin_remove = State()
-    waiting_vip_user_id = State()
-    waiting_vip_level = State()
-    waiting_vip_discount = State()
-    waiting_vip_downgrade_reason = State()
-    waiting_custom_message_user = State()
-    waiting_custom_message_text = State()
-    waiting_new_game_name = State()
-    waiting_new_game_type = State()
     
-    # حالات إدارة الخيارات
+    # إدارة الخيارات
     waiting_option_name = State()
     waiting_option_quantity = State()
     waiting_option_supplier_price = State()
     waiting_option_profit = State()
     waiting_option_description = State()
-    
-    # حالات تعديل الخيارات
     waiting_edit_option_field = State()
     waiting_edit_option_value = State()
+    
+    # إدارة الألعاب الجديدة
+    waiting_new_game_name = State()
+    waiting_new_game_type = State()
+    
+    # إدارة المشرفين
+    waiting_admin_id = State()
+    waiting_admin_info = State()
+    waiting_admin_remove = State()
+    
+    # إدارة VIP
+    waiting_vip_user_id = State()
+    waiting_vip_level = State()
+    waiting_vip_discount = State()
+    waiting_vip_downgrade_reason = State()
+    
+    # الرسائل
+    waiting_broadcast_msg = State()
+    waiting_custom_message_user = State()
+    waiting_custom_message_text = State()
+    
+    # التصفير
+    waiting_reset_rate = State()
 
-def is_admin(user_id):
-    return user_id == ADMIN_ID or user_id in MODERATORS
+# ============= معالج الإلغاء العام =============
 
-
-@router.message(F.text == "❌ إلغاء")
-async def global_cancel_handler(message: types.Message, state: FSMContext):
+@router.message(F.text.in_(["❌ إلغاء", "/cancel", "/الغاء", "/رجوع"]))
+async def global_cancel_handler(message: types.Message, state: FSMContext, db_pool):
     """معالج الإلغاء الموحد"""
     current_state = await state.get_state()
     if current_state is not None:
         await state.clear()
     
-    # ✅ استخدم الدالة المستوردة مباشرة
     from database import is_admin_user
-    
-    is_admin_user_flag = await is_admin_user(None, message.from_user.id)
+    is_admin_user_flag = await is_admin_user(db_pool, message.from_user.id)
     
     await message.answer(
         "✅ تم إلغاء العملية",
-        reply_markup=get_main_menu_keyboard(is_admin_user_flag)  # 👈 مستوردة من keyboards
+        reply_markup=get_main_menu_keyboard(is_admin_user_flag)
     )
 
 # ============= لوحة التحكم الرئيسية =============
 
 @router.message(Command("admin"))
 async def admin_panel(message: types.Message, db_pool):
+    """عرض لوحة تحكم الإدارة"""
     if not is_admin(message.from_user.id):
         return
 
@@ -114,54 +140,41 @@ async def admin_panel(message: types.Message, db_pool):
     status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
 
     kb = [
-        [
-            types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
-            types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")
-        ],
-        [
-            types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
-            types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")
-        ],
-        [
-            types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
-            types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")
-        ],
-        [
-            types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
-            types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")
-        ],
-        [
-            types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
-            types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points")
-        ],
-        [
-            types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
-            types.InlineKeyboardButton(text="📊 تقارير ونسخ احتياطي", callback_data="reports_menu")
-        ],
-        [
-            types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
-            types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product")
-        ],
-        [
-            types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
-            types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products")
-        ],
-        [
-            types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
-            types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot")
-        ],
-        [
-            types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
-            types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
-        ],
-        [
-            types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
-            types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message")
-        ],
-        [
-            types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
-            types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options")
-        ],
+        [types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
+         types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")],
+        
+        [types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
+         types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")],
+        
+        [types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
+         types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
+        
+        [types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
+         types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")],
+        
+        [types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
+         types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points")],
+        
+        [types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
+         types.InlineKeyboardButton(text="📊 تقارير ونسخ احتياطي", callback_data="reports_menu")],
+        
+        [types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
+         types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product")],
+        
+        [types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
+         types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products")],
+        
+        [types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
+         types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot")],
+        
+        [types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
+         types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")],
+        
+        [types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
+         types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message")],
+        
+        [types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
+         types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options")],
     ]
     
     await message.answer(
@@ -171,6 +184,21 @@ async def admin_panel(message: types.Message, db_pool):
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb),
         parse_mode="Markdown"
     )
+
+# ============= العودة للوحة التحكم =============
+
+@router.callback_query(F.data == "back_to_admin")
+@router.callback_query(F.data == "back_to_admin_panel")
+async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
+    """العودة للوحة التحكم الرئيسية"""
+    from database import get_bot_status
+    
+    bot_status = await get_bot_status(db_pool)
+    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
+    
+    await admin_panel(callback.message, db_pool)
+
+# ============= تشغيل/إيقاف البوت =============
 
 @router.callback_query(F.data == "toggle_bot")
 async def toggle_bot(callback: types.CallbackQuery, db_pool):
@@ -185,7 +213,6 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     
     await set_bot_status(db_pool, new_status)
     
-    # تحديث الكاش فوراً
     from handlers.middleware import refresh_bot_status_cache
     await refresh_bot_status_cache(db_pool)
     
@@ -199,7 +226,6 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     )
     
     # إرسال إشعار للمشرفين
-    from config import ADMIN_ID, MODERATORS
     admin_ids = [ADMIN_ID] + MODERATORS
     for admin_id in admin_ids:
         if admin_id and admin_id != callback.from_user.id:
@@ -211,6 +237,8 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
             except:
                 pass
 
+# ============= رسالة الصيانة =============
+
 @router.callback_query(F.data == "edit_maintenance")
 async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء تعديل رسالة الصيانة"""
@@ -219,7 +247,9 @@ async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContex
     
     await callback.message.answer(
         "📝 أرسل رسالة الصيانة الجديدة:\n\n"
-        "(هذه الرسالة ستظهر للمستخدمين عند إيقاف البوت)"
+        "(هذه الرسالة ستظهر للمستخدمين عند إيقاف البوت)\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_maintenance_msg)
 
@@ -239,6 +269,7 @@ async def save_maintenance_message(message: types.Message, state: FSMContext, db
     await state.clear()
 
 # ============= إدارة أرقام سيرياتل =============
+
 @router.callback_query(F.data == "edit_syriatel")
 async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext):
     """تعديل أرقام سيرياتل كاش"""
@@ -255,27 +286,25 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext):
         f"مثال:\n"
         f"74091109\n"
         f"63826779\n"
-        f"0912345678"
+        f"0912345678\n\n"
+        f"أو أرسل /cancel للإلغاء"
     )
     
-    await callback.message.answer(text, parse_mode="Markdown")
+    await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_cancel_keyboard())
     await state.set_state(AdminStates.waiting_new_syriatel_numbers)
 
 @router.message(AdminStates.waiting_new_syriatel_numbers)
 async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
-    """حفظ أرقام سيرياتل الجديدة في قاعدة البيانات"""
+    """حفظ أرقام سيرياتل الجديدة"""
     if not is_admin(message.from_user.id):
         return
     
-    # تقسيم الأرقام (كل سطر رقم)
     numbers = [line.strip() for line in message.text.split('\n') if line.strip()]
     
-    # حفظ في قاعدة البيانات
     from database import set_syriatel_numbers
     success = await set_syriatel_numbers(db_pool, numbers)
     
     if success:
-        # تحديث المتغير في config مؤقتاً
         import config
         config.SYRIATEL_NUMS = numbers
         
@@ -288,6 +317,8 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
     await message.answer(text, parse_mode="Markdown")
     await state.clear()
 
+# ============= إرسال رسالة لمستخدم محدد =============
+
 @router.callback_query(F.data == "send_custom_message")
 async def send_custom_message_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء إرسال رسالة لمستخدم محدد"""
@@ -298,16 +329,17 @@ async def send_custom_message_start(callback: types.CallbackQuery, state: FSMCon
         "✉️ **إرسال رسالة لمستخدم محدد**\n\n"
         "أدخل آيدي المستخدم (ID) أو اليوزر نيم:\n"
         "مثال: `123456789` أو `@username`\n\n"
-        "أو أرسل /cancel للإلغاء"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_custom_message_user)
+
 @router.message(AdminStates.waiting_custom_message_user)
 async def get_custom_message_user(message: types.Message, state: FSMContext, db_pool):
     """استقبال آيدي المستخدم"""
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
     if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
         await state.clear()
         await message.answer("✅ تم إلغاء العملية")
@@ -315,9 +347,7 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
     
     search_term = message.text.strip()
     
-    # البحث عن المستخدم
     async with db_pool.acquire() as conn:
-        # محاولة البحث بالآيدي
         try:
             user_id = int(search_term)
             user = await conn.fetchrow(
@@ -325,7 +355,6 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
                 user_id
             )
         except ValueError:
-            # البحث باليوزر نيم
             username = search_term.replace('@', '')
             user = await conn.fetchrow(
                 "SELECT user_id, username, first_name FROM users WHERE username = $1",
@@ -336,11 +365,11 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
         await message.answer(
             "❌ **المستخدم غير موجود**\n\n"
             "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.\n"
-            "أو أرسل /cancel للإلغاء"
+            "أو أرسل /cancel للإلغاء",
+            reply_markup=get_cancel_keyboard()
         )
         return
     
-    # حفظ معلومات المستخدم
     await state.update_data(
         target_user=user['user_id'],
         target_username=user['username'] or user['first_name'] or str(user['user_id'])
@@ -353,16 +382,18 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
         f"✏️ يمكنك استخدام Markdown للتنسيق:\n"
         f"• **نص عريض**\n"
         f"• *نص مائل*\n"
-        f"• `كود`"
+        f"• `كود`\n\n"
+        f"أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_custom_message_text)
+
 @router.message(AdminStates.waiting_custom_message_text)
 async def send_custom_message_text(message: types.Message, state: FSMContext, bot: Bot):
     """إرسال الرسالة للمستخدم المحدد"""
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
     if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
         await state.clear()
         await message.answer("✅ تم إلغاء العملية")
@@ -374,7 +405,6 @@ async def send_custom_message_text(message: types.Message, state: FSMContext, bo
     target_username = data['target_username']
     
     try:
-        # محاولة إرسال مع Markdown
         await bot.send_message(
             target_user,
             f"✉️ **رسالة خاصة من الإدارة**\n\n{custom_text}",
@@ -389,7 +419,6 @@ async def send_custom_message_text(message: types.Message, state: FSMContext, bo
         )
         
     except Exception as e:
-        # إذا فشل Markdown، نجرب إرسال نص عادي
         try:
             await bot.send_message(
                 target_user,
@@ -413,13 +442,13 @@ async def send_custom_message_text(message: types.Message, state: FSMContext, bo
     await state.clear()
 
 # ============= إدارة المنتجات =============
+
 @router.callback_query(F.data == "add_product")
 async def add_product_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء إضافة منتج جديد"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # جلب الأقسام
     async with db_pool.acquire() as conn:
         categories = await conn.fetch("SELECT id, display_name FROM categories ORDER BY sort_order")
     
@@ -427,7 +456,6 @@ async def add_product_start(callback: types.CallbackQuery, state: FSMContext, db
         await callback.answer("❌ لا توجد أقسام. أضف قسماً أولاً.", show_alert=True)
         return
     
-    # عرض الأقسام للاختيار
     builder = InlineKeyboardBuilder()
     for cat in categories:
         builder.row(types.InlineKeyboardButton(
@@ -459,7 +487,9 @@ async def get_product_name(message: types.Message, state: FSMContext):
     await state.update_data(product_name=message.text)
     await message.answer(
         "💰 **أدخل سعر الوحدة بالدولار:**\n"
-        "مثال: 0.001"
+        "مثال: 0.001\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_product_price)
 
@@ -471,11 +501,13 @@ async def get_product_price(message: types.Message, state: FSMContext):
         await state.update_data(product_price=price)
         await message.answer(
             "📦 **أدخل الحد الأدنى للكمية:**\n"
-            "مثال: 100"
+            "مثال: 100\n\n"
+            "أو أرسل /cancel للإلغاء",
+            reply_markup=get_cancel_keyboard()
         )
         await state.set_state(AdminStates.waiting_product_min)
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001)")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001):", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_product_min)
 async def get_product_min(message: types.Message, state: FSMContext):
@@ -484,17 +516,19 @@ async def get_product_min(message: types.Message, state: FSMContext):
         min_units = int(message.text)
         
         if min_units <= 0:
-            return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0")
+            return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
         
         await state.update_data(product_min=min_units)
         await message.answer(
             "📈 **أدخل نسبة الربح (%):**\n"
-            "مثال: 10"
+            "مثال: 10\n\n"
+            "أو أرسل /cancel للإلغاء",
+            reply_markup=get_cancel_keyboard()
         )
         await state.set_state(AdminStates.waiting_product_profit)
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):", reply_markup=get_cancel_keyboard())
 
 @router.message(AdminStates.waiting_product_profit)
 async def get_product_profit(message: types.Message, state: FSMContext, db_pool):
@@ -526,7 +560,7 @@ async def get_product_profit(message: types.Message, state: FSMContext, db_pool)
         await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10)")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10):", reply_markup=get_cancel_keyboard())
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
@@ -582,7 +616,8 @@ async def edit_product_form(callback: types.CallbackQuery, state: FSMContext, db
         f"الربح: {product['profit_percentage']}%\n\n"
         f"📝 أرسل البيانات الجديدة بالصيغة:\n"
         f"`الاسم|السعر|الحد_الأدنى|الربح`\n\n"
-        f"مثال: `اسم جديد|0.002|200|15`"
+        f"مثال: `اسم جديد|0.002|200|15`\n\n"
+        f"أو أرسل /cancel للإلغاء"
     )
     
     await callback.message.edit_text(text, parse_mode="Markdown")
@@ -702,7 +737,8 @@ async def list_products(callback: types.CallbackQuery, db_pool):
         )
     
     await callback.message.edit_text(text, parse_mode="Markdown")
-# ============= إدارة حالة التطبيقات (تفعيل/إيقاف) =============
+
+# ============= إدارة حالة التطبيقات =============
 
 @router.callback_query(F.data == "manage_apps_status")
 async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
@@ -710,13 +746,11 @@ async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # جلب جميع الأقسام
     async with db_pool.acquire() as conn:
         categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
     
     builder = InlineKeyboardBuilder()
     
-    # زر لكل قسم
     for cat in categories:
         builder.row(types.InlineKeyboardButton(
             text=f"{cat['icon']} {cat['display_name']}",
@@ -742,13 +776,7 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     cat_id = int(callback.data.split("_")[3])
     
     async with db_pool.acquire() as conn:
-        # جلب معلومات القسم
-        category = await conn.fetchrow(
-            "SELECT * FROM categories WHERE id = $1",
-            cat_id
-        )
-        
-        # جلب تطبيقات القسم
+        category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
         apps = await conn.fetch('''
             SELECT * FROM applications 
             WHERE category_id = $1 
@@ -758,74 +786,53 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     if not apps:
         return await callback.answer("لا توجد تطبيقات في هذا القسم", show_alert=True)
     
-    text = f"{category['icon']} **{category['display_name']}**\n\n"
-    text += "اختر التطبيق لتغيير حالته:\n\n"
+    text = f"{category['icon']} **{category['display_name']}**\n\nاختر التطبيق لتغيير حالته:\n\n"
     
     builder = InlineKeyboardBuilder()
     
     for app in apps:
         status_icon = "✅" if app['is_active'] else "❌"
         button_text = f"{status_icon} {app['name']}"
-        
         builder.row(types.InlineKeyboardButton(
             text=button_text,
             callback_data=f"toggle_app_{app['id']}_{'1' if app['is_active'] else '0'}"
         ))
     
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع للأقسام",
-        callback_data="manage_apps_status"
-    ))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للأقسام", callback_data="manage_apps_status"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("toggle_app_"))
 async def toggle_app_status(callback: types.CallbackQuery, db_pool):
-    """تغيير حالة التطبيق (تفعيل/إيقاف)"""
+    """تغيير حالة التطبيق"""
     parts = callback.data.split("_")
     app_id = int(parts[2])
     current_status = bool(int(parts[3]))
     new_status = not current_status
     
     async with db_pool.acquire() as conn:
-        # تحديث حالة التطبيق
-        await conn.execute('''
-            UPDATE applications 
-            SET is_active = $1 
-            WHERE id = $2
-        ''', new_status, app_id)
-        
-        # جلب معلومات التطبيق
-        app = await conn.fetchrow(
-            "SELECT name, is_active FROM applications WHERE id = $1",
-            app_id
-        )
+        await conn.execute("UPDATE applications SET is_active = $1 WHERE id = $2", new_status, app_id)
+        app = await conn.fetchrow("SELECT name FROM applications WHERE id = $1", app_id)
     
-    status_text = "✅ **مفعل**" if new_status else "❌ **معطل**"
-    
-    # رسالة تأكيد
+    status_text = "✅ مفعل" if new_status else "❌ معطل"
     await callback.answer(f"تم تغيير حالة {app['name']} إلى {status_text}")
     
-    # العودة لقائمة التطبيقات في نفس القسم
-    # نستخرج cat_id من callback data السابق أو نجلبها من قاعدة البيانات
+    # العودة لقائمة التطبيقات
     async with db_pool.acquire() as conn:
-        app_info = await conn.fetchrow(
-            "SELECT category_id FROM applications WHERE id = $1",
-            app_id
-        )
+        app_info = await conn.fetchrow("SELECT category_id FROM applications WHERE id = $1", app_id)
     
-    # إعادة عرض القائمة
     await show_apps_for_status(
         types.CallbackQuery(
             id=callback.id,
             from_user=callback.from_user,
-            chat_instance="dummy",  # 👈 أضف هذا السطر
+            chat_instance="dummy",
             message=callback.message,
             data=f"app_status_cat_{app_info['category_id']}"
         ), 
         db_pool
     )
-# ============= إدارة خيارات المنتجات =============
+
+# ============= إدارة خيارات الألعاب =============
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
@@ -861,20 +868,10 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
             callback_data=f"prod_options_{product['id']}"
         ))
     
-    builder.row(types.InlineKeyboardButton(
-        text="➕ إضافة لعبة أو اشتراك جديد",
-        callback_data="add_new_game"
-    ))
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة لعبة أو اشتراك جديد", callback_data="add_new_game"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
     
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع للوحة التحكم",
-        callback_data="back_to_admin_panel"
-    ))
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=builder.as_markup()
-    )
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
@@ -903,33 +900,19 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
             text += "➖➖➖➖➖➖\n"
     
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="➕ إضافة خيار جديد",
-        callback_data=f"add_option_{product_id}"
-    ))
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
     
     for opt in options:
         builder.row(
-            types.InlineKeyboardButton(
-                text=f"✏️ تعديل {opt['name']}",
-                callback_data=f"edit_option_{opt['id']}"
-            ),
-            types.InlineKeyboardButton(
-                text=f"🗑️ حذف {opt['name']}",
-                callback_data=f"delete_option_{opt['id']}"
-            )
+            types.InlineKeyboardButton(text=f"✏️ تعديل {opt['name']}", callback_data=f"edit_option_{opt['id']}"),
+            types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع للقائمة",
-        callback_data="manage_options"
-    ))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
     
-    await callback.message.edit_text(
-        text,
-        reply_markup=builder.as_markup()
-    )
-# ============= إدارة خيارات المنتجات (للألعاب والاشتراكات) =============
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+# ============= إضافة خيار جديد =============
 
 @router.callback_query(F.data.startswith("add_option_"))
 async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
@@ -946,7 +929,6 @@ async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=None
     )
     
-    # إرسال رسالة مع زر إلغاء
     await callback.message.answer(
         "أدخل اسم الخيار:",
         reply_markup=get_cancel_keyboard()
@@ -1100,11 +1082,9 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     supplier_price = data['supplier_price']
     profit_percent = data['profit_percent']
     
-    # جلب سعر الصرف
     from database import get_exchange_rate
     exchange_rate = await get_exchange_rate(db_pool)
     
-    # حساب السعر النهائي
     final_price_usd = supplier_price * (1 + profit_percent / 100)
     final_price_syp = final_price_usd * exchange_rate
     
@@ -1131,19 +1111,13 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
         confirm_text += f"📝 **الوصف:**\n{description}\n\n"
     
     await message.answer(confirm_text, reply_markup=None)
-    
     await state.clear()
     
     # العودة لقائمة الخيارات
     fake_callback = types.CallbackQuery(
         id='0',
         from_user=message.from_user,
-        message=types.Message(
-            message_id=0,
-            date=datetime.now(),
-            chat=types.Chat(id=message.from_user.id, type='private'),
-            text=''
-        ),
+        message=types.Message(message_id=0, date=datetime.now(), chat=types.Chat(id=message.from_user.id, type='private'), text=''),
         data=f"prod_options_{product_id}",
         bot=message.bot
     )
@@ -1153,9 +1127,8 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
 
 @router.callback_query(F.data.startswith("edit_option_"))
 async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """عرض قائمة تعديل الخيار - نسخة مصححة"""
+    """عرض قائمة تعديل الخيار"""
     try:
-        # استخراج option_id من callback data
         parts = callback.data.split("_")
         if len(parts) >= 3 and parts[2].isdigit():
             option_id = int(parts[2])
@@ -1163,52 +1136,21 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
             await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
             return
         
-        # جلب معلومات الخيار من قاعدة البيانات
         from database import get_product_option
         option = await get_product_option(db_pool, option_id)
         
         if not option:
             return await callback.answer("❌ الخيار غير موجود", show_alert=True)
         
-        await state.update_data(
-            option_id=option_id,
-            product_id=option['product_id']
-        )
+        await state.update_data(option_id=option_id, product_id=option['product_id'])
         
-        # بناء أزرار التعديل - باستخدام تنسيق بسيط وواضح
         builder = InlineKeyboardBuilder()
-        
-        # أزرار التعديل - كل زر في صف منفصل
-        builder.row(types.InlineKeyboardButton(
-            text="📝 تعديل الاسم", 
-            callback_data=f"edit_fld_name_{option_id}"
-        ))
-        
-        builder.row(types.InlineKeyboardButton(
-            text="🔢 تعديل الكمية", 
-            callback_data=f"edit_fld_quantity_{option_id}"
-        ))
-        
-        builder.row(types.InlineKeyboardButton(
-            text="💰 تعديل سعر المورد", 
-            callback_data=f"edit_fld_price_{option_id}"
-        ))
-        
-        builder.row(types.InlineKeyboardButton(
-            text="📈 تعديل نسبة الربح", 
-            callback_data=f"edit_fld_profit_{option_id}"
-        ))
-        
-        builder.row(types.InlineKeyboardButton(
-            text="📝 تعديل الوصف", 
-            callback_data=f"edit_fld_desc_{option_id}"
-        ))
-        
-        # زر الرجوع
-        builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع", 
-            callback_data=f"prod_options_{option['product_id']}"
-        ))
+        builder.row(types.InlineKeyboardButton(text="📝 تعديل الاسم", callback_data=f"edit_fld_name_{option_id}"))
+        builder.row(types.InlineKeyboardButton(text="🔢 تعديل الكمية", callback_data=f"edit_fld_quantity_{option_id}"))
+        builder.row(types.InlineKeyboardButton(text="💰 تعديل سعر المورد", callback_data=f"edit_fld_price_{option_id}"))
+        builder.row(types.InlineKeyboardButton(text="📈 تعديل نسبة الربح", callback_data=f"edit_fld_profit_{option_id}"))
+        builder.row(types.InlineKeyboardButton(text="📝 تعديل الوصف", callback_data=f"edit_fld_desc_{option_id}"))
+        builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"prod_options_{option['product_id']}"))
         
         text = (
             f"✏️ **تعديل الخيار**\n\n"
@@ -1229,36 +1171,21 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
 
 @router.callback_query(F.data.startswith("edit_fld_"))
 async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء تعديل حقل معين - بدون محاولة تعديل الرسالة"""
+    """بدء تعديل حقل معين"""
     try:
-        # تحليل callback data: edit_fld_name_123
         parts = callback.data.split("_")
-        
         if len(parts) != 4:
             await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
             return
         
-        field_type = parts[2]  # name, quantity, price, profit, desc
+        field_type = parts[2]
         option_id = int(parts[3])
         
-        # أسماء الحقول للعرض
-        field_names = {
-            'name': 'الاسم',
-            'quantity': 'الكمية',
-            'price': 'سعر المورد',
-            'profit': 'نسبة الربح',
-            'desc': 'الوصف'
-        }
-        
+        field_names = {'name': 'الاسم', 'quantity': 'الكمية', 'price': 'سعر المورد', 'profit': 'نسبة الربح', 'desc': 'الوصف'}
         field_name = field_names.get(field_type, field_type)
         
-        # حفظ البيانات في state
-        await state.update_data(
-            edit_field=field_type,
-            option_id=option_id
-        )
+        await state.update_data(edit_field=field_type, option_id=option_id)
         
-        # تعليمات الإدخال
         instructions = {
             'name': "أدخل الاسم الجديد:",
             'quantity': "أدخل الكمية الجديدة (رقم فقط):",
@@ -1267,7 +1194,6 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
             'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
         }
         
-        # إرسال رسالة جديدة بدلاً من تعديل القديمة
         await callback.message.answer(
             f"✏️ **تعديل {field_name}**\n\n"
             f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
@@ -1275,10 +1201,7 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
             f"❌ أو أرسل /cancel للإلغاء"
         )
         
-        # تغيير حالة FSM
         await state.set_state(AdminStates.waiting_edit_option_value)
-        
-        # إرسال تأكيد للمستخدم أن البوت ينتظر الإدخال
         await callback.answer("📝 جاري انتظار الإدخال...")
         
     except Exception as e:
@@ -1287,17 +1210,15 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_edit_option_value)
 async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
-    """حفظ القيمة المعدلة - مع أسماء الأعمدة الصحيحة"""
+    """حفظ القيمة المعدلة"""
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
     if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
         await state.clear()
         await message.answer("✅ تم إلغاء العملية")
         return
     
-    # استرجاع البيانات من state
     data = await state.get_data()
     option_id = data.get('option_id')
     field = data.get('edit_field')
@@ -1312,100 +1233,81 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
     try:
         update_value = None
         field_name = ""
-        db_column = ""  # اسم العمود في قاعدة البيانات
+        db_column = ""
         
-        # معالجة حسب نوع الحقل مع أسماء الأعمدة الصحيحة
         if field == 'name':
             if len(value) < 2:
-                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول (على الأقل حرفين):")
+                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:", reply_markup=get_cancel_keyboard())
                 return
             update_value = value
             field_name = "الاسم"
-            db_column = "name"  # ✅ صحيح
+            db_column = "name"
             
         elif field == 'quantity':
             try:
                 quantity = int(value)
                 if quantity <= 0:
-                    await message.answer("❌ الكمية يجب أن تكون أكبر من 0:")
+                    await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
                     return
                 update_value = quantity
                 field_name = "الكمية"
-                db_column = "quantity"  # ✅ صحيح
+                db_column = "quantity"
             except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح للكمية:")
+                await message.answer("❌ يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
                 return
             
         elif field == 'price':
             try:
                 price = float(value)
                 if price <= 0:
-                    await message.answer("❌ السعر يجب أن يكون أكبر من 0:")
+                    await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
                     return
                 update_value = price
                 field_name = "سعر المورد"
-                db_column = "price_usd"  # ✅ التصحيح: price_usd وليس price
+                db_column = "price_usd"
             except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):")
+                await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):", reply_markup=get_cancel_keyboard())
                 return
             
         elif field == 'profit':
             try:
                 profit = float(value)
                 if profit < 0:
-                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:")
+                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
                     return
                 update_value = profit
                 field_name = "نسبة الربح"
-                # نسبة الربح في جدول applications
                 db_column = "profit_percentage"
             except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):")
+                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):", reply_markup=get_cancel_keyboard())
                 return
             
         elif field == 'desc':
             update_value = None if value == '-' else value
             field_name = "الوصف"
-            db_column = "description"  # ✅ التصحيح: description وليس desc
+            db_column = "description"
         
         else:
             await message.answer("❌ حقل غير معروف")
             await state.clear()
             return
         
-        # تحديث قاعدة البيانات
         async with db_pool.acquire() as conn:
             if field == 'profit':
-                # نسبة الربح تخزن في جدول applications
-                option = await conn.fetchrow(
-                    "SELECT product_id FROM product_options WHERE id = $1",
-                    option_id
-                )
+                option = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
                 if option:
-                    await conn.execute(
-                        f"UPDATE applications SET {db_column} = $1 WHERE id = $2",
-                        update_value, option['product_id']
-                    )
-                    
-                    # جلب اسم المنتج للعرض
-                    product = await conn.fetchrow(
-                        "SELECT name FROM applications WHERE id = $1",
-                        option['product_id']
-                    )
+                    await conn.execute(f"UPDATE applications SET {db_column} = $1 WHERE id = $2", update_value, option['product_id'])
+                    product = await conn.fetchrow("SELECT name FROM applications WHERE id = $1", option['product_id'])
                     product_name = product['name'] if product else "المنتج"
-                    
                     await message.answer(f"✅ تم تحديث {field_name} للمنتج **{product_name}** بنجاح!")
                 else:
                     await message.answer("❌ لم يتم العثور على الخيار")
                     await state.clear()
                     return
             else:
-                # تحديث الخيار مباشرة في جدول product_options
-                # ✅ استخدام علامات اقتباس مزدوجة لتجنب مشاكل الكلمات المحجوزة
                 query = f'UPDATE product_options SET "{db_column}" = $1 WHERE id = $2'
                 await conn.execute(query, update_value, option_id)
                 
-                # جلب معلومات الخيار بعد التحديث
                 updated_option = await conn.fetchrow(
                     "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
                     option_id
@@ -1428,30 +1330,20 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
         if 'updated_option' in locals() and updated_option:
             product_id = updated_option['product_id']
         else:
-            # جلب product_id من قاعدة البيانات
             async with db_pool.acquire() as conn:
-                opt = await conn.fetchrow(
-                    "SELECT product_id FROM product_options WHERE id = $1",
-                    option_id
-                )
+                opt = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
                 product_id = opt['product_id'] if opt else None
         
         if product_id:
             builder = InlineKeyboardBuilder()
-            builder.row(types.InlineKeyboardButton(
-                text="🔙 العودة لقائمة الخيارات",
-                callback_data=f"prod_options_{product_id}"
-            ))
-            
-            await message.answer(
-                "🔍 اختر ما تريد فعله الآن:",
-                reply_markup=builder.as_markup()
-            )
+            builder.row(types.InlineKeyboardButton(text="🔙 العودة لقائمة الخيارات", callback_data=f"prod_options_{product_id}"))
+            await message.answer("🔍 اختر ما تريد فعله الآن:", reply_markup=builder.as_markup())
         
     except Exception as e:
         logger.error(f"❌ خطأ في حفظ التعديل: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
+
 # ============= حذف خيار =============
 
 @router.callback_query(F.data.startswith("delete_option_"))
@@ -1494,10 +1386,7 @@ async def delete_option_execute(callback: types.CallbackQuery, db_pool):
     product_id = option['product_id']
     
     async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE product_options SET is_active = FALSE WHERE id = $1",
-            option_id
-        )
+        await conn.execute("UPDATE product_options SET is_active = FALSE WHERE id = $1", option_id)
     
     await callback.answer("✅ تم حذف الخيار بنجاح")
     
@@ -1510,6 +1399,7 @@ async def delete_option_execute(callback: types.CallbackQuery, db_pool):
         bot=callback.bot
     )
     await show_product_options(fake_callback, db_pool)
+
 # ============= إضافة لعبة أو اشتراك جديد =============
 
 @router.callback_query(F.data == "add_new_game")
@@ -1518,25 +1408,17 @@ async def add_new_game_start(callback: types.CallbackQuery, state: FSMContext, d
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # جلب الأقسام
     async with db_pool.acquire() as conn:
         categories = await conn.fetch("SELECT id, display_name FROM categories ORDER BY sort_order")
     
     builder = InlineKeyboardBuilder()
     for cat in categories:
-        builder.row(types.InlineKeyboardButton(
-            text=cat['display_name'],
-            callback_data=f"new_game_cat_{cat['id']}"
-        ))
+        builder.row(types.InlineKeyboardButton(text=cat['display_name'], callback_data=f"new_game_cat_{cat['id']}"))
     
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data="manage_options"
-    ))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_options"))
     
     await callback.message.edit_text(
-        "➕ **إضافة لعبة أو اشتراك جديد**\n\n"
-        "اختر القسم أولاً:",
+        "➕ **إضافة لعبة أو اشتراك جديد**\n\nاختر القسم أولاً:",
         reply_markup=builder.as_markup()
     )
 
@@ -1569,11 +1451,7 @@ async def new_game_get_type(message: types.Message, state: FSMContext):
         types.InlineKeyboardButton(text="📅 اشتراك", callback_data="new_game_type_subscription")
     )
     
-    await message.answer(
-        f"📱 **الاسم:** {name}\n\n"
-        f"اختر النوع:",
-        reply_markup=builder.as_markup()
-    )
+    await message.answer(f"📱 **الاسم:** {name}\n\nاختر النوع:", reply_markup=builder.as_markup())
     await state.set_state(AdminStates.waiting_new_game_type)
 
 @router.callback_query(F.data.startswith("new_game_type_"))
@@ -1587,22 +1465,14 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     try:
         async with db_pool.acquire() as conn:
-            # التحقق من وجود الاسم مسبقاً
-            existing = await conn.fetchval(
-                "SELECT id FROM applications WHERE name = $1",
-                name
-            )
-            
+            existing = await conn.fetchval("SELECT id FROM applications WHERE name = $1", name)
             if existing:
                 await callback.message.edit_text(
-                    f"❌ **فشل الإضافة**\n\n"
-                    f"تطبيق باسم **{name}** موجود مسبقاً.\n"
-                    f"الرجاء استخدام اسم مختلف."
+                    f"❌ **فشل الإضافة**\n\nتطبيق باسم **{name}** موجود مسبقاً.\nالرجاء استخدام اسم مختلف."
                 )
                 await state.clear()
                 return
             
-            # إضافة اللعبة إلى جدول applications
             game_id = await conn.fetchval('''
                 INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
                 VALUES ($1, $2, $3, $4, $5, $6, TRUE)
@@ -1613,355 +1483,19 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
             f"✅ **تم إضافة {name} بنجاح!**\n\n"
             f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك'}\n"
             f"🆔 المعرف: {game_id}\n\n"
-            f"🔹 الآن يمكنك إضافة خيارات لهذا التطبيق من خلال:\n"
-            f"🎮 إدارة خيارات الألعاب ← اختر {name}"
+            f"🔹 الآن يمكنك إضافة خيارات لهذا التطبيق."
         )
         await state.clear()
         
     except Exception as e:
-        await callback.message.edit_text(
-            f"❌ **حدث خطأ:** {str(e)}\n\n"
-            f"يرجى المحاولة مرة أخرى."
-        )
+        await callback.message.edit_text(f"❌ **حدث خطأ:** {str(e)}\n\nيرجى المحاولة مرة أخرى.")
         await state.clear()
 
-# ============= إضافة خيارات ألعاب جديدة =============
+# ============= إدارة النقاط =============
 
-@router.callback_query(F.data == "add_game_options")
-async def add_game_options_start(callback: types.CallbackQuery, db_pool):
-    """بدء إضافة خيارات ألعاب جديدة"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    # جلب الألعاب الموجودة
-    async with db_pool.acquire() as conn:
-        games = await conn.fetch('''
-            SELECT id, name FROM applications 
-            WHERE type = 'game' AND is_active = TRUE
-            ORDER BY name
-        ''')
-    
-    if not games:
-        await callback.answer("❌ لا توجد ألعاب في النظام", show_alert=True)
-        return
-    
-    builder = InlineKeyboardBuilder()
-    for game in games:
-        builder.row(types.InlineKeyboardButton(
-            text=f"🎮 {game['name']}",
-            callback_data=f"add_options_to_game_{game['id']}"
-        ))
-    
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data="back_to_admin"
-    ))
-    
-    await callback.message.edit_text(
-        "➕ **إضافة خيارات ألعاب**\n\n"
-        "اختر اللعبة التي تريد إضافة خيارات لها:",
-        reply_markup=builder.as_markup()
-    )
-
-@router.callback_query(F.data.startswith("add_options_to_game_"))
-async def add_options_to_game(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """إضافة خيارات للعبة محددة"""
-    game_id = int(callback.data.split("_")[4])
-    
-    async with db_pool.acquire() as conn:
-        game = await conn.fetchrow(
-            "SELECT * FROM applications WHERE id = $1",
-            game_id
-        )
-    
-    if not game:
-        return await callback.answer("❌ اللعبة غير موجودة", show_alert=True)
-    
-    await state.update_data(game_id=game_id, game_name=game['name'])
-    
-    # عرض قوالب جاهزة
-    templates = InlineKeyboardBuilder()
-    templates.row(types.InlineKeyboardButton(
-        text="🎯 قالب PUBG", 
-        callback_data=f"template_pubg_{game_id}"
-    ))
-    templates.row(types.InlineKeyboardButton(
-        text="🔥 قالب Free Fire", 
-        callback_data=f"template_ff_{game_id}"
-    ))
-    templates.row(types.InlineKeyboardButton(
-        text="⚔️ قالب Clash of Clans", 
-        callback_data=f"template_coc_{game_id}"
-    ))
-    templates.row(types.InlineKeyboardButton(
-        text="✏️ إدخال يدوي", 
-        callback_data=f"manual_options_{game_id}"
-    ))
-    templates.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data="add_game_options"
-    ))
-    
-    await callback.message.edit_text(
-        f"➕ **إضافة خيارات لـ {game['name']}**\n\n"
-        f"اختر طريقة الإضافة:",
-        reply_markup=templates.as_markup()
-    )
-
-@router.callback_query(F.data.startswith("template_pubg_"))
-async def add_pubg_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب PUBG"""
-    game_id = int(callback.data.split("_")[2])
-    
-    # خيارات PUBG
-    options = [
-        ('60 UC', 60, 0.99),
-        ('325 UC', 325, 4.99),
-        ('660 UC', 660, 9.99),
-        ('1800 UC', 1800, 18.99),
-        ('3850 UC', 3850, 48.99),
-    ]
-    
-    async with db_pool.acquire() as conn:
-        # حذف القديم إذا وجد
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            game_id
-        )
-        
-        # إضافة الجديد
-        for i, (name, qty, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', game_id, name, qty, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات PUBG بنجاح!**\n\n"
-        f"• 60 UC - $0.99\n"
-        f"• 325 UC - $4.99\n"
-        f"• 660 UC - $9.99\n"
-        f"• 1800 UC - $18.99\n"
-        f"• 3850 UC - $48.99"
-    )
-
-@router.callback_query(F.data.startswith("template_ff_"))
-async def add_ff_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب Free Fire"""
-    game_id = int(callback.data.split("_")[2])
-    
-    # خيارات Free Fire (بدون كلمة "هدية")
-    options = [
-        ('110 ماسة', 110, 0.99),
-        ('570 ماسة', 620, 4.99),
-        ('1220 ماسة', 1370, 9.99),
-        ('2420 ماسة', 2870, 24.99),
-    ]
-    
-    async with db_pool.acquire() as conn:
-        # حذف القديم إذا وجد
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            game_id
-        )
-        
-        # إضافة الجديد
-        for i, (name, qty, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', game_id, name, qty, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات Free Fire بنجاح!**\n\n"
-        f"• 110 ماسة - $0.99\n"
-        f"• 570 ماسة - $4.99\n"
-        f"• 1220 ماسة - $9.99\n"
-        f"• 2420 ماسة - $24.99"
-    )
-
-@router.callback_query(F.data.startswith("template_coc_"))
-async def add_coc_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب Clash of Clans"""
-    game_id = int(callback.data.split("_")[2])
-    
-    # خيارات Clash of Clans
-    options = [
-        ('80 جوهرة', 80, 0.99),
-        ('500 جوهرة', 500, 4.99),
-        ('1200 جوهرة', 1200, 9.99),
-        ('2500 جوهرة', 2500, 19.99),
-        ('التذكرة الذهبية', 1, 4.99),
-    ]
-    
-    async with db_pool.acquire() as conn:
-        # حذف القديم إذا وجد
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            game_id
-        )
-        
-        # إضافة الجديد
-        for i, (name, qty, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', game_id, name, qty, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات Clash of Clans بنجاح!**\n\n"
-        f"• 80 جوهرة - $0.99\n"
-        f"• 500 جوهرة - $4.99\n"
-        f"• 1200 جوهرة - $9.99\n"
-        f"• 2500 جوهرة - $19.99\n"
-        f"• التذكرة الذهبية - $4.99"
-    )
-
-# ============= تصفير البوت =============
-@router.callback_query(F.data == "reset_bot")
-async def reset_bot_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء عملية تصفير البوت"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="⚠️ نعم، تصفير البوت", callback_data="confirm_reset"),
-        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_del")
-    )
-    
-    await callback.message.edit_text(
-        "⚠️ **تحذير: تصفير البوت** ⚠️\n\n"
-        "هذا الإجراء سيقوم بحذف:\n"
-        "• جميع المستخدمين\n"
-        "• جميع طلبات الشحن\n"
-        "• جميع طلبات التطبيقات\n"
-        "• جميع النقاط وسجل النقاط\n"
-        "• جميع الإحالات\n\n"
-        "**سيتم الاحتفاظ بالمشرفين فقط.**\n\n"
-        "هل أنت متأكد؟",
-        reply_markup=builder.as_markup()
-    )
-
-@router.callback_query(F.data == "confirm_reset")
-async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
-    """طلب سعر الصرف الجديد بعد التصفير"""
-    await callback.message.edit_text(
-        "💰 **أدخل سعر الصرف الجديد**\n"
-        "مثال: 118\n\n"
-        "سيتم استخدام هذا السعر بعد تصفير البوت."
-    )
-    await state.set_state(AdminStates.waiting_reset_rate)
-
-@router.message(AdminStates.waiting_reset_rate)
-async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
-    """تنفيذ تصفير البوت - مع إعادة ضبط VIP والخصومات اليدوية"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        new_rate = float(message.text)
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118)")
-    
-    from config import ADMIN_ID, MODERATORS
-    admin_ids = [ADMIN_ID] + MODERATORS
-    admin_ids_str = ','.join([str(id) for id in admin_ids if id])
-    
-    async with db_pool.acquire() as conn:
-        # 1. مسح سجل النقاط
-        await conn.execute("DELETE FROM points_history")
-        
-        # 2. مسح طلبات الاسترداد
-        await conn.execute("DELETE FROM redemption_requests")
-        
-        # 3. مسح طلبات الشحن
-        await conn.execute("DELETE FROM deposit_requests")
-        
-        # 4. مسح طلبات التطبيقات
-        await conn.execute("DELETE FROM orders")
-        
-        # 5. مسح المستخدمين (مع الاحتفاظ بالمشرفين)
-        if admin_ids_str:
-            await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
-            
-            # إعادة ضبط المشرفين - مع إعادة تعيين VIP والخصومات اليدوية
-            for admin_id in admin_ids:
-                if admin_id:
-                    await conn.execute('''
-                        UPDATE users 
-                        SET 
-                            balance = 0, 
-                            total_points = 0, 
-                            total_deposits = 0, 
-                            total_orders = 0, 
-                            referral_count = 0, 
-                            referral_earnings = 0,
-                            total_points_earned = 0, 
-                            total_points_redeemed = 0,
-                            vip_level = 0,           -- إعادة ضبط مستوى VIP
-                            total_spent = 0,         -- إعادة ضبط إجمالي المشتريات
-                            discount_percent = 0,    -- إعادة ضبط نسبة الخصم
-                            manual_vip = FALSE,      -- 👈 إعادة ضبط الحالة اليدوية
-                            last_activity = CURRENT_TIMESTAMP
-                        WHERE user_id = $1
-                    ''', admin_id)
-        else:
-            await conn.execute("DELETE FROM users")
-        
-        # 6. تحديث سعر الصرف
-        await conn.execute('''
-            INSERT INTO bot_settings (key, value, description) 
-            VALUES ('usd_to_syp', $1, 'سعر صرف الدولار مقابل الليرة')
-            ON CONFLICT (key) DO UPDATE SET value = $1
-        ''', str(new_rate))
-        
-        # 7. إعادة ضبط إعدادات النقاط
-        await conn.execute('''
-            UPDATE bot_settings SET value = '1' 
-            WHERE key IN ('points_per_order', 'points_per_referral')
-        ''')
-        
-        # 8. إعادة ضبط redemption_rate
-        await conn.execute('''
-            UPDATE bot_settings SET value = '100' 
-            WHERE key = 'redemption_rate'
-        ''')
-        
-        # 9. إعادة ضبط مستويات VIP في جدول vip_levels
-        await conn.execute('''
-            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
-            VALUES 
-                (0, 'VIP 0', 0, 0, '🟢'),
-                (1, 'VIP 1', 1000, 1, '🔵'),
-                (2, 'VIP 2', 2000, 2, '🟣'),
-                (3, 'VIP 3', 4000, 3, '🟡'),
-                (4, 'VIP 4', 8000, 5, '🔴')
-            ON CONFLICT (level) DO UPDATE SET 
-                min_spent = EXCLUDED.min_spent,
-                discount_percent = EXCLUDED.discount_percent,
-                icon = EXCLUDED.icon;
-        ''')
-    
-    await message.answer(
-        f"✅ **تم تصفير البوت بنجاح!**\n\n"
-        f"💰 سعر الصرف الجديد: {new_rate} ل.س\n"
-        f"⭐ نقاط لكل طلب: 1\n"
-        f"🔗 نقاط لكل إحالة: 1\n"
-        f"🎁 100 نقطة = 1 دولار\n"
-        f"👑 تم إعادة ضبط جميع مستويات VIP والخصومات اليدوية إلى 0\n\n"
-        f"البوت الآن جاهز للبدء من جديد!"
-    )
-    await state.clear()
-
-@router.callback_query(F.data == "cancel_del")
-async def cancel_action(callback: types.CallbackQuery):
-    """إلغاء أي عملية"""
-    await callback.message.edit_text("✅ تم الإلغاء.")
-
-# إدارة النقاط
 @router.callback_query(F.data == "manage_points")
 async def manage_points(callback: types.CallbackQuery, db_pool):
+    """قائمة إدارة النقاط"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -1969,11 +1503,7 @@ async def manage_points(callback: types.CallbackQuery, db_pool):
         points_per_order = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'points_per_order'")
         points_per_referral = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'points_per_referral'")
         points_to_usd = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'points_to_usd'")
-        
-        # طلبات الاسترداد المعلقة
-        pending_redemptions = await conn.fetch('''
-            SELECT * FROM redemption_requests WHERE status = 'pending' ORDER BY created_at
-        ''')
+        pending_redemptions = await conn.fetch("SELECT * FROM redemption_requests WHERE status = 'pending' ORDER BY created_at")
     
     kb = [
         [types.InlineKeyboardButton(text="⚙️ تعديل إعدادات النقاط", callback_data="edit_points_settings")],
@@ -1992,40 +1522,9 @@ async def manage_points(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
-@router.callback_query(F.data == "pending_redemptions")
-async def show_pending_redemptions(callback: types.CallbackQuery, db_pool):
-    """عرض طلبات الاسترداد المعلقة"""
-    async with db_pool.acquire() as conn:
-        pending = await conn.fetch('''
-            SELECT id, user_id, username, points, amount_syp, created_at
-            FROM redemption_requests
-            WHERE status = 'pending'
-            ORDER BY created_at DESC
-        ''')
-    
-    if not pending:
-        return await callback.answer("لا توجد طلبات استرداد معلقة", show_alert=True)
-    
-    for req in pending:
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(text="✅ موافقة", callback_data=f"appr_red_{req['id']}"),
-            types.InlineKeyboardButton(text="❌ رفض", callback_data=f"reje_red_{req['id']}")
-        )
-        
-        await callback.message.answer(
-            f"📋 **طلب استرداد نقاط**\n\n"
-            f"🆔 رقم الطلب: {req['id']}\n"
-            f"👤 المستخدم: @{req['username'] or 'غير معروف'} (ID: `{req['user_id']}`)\n"
-            f"⭐ النقاط: {req['points']}\n"
-            f"💰 المبلغ: {req['amount_syp']:,.0f} ل.س\n"
-            f"📅 التاريخ: {req['created_at'].strftime('%Y-%m-%d %H:%M')}",
-            reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
-        )
-
 @router.callback_query(F.data == "edit_points_settings")
 async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل إعدادات النقاط"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -2033,13 +1532,16 @@ async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext)
         "⚙️ **تعديل إعدادات النقاط**\n\n"
         "أدخل القيم الجديدة بالصيغة التالية:\n"
         "`نقاط_الطلب نقاط_الإحالة نقاط_الدولار`\n\n"
-        "مثال: `1 1 100`",
-        parse_mode="Markdown"
+        "مثال: `1 1 100`\n\n"
+        "أو أرسل /cancel للإلغاء",
+        parse_mode="Markdown",
+        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_points_settings)
 
 @router.message(AdminStates.waiting_points_settings)
 async def save_points_settings(message: types.Message, state: FSMContext, db_pool):
+    """حفظ إعدادات النقاط"""
     if not is_admin(message.from_user.id):
         return
     
@@ -2051,18 +1553,9 @@ async def save_points_settings(message: types.Message, state: FSMContext, db_poo
         points_order, points_referral, points_usd = parts
         
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE bot_settings SET value = $1 WHERE key = 'points_per_order'",
-                points_order
-            )
-            await conn.execute(
-                "UPDATE bot_settings SET value = $1 WHERE key = 'points_per_referral'",
-                points_referral
-            )
-            await conn.execute(
-                "UPDATE bot_settings SET value = $1 WHERE key = 'points_to_usd'",
-                points_usd
-            )
+            await conn.execute("UPDATE bot_settings SET value = $1 WHERE key = 'points_per_order'", points_order)
+            await conn.execute("UPDATE bot_settings SET value = $1 WHERE key = 'points_per_referral'", points_referral)
+            await conn.execute("UPDATE bot_settings SET value = $1 WHERE key = 'points_to_usd'", points_usd)
         
         await message.answer("✅ **تم تحديث إعدادات النقاط بنجاح**")
         await state.clear()
@@ -2072,13 +1565,12 @@ async def save_points_settings(message: types.Message, state: FSMContext, db_poo
 
 @router.callback_query(F.data == "view_redemptions")
 async def view_redemptions(callback: types.CallbackQuery, db_pool):
+    """عرض طلبات الاسترداد"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     async with db_pool.acquire() as conn:
-        redemptions = await conn.fetch('''
-            SELECT * FROM redemption_requests WHERE status = 'pending' ORDER BY created_at
-        ''')
+        redemptions = await conn.fetch("SELECT * FROM redemption_requests WHERE status = 'pending' ORDER BY created_at")
     
     if not redemptions:
         await callback.answer("لا توجد طلبات استرداد معلقة", show_alert=True)
@@ -2110,18 +1602,12 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
         
         from database import approve_redemption, get_exchange_rate
         
-        # جلب سعر الصرف الحالي للتأكيد
         current_rate = await get_exchange_rate(db_pool)
-        
         success, error = await approve_redemption(db_pool, req_id, callback.from_user.id)
         
         if success:
-            # جلب معلومات الطلب لعرضها
             async with db_pool.acquire() as conn:
-                req = await conn.fetchrow(
-                    "SELECT * FROM redemption_requests WHERE id = $1",
-                    req_id
-                )
+                req = await conn.fetchrow("SELECT * FROM redemption_requests WHERE id = $1", req_id)
             
             await callback.answer("✅ تمت الموافقة على الطلب")
             await callback.message.edit_text(
@@ -2129,7 +1615,6 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
                 reply_markup=None
             )
             
-            # إرسال تأكيد للمستخدم
             try:
                 await bot.send_message(
                     req['user_id'],
@@ -2170,370 +1655,209 @@ async def reject_redemption(callback: types.CallbackQuery, state: FSMContext, db
         logger.error(f"❌ خطأ في رفض الاسترداد: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-@router.callback_query(F.data == "back_to_admin")
-async def back_to_admin(callback: types.CallbackQuery, db_pool):
-    from database import get_bot_status
-    bot_status = await get_bot_status(db_pool)
-    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
-    
-    kb = [
-        [types.InlineKeyboardButton(text="📈 تعديل سعر الصرف", callback_data="edit_rate")],
-        [types.InlineKeyboardButton(text="📢 إرسال رسالة للكل", callback_data="broadcast")],
-        [types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance")],
-        [types.InlineKeyboardButton(text="📊 إحصائيات البوت", callback_data="bot_stats")],
-        [types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")],
-        [types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
-        [types.InlineKeyboardButton(
-            text=f"🔄 إيقاف البوت" if bot_status else "🔄 تشغيل البوت", 
-            callback_data="toggle_bot"
-        )],
-        [types.InlineKeyboardButton(text="✏️ تعديل رسالة الصيانة", callback_data="edit_maintenance")],
-    ]
-    
-    await callback.message.edit_text(
-        f"🛠 **لوحة تحكم الإدارة**\n\n"
-        f"حالة البوت: {status_text}\n\n"
-        f"🔸 **اختر الإجراء المطلوب:**",
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb),
-        parse_mode="Markdown"
-    )
+# ============= تصفير البوت =============
 
-@router.callback_query(F.data == "edit_rate")
-async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل سعر الصرف"""
+@router.callback_query(F.data == "reset_bot")
+async def reset_bot_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء عملية تصفير البوت"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_exchange_rate
-    current_rate = await get_exchange_rate(db_pool)
-    
-    await callback.message.answer(
-        f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س\n\n"
-        f"📝 **أدخل السعر الجديد:**",
-        parse_mode="Markdown"
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="⚠️ نعم، تصفير البوت", callback_data="confirm_reset"),
+        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_del")
     )
-    await state.set_state(AdminStates.waiting_new_rate)
+    
+    await callback.message.edit_text(
+        "⚠️ **تحذير: تصفير البوت** ⚠️\n\n"
+        "هذا الإجراء سيقوم بحذف:\n"
+        "• جميع المستخدمين\n"
+        "• جميع طلبات الشحن\n"
+        "• جميع طلبات التطبيقات\n"
+        "• جميع النقاط وسجل النقاط\n"
+        "• جميع الإحالات\n\n"
+        "**سيتم الاحتفاظ بالمشرفين فقط.**\n\n"
+        "هل أنت متأكد؟",
+        reply_markup=builder.as_markup()
+    )
 
-@router.message(AdminStates.waiting_new_rate)
-async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
+@router.callback_query(F.data == "confirm_reset")
+async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
+    """طلب سعر الصرف الجديد بعد التصفير"""
+    await callback.message.edit_text(
+        "💰 **أدخل سعر الصرف الجديد**\n"
+        "مثال: 118\n\n"
+        "سيتم استخدام هذا السعر بعد تصفير البوت.\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_reset_rate)
+
+@router.message(AdminStates.waiting_reset_rate)
+async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
+    """تنفيذ تصفير البوت"""
     if not is_admin(message.from_user.id):
         return
     
     try:
         new_rate = float(message.text)
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):", reply_markup=get_cancel_keyboard())
+    
+    from config import ADMIN_ID, MODERATORS
+    admin_ids = [ADMIN_ID] + MODERATORS
+    admin_ids_str = ','.join([str(id) for id in admin_ids if id])
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM points_history")
+        await conn.execute("DELETE FROM redemption_requests")
+        await conn.execute("DELETE FROM deposit_requests")
+        await conn.execute("DELETE FROM orders")
         
-        if new_rate <= 0:
-            return await message.answer("⚠️ يرجى إدخال رقم موجب")
+        if admin_ids_str:
+            await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
+            
+            for admin_id in admin_ids:
+                if admin_id:
+                    await conn.execute('''
+                        UPDATE users 
+                        SET balance = 0, total_points = 0, total_deposits = 0, total_orders = 0,
+                            referral_count = 0, referral_earnings = 0, total_points_earned = 0,
+                            total_points_redeemed = 0, vip_level = 0, total_spent = 0,
+                            discount_percent = 0, manual_vip = FALSE, last_activity = CURRENT_TIMESTAMP
+                        WHERE user_id = $1
+                    ''', admin_id)
+        else:
+            await conn.execute("DELETE FROM users")
         
-        from database import set_exchange_rate
-        await set_exchange_rate(db_pool, new_rate)
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value, description) 
+            VALUES ('usd_to_syp', $1, 'سعر صرف الدولار مقابل الليرة')
+            ON CONFLICT (key) DO UPDATE SET value = $1
+        ''', str(new_rate))
         
-        import config
-        config.USD_TO_SYP = new_rate
+        await conn.execute("UPDATE bot_settings SET value = '1' WHERE key IN ('points_per_order', 'points_per_referral')")
+        await conn.execute("UPDATE bot_settings SET value = '100' WHERE key = 'redemption_rate'")
         
-        await message.answer(f"✅ تم تحديث سعر الصرف إلى {new_rate}")
+        await conn.execute('''
+            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
+            VALUES (0, 'VIP 0', 0, 0, '🟢'), (1, 'VIP 1', 1000, 1, '🔵'),
+                   (2, 'VIP 2', 2000, 2, '🟣'), (3, 'VIP 3', 4000, 3, '🟡'),
+                   (4, 'VIP 4', 8000, 5, '🔴')
+            ON CONFLICT (level) DO UPDATE SET 
+                min_spent = EXCLUDED.min_spent,
+                discount_percent = EXCLUDED.discount_percent,
+                icon = EXCLUDED.icon;
+        ''')
+    
+    await message.answer(
+        f"✅ **تم تصفير البوت بنجاح!**\n\n"
+        f"💰 سعر الصرف الجديد: {new_rate} ل.س\n"
+        f"⭐ نقاط لكل طلب: 1\n"
+        f"🔗 نقاط لكل إحالة: 1\n"
+        f"🎁 100 نقطة = 1 دولار\n"
+        f"👑 تم إعادة ضبط جميع مستويات VIP\n\n"
+        f"البوت الآن جاهز للبدء من جديد!"
+    )
+    await state.clear()
+
+@router.callback_query(F.data == "cancel_del")
+async def cancel_action(callback: types.CallbackQuery):
+    """إلغاء أي عملية"""
+    await callback.message.edit_text("✅ تم الإلغاء.")
+
+# ============= إدارة المشرفين =============
+
+@router.callback_query(F.data == "manage_admins")
+async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
+    """قائمة إدارة المشرفين"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_all_admins
+    admins = await get_all_admins(db_pool)
+    
+    admins_text = "👑 **قائمة المشرفين**\n\n"
+    for admin in admins:
+        role_icon = "👑" if admin['role'] == 'owner' else "🛡️"
+        username = f"@{admin['username']}" if admin['username'] else f"ID: {admin['user_id']}"
+        name = admin['first_name'] or ""
+        admins_text += f"{role_icon} {username}\n   🆔 `{admin['user_id']}`\n   📝 {name}\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة مشرف", callback_data="add_admin"),
+                types.InlineKeyboardButton(text="❌ إزالة مشرف", callback_data="remove_admin"))
+    builder.row(types.InlineKeyboardButton(text="📋 معلومات مشرف", callback_data="admin_info"),
+                types.InlineKeyboardButton(text="📊 سجل النشاطات", callback_data="admin_logs"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
+    
+    await callback.message.edit_text(admins_text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data == "add_admin")
+async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إضافة مشرف جديد"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "👤 **إضافة مشرف جديد**\n\n"
+        "أدخل الآيدي (ID) الخاص بالمستخدم الذي تريد إضافته كمشرف:\n\n"
+        "💡 يمكن للمستخدم الحصول على آيديه عبر إرسال /id للبوت\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await state.set_state(AdminStates.waiting_admin_id)
+
+@router.message(AdminStates.waiting_admin_id)
+async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
+    """تأكيد إضافة مشرف"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        new_admin_id = int(message.text.strip())
         
-        for mod_id in MODERATORS:
-            if mod_id and mod_id != message.from_user.id:
-                try:
-                    await message.bot.send_message(mod_id, f"ℹ️ تم تغيير السعر إلى {new_rate}")
-                except:
-                    pass
+        from database import add_admin, get_user_by_id
+        user = await get_user_by_id(db_pool, new_admin_id)
+        
+        if not user:
+            return await message.answer(
+                "❌ المستخدم غير موجود في قاعدة البيانات.\n"
+                "يجب على المستخدم استخدام البوت مرة واحدة على الأقل.\n\n"
+                "أو أرسل /cancel للإلغاء",
+                reply_markup=get_cancel_keyboard()
+            )
+        
+        success, msg = await add_admin(db_pool, new_admin_id, message.from_user.id)
+        
+        if success:
+            await message.answer(
+                f"✅ **تمت إضافة المشرف بنجاح!**\n\n"
+                f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
+                f"🆔 الآيدي: `{new_admin_id}`\n\n"
+                f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل الصلاحيات."
+            )
+            
+            try:
+                await message.bot.send_message(
+                    new_admin_id,
+                    f"🎉 **مبروك! تمت إضافتك كمشرف في البوت**\n\n"
+                    f"🔸 يمكنك الآن استخدام لوحة التحكم عبر إرسال /admin\n"
+                    f"👤 تمت الإضافة بواسطة: @{message.from_user.username}"
+                )
+            except:
+                pass
+        else:
+            await message.answer(f"❌ {msg}")
         
         await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118)")
+        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط):", reply_markup=get_cancel_keyboard())
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
-# إرسال رسالة للجميع
-@router.callback_query(F.data == "broadcast")
-async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    """بدء إرسال رسالة للجميع"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.message.answer(
-        "📢 **إرسال رسالة للجميع**\n\n"
-        "أدخل الرسالة التي تريد إرسالها لجميع المستخدمين:\n\n"
-        "✏️ يمكنك استخدام Markdown للتنسيق:\n"
-        "• **نص عريض**\n"
-        "• *نص مائل*\n"
-        "• `كود`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(AdminStates.waiting_broadcast_msg)
-
-@router.message(AdminStates.waiting_broadcast_msg)
-async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
-    """إرسال رسالة لجميع المستخدمين مع إمكانية الإلغاء في أي وقت"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    # التحقق من الإلغاء
-    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
-        await state.clear()
-        await message.answer("✅ تم إلغاء الإرسال.")
-        return
-    
-    broadcast_text = message.text
-    
-    # جلب عدد المستخدمين
-    async with db_pool.acquire() as conn:
-        # جلب جميع المستخدمين غير المحظورين
-        users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
-        total_users = len(users)
-        
-        # جلب عدد المستخدمين المحظورين (للعرض فقط)
-        banned_count = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_banned")
-    
-    if total_users == 0:
-        await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
-        await state.clear()
-        return
-    
-    # معاينة الرسالة
-    try:
-        # تجربة إرسال معاينة للمشرف
-        await bot.send_message(
-            message.from_user.id,
-            f"📢 **معاينة الرسالة:**\n\n{broadcast_text}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        # بناء أزرار التأكيد
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(text="✅ تأكيد الإرسال", callback_data="confirm_broadcast"),
-            types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast")
-        )
-        builder.row(
-            types.InlineKeyboardButton(text="📝 تعديل الرسالة", callback_data="edit_broadcast")
-        )
-        
-        await message.answer(
-            f"📊 **معلومات الإرسال**\n\n"
-            f"👥 عدد المستلمين: {total_users} مستخدم\n"
-            f"🚫 المحظورين: {banned_count} (لن يستلموا)\n\n"
-            f"هل أنت متأكد من إرسال الرسالة؟",
-            reply_markup=builder.as_markup()
-        )
-        
-        # حفظ البيانات في state
-        await state.update_data(
-            broadcast_text=broadcast_text,
-            total_users=total_users
-        )
-        
-    except Exception as e:
-        # إذا فشلت المعاينة بسبب تنسيق Markdown
-        await message.answer(
-            f"❌ **خطأ في تنسيق Markdown**\n\n"
-            f"الرسالة:\n{broadcast_text}\n\n"
-            f"الخطأ: {str(e)}\n\n"
-            f"تأكد من إغلاق جميع الرموز بشكل صحيح:\n"
-            f"• `**نص**` للنص العريض\n"
-            f"• `*نص*` للنص المائل\n"
-            f"• `` `نص` `` للكود"
-        )
-        # لا نمسح الـ state عشان يقدر يعدل
-
-@router.callback_query(F.data == "edit_broadcast")
-async def edit_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    """تعديل رسالة البث"""
-    await callback.message.edit_text(
-        "📝 **أدخل الرسالة الجديدة:**\n\n"
-        "✏️ يمكنك استخدام Markdown للتنسيق:\n"
-        "• **نص عريض**\n"
-        "• *نص مائل*\n"
-        "• `كود`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    # نبقى في نفس الحالة waiting_broadcast_msg
-    await callback.answer()
-
-@router.callback_query(F.data == "confirm_broadcast")
-async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
-    """تأكيد إرسال البث"""
-    data = await state.get_data()
-    broadcast_text = data.get('broadcast_text')
-    total_users = data.get('total_users', 0)
-    
-    if not broadcast_text:
-        await callback.answer("❌ لا توجد رسالة للإرسال", show_alert=True)
-        await state.clear()
-        return
-    
-    # تغيير نص الزر إلى "جاري الإرسال..."
-    await callback.message.edit_text("⏳ **جاري الإرسال...**\nقد يستغرق هذا بعض الوقت.")
-    
-    # جلب جميع المستخدمين
-    async with db_pool.acquire() as conn:
-        users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
-    
-    success_count = 0
-    failed_count = 0
-    failed_users = []
-    
-    # إرسال الرسالة لكل مستخدم
-    for i, user in enumerate(users):
-        user_id = user['user_id']
-        
-        # نتخطى المشرف نفسه
-        if user_id == callback.from_user.id:
-            continue
-        
-        try:
-            # محاولة إرسال مع Markdown
-            await bot.send_message(
-                user_id,
-                f"📢 **رسالة من الإدارة:**\n\n{broadcast_text}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            success_count += 1
-            
-        except Exception as e:
-            # إذا فشل Markdown، نجرب إرسال نص عادي
-            try:
-                await bot.send_message(
-                    user_id,
-                    f"📢 رسالة من الإدارة:\n\n{broadcast_text}"
-                )
-                success_count += 1
-                logger.info(f"✅ تم الإرسال كنص عادي للمستخدم {user_id}")
-            except Exception as e2:
-                # إذا فشل أيضاً، نسجل الخطأ
-                failed_count += 1
-                failed_users.append(str(user_id))
-                logger.error(f"❌ فشل إرسال للمستخدم {user_id}: {e2}")
-        
-        # تحديث التقدم كل 10 رسائل
-        if (i + 1) % 10 == 0:
-            await callback.message.edit_text(
-                f"⏳ **جاري الإرسال...**\n"
-                f"✅ تم: {success_count}\n"
-                f"❌ فشل: {failed_count}\n"
-                f"📊 المتبقي: {total_users - (i + 1)}"
-            )
-        
-        # تأخير بسيط بين الرسائل
-        await asyncio.sleep(0.05)
-    
-    # رسالة النتيجة النهائية
-    result_text = (
-        f"✅ **تم إرسال الرسالة**\n\n"
-        f"📊 **نتيجة الإرسال:**\n"
-        f"• ✅ نجح: {success_count}\n"
-        f"• ❌ فشل: {failed_count}\n"
-        f"• 👥 الإجمالي: {total_users}\n\n"
-    )
-    
-    if failed_users:
-        # عرض أول 10 مستخدمين فشل الإرسال لهم
-        failed_sample = failed_users[:10]
-        result_text += f"⚠️ أمثلة على المستخدمين الذين فشل الإرسال لهم:\n"
-        result_text += f"`{', '.join(failed_sample)}`\n"
-        if len(failed_users) > 10:
-            result_text += f"... و{len(failed_users) - 10} آخرين\n"
-    
-    await callback.message.edit_text(result_text)
-    
-    # تسجيل العملية في logs
-    async with db_pool.acquire() as conn:
-        await conn.execute('''
-            INSERT INTO logs (user_id, action, details, created_at)
-            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-        ''', callback.from_user.id, 'broadcast', 
-           f'إرسال رسالة جماعية - نجح: {success_count}, فشل: {failed_count}')
-    
-    await state.clear()
-
-@router.callback_query(F.data == "cancel_broadcast")
-async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    """إلغاء البث"""
-    await state.clear()
-    await callback.message.edit_text("✅ تم إلغاء الإرسال.")
-
-# إضافة رصيد يدوي
-@router.callback_query(F.data == "add_balance")
-async def add_balance_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("👤 **أدخل آيدي المستخدم:**")
-    await state.set_state(AdminStates.waiting_user_id)
-
-@router.message(AdminStates.waiting_user_id)
-async def add_balance_amount(message: types.Message, state: FSMContext, db_pool):
-    try:
-        user_id = int(message.text)
-        await state.update_data(target_user=user_id)
-        
-        async with db_pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT username, balance FROM users WHERE user_id = $1",
-                user_id
-            )
-            
-            if not user:
-                await message.answer("⚠️ **المستخدم غير موجود**")
-                await state.clear()
-                return
-            
-            await message.answer(
-                f"👤 **المستخدم:** {user['username'] or 'بدون اسم'}\n"
-                f"💰 **الرصيد الحالي:** {user['balance']:,.0f} ل.س\n\n"
-                f"**أدخل المبلغ المراد إضافته (ل.س):**",
-                parse_mode="Markdown"
-            )
-            await state.set_state(AdminStates.waiting_balance_amount)
-    except ValueError:
-        await message.answer("⚠️ **آيدي غير صالح. الرجاء إدخال رقم صحيح**")
-        await state.clear()
-
-@router.message(AdminStates.waiting_balance_amount)
-async def finalize_add_balance(message: types.Message, state: FSMContext, db_pool):
-    try:
-        amount = float(message.text)
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 5000)")
-    
-    data = await state.get_data()
-    user_id = data['target_user']
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET balance = balance + $1, total_deposits = total_deposits + $1 WHERE user_id = $2",
-            amount, user_id
-        )
-        
-        user = await conn.fetchrow(
-            "SELECT username, balance, total_points FROM users WHERE user_id = $1",
-            user_id
-        )
-    
-    await message.answer(
-        f"✅ **تمت إضافة الرصيد بنجاح**\n\n"
-        f"👤 **المستخدم:** {user['username'] or 'بدون اسم'}\n"
-        f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
-        f"💳 **الرصيد الجديد:** {user['balance']:,.0f} ل.س\n"
-        f"⭐ **النقاط:** {user['total_points']}",
-        parse_mode="Markdown"
-    )
-    
-    # إرسال إشعار للمستخدم
-    try:
-        await message.bot.send_message(
-            user_id,
-            f"✅ **تم إضافة رصيد إلى حسابك!**\n\n"
-            f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
-            f"💳 **الرصيد الحالي:** {user['balance']:,.0f} ل.س",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
-    
-    await state.clear()
-    
+# ============= الإحصائيات =============
 
 @router.callback_query(F.data == "bot_stats")
 async def show_bot_stats(callback: types.CallbackQuery, db_pool):
@@ -2554,45 +1878,36 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
     
     stats_text = (
         "📊 **إحصائيات البوت**\n\n"
-        
         f"🤖 **حالة البوت:** {status_text}\n\n"
-        
         "👥 **المستخدمين:**\n"
         f"• 📈 الإجمالي: {stats['users'].get('total_users', 0)}\n"
         f"• 💰 إجمالي الأرصدة: {stats['users'].get('total_balance', 0):,.0f} ل.س\n"
         f"• 🚫 المحظورين: {stats['users'].get('banned_users', 0)}\n"
         f"• 🆕 الجدد اليوم: {stats['users'].get('new_users_today', 0)}\n"
         f"• ⭐ إجمالي النقاط: {stats['users'].get('total_points', 0)}\n\n"
-        
         "💰 **الإيداعات:**\n"
         f"• 📋 الإجمالي: {stats['deposits'].get('total_deposits', 0)}\n"
         f"• 💸 إجمالي المبالغ: {stats['deposits'].get('total_deposit_amount', 0):,.0f} ل.س\n"
         f"• ⏳ المعلقة: {stats['deposits'].get('pending_deposits', 0)}\n"
         f"• ✅ المنجزة: {stats['deposits'].get('approved_deposits', 0)}\n\n"
-        
         "🛒 **الطلبات:**\n"
         f"• 📋 الإجمالي: {stats['orders'].get('total_orders', 0)}\n"
         f"• 💸 إجمالي المبالغ: {stats['orders'].get('total_order_amount', 0):,.0f} ل.س\n"
         f"• ⏳ المعلقة: {stats['orders'].get('pending_orders', 0)}\n"
         f"• ✅ المكتملة: {stats['orders'].get('completed_orders', 0)}\n"
         f"• ⭐ نقاط ممنوحة: {stats['orders'].get('total_points_given', 0)}\n\n"
-        
         "🎁 **نظام النقاط:**\n"
         f"• 💰 عمليات استرداد: {stats['points'].get('total_redemptions', 0)}\n"
         f"• ⭐ نقاط مستردة: {stats['points'].get('total_points_redeemed', 0)}\n"
         f"• 💵 قيمة المستردة: {stats['points'].get('total_redemption_amount', 0):,.0f} ل.س\n\n"
-        
-        f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
-        f"⚙️ **إعدادات النقاط:**\n"
-        f"• 📦 نقاط الطلب: {stats.get('points_per_order', 1)}\n"
-        f"• 🔗 نقاط الإحالة: {stats.get('points_per_referral', 1)}"
+        f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
     )
     
     await callback.message.answer(stats_text, parse_mode="Markdown")
-    
+
 @router.callback_query(F.data == "top_deposits")
 async def show_top_deposits(callback: types.CallbackQuery, db_pool):
-    """عرض أكثر المستخدمين إيداعاً"""
+    """أكثر المستخدمين إيداعاً"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -2606,14 +1921,13 @@ async def show_top_deposits(callback: types.CallbackQuery, db_pool):
     text = "💳 **أكثر المستخدمين إيداعاً**\n\n"
     for i, user in enumerate(users, 1):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
-        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
-        text += f"{i}. {vip_icon} {username}\n   💰 {user['total_deposits']:,.0f} ل.س\n"
+        text += f"{i}. {username}\n   💰 {user['total_deposits']:,.0f} ل.س\n"
     
     await callback.message.answer(text, parse_mode="Markdown")
 
 @router.callback_query(F.data == "top_orders")
 async def show_top_orders(callback: types.CallbackQuery, db_pool):
-    """عرض أكثر المستخدمين طلبات"""
+    """أكثر المستخدمين طلبات"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -2627,14 +1941,13 @@ async def show_top_orders(callback: types.CallbackQuery, db_pool):
     text = "🛒 **أكثر المستخدمين طلبات**\n\n"
     for i, user in enumerate(users, 1):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
-        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
-        text += f"{i}. {vip_icon} {username}\n   📦 {user['total_orders']} طلب\n"
+        text += f"{i}. {username}\n   📦 {user['total_orders']} طلب\n"
     
     await callback.message.answer(text, parse_mode="Markdown")
 
 @router.callback_query(F.data == "top_referrals")
 async def show_top_referrals(callback: types.CallbackQuery, db_pool):
-    """عرض أكثر المستخدمين إحالة"""
+    """أكثر المستخدمين إحالة"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -2648,14 +1961,13 @@ async def show_top_referrals(callback: types.CallbackQuery, db_pool):
     text = "🔗 **أكثر المستخدمين إحالة**\n\n"
     for i, user in enumerate(users, 1):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
-        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
-        text += f"{i}. {vip_icon} {username}\n   👥 {user['referral_count']} إحالة | 💰 {user['referral_earnings']:,.0f} ل.س\n"
+        text += f"{i}. {username}\n   👥 {user['referral_count']} إحالة | 💰 {user['referral_earnings']:,.0f} ل.س\n"
     
     await callback.message.answer(text, parse_mode="Markdown")
 
 @router.callback_query(F.data == "top_points")
 async def show_top_points(callback: types.CallbackQuery, db_pool):
-    """عرض أكثر المستخدمين نقاط"""
+    """أكثر المستخدمين نقاط"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -2669,47 +1981,28 @@ async def show_top_points(callback: types.CallbackQuery, db_pool):
     text = "⭐ **أكثر المستخدمين نقاط**\n\n"
     for i, user in enumerate(users, 1):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
-        vip_icon = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎"][user['vip_level']] if user['vip_level'] <= 5 else "⭐"
-        text += f"{i}. {vip_icon} {username}\n   ⭐ {user['total_points']} نقطة\n"
+        text += f"{i}. {username}\n   ⭐ {user['total_points']} نقطة\n"
     
     await callback.message.answer(text, parse_mode="Markdown")
 
 @router.callback_query(F.data == "vip_stats")
 async def show_vip_stats(callback: types.CallbackQuery, db_pool):
-    """عرض إحصائيات VIP"""
+    """إحصائيات VIP"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     async with db_pool.acquire() as conn:
-        # عدد المستخدمين في كل مستوى
-        vip_counts = await conn.fetch('''
-            SELECT vip_level, COUNT(*) as count 
-            FROM users 
-            GROUP BY vip_level 
-            ORDER BY vip_level
-        ''')
-        
-        # إجمالي الإنفاق في كل مستوى
-        vip_spent = await conn.fetch('''
-            SELECT vip_level, SUM(total_spent) as total 
-            FROM users 
-            WHERE vip_level > 0 
-            GROUP BY vip_level 
-            ORDER BY vip_level
-        ''')
+        vip_counts = await conn.fetch("SELECT vip_level, COUNT(*) as count FROM users GROUP BY vip_level ORDER BY vip_level")
+        vip_spent = await conn.fetch("SELECT vip_level, SUM(total_spent) as total FROM users WHERE vip_level > 0 GROUP BY vip_level ORDER BY vip_level")
     
     vip_names = ["VIP 0 🟢", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡", "VIP 4 🔴", "VIP 5 💎"]
+    text = "👥 **إحصائيات VIP**\n\n**عدد المستخدمين:**\n"
     
-    text = "👥 **إحصائيات VIP**\n\n"
-    
-    # عرض عدد المستخدمين
-    text += "**عدد المستخدمين:**\n"
     for row in vip_counts:
         level = row['vip_level']
         if level <= 5:
             text += f"• {vip_names[level]}: {row['count']} مستخدم\n"
     
-    # عرض إجمالي الإنفاق
     if vip_spent:
         text += "\n**إجمالي الإنفاق:**\n"
         for row in vip_spent:
@@ -2719,10 +2012,16 @@ async def show_vip_stats(callback: types.CallbackQuery, db_pool):
     
     await callback.message.answer(text, parse_mode="Markdown")
 
-# معلومات مستخدم
+# ============= معلومات المستخدم =============
+
 @router.callback_query(F.data == "user_info")
 async def user_info_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("👤 **أدخل آيدي المستخدم للحصول على معلوماته:**")
+    """بدء البحث عن معلومات مستخدم"""
+    await callback.message.answer(
+        "👤 **أدخل آيدي المستخدم للحصول على معلوماته:**\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
     await state.set_state(AdminStates.waiting_user_info)
 
 @router.message(AdminStates.waiting_user_info)
@@ -2742,15 +2041,12 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         user = profile['user']
         deposits = profile['deposits']
         orders = profile['orders']
-        referrals = profile['referrals']
         
-        # تنسيق التاريخ
         join_date = user['created_at'].strftime("%Y-%m-%d %H:%M") if user.get('created_at') else "غير معروف"
         last_active = user['last_activity'].strftime("%Y-%m-%d %H:%M") if user.get('last_activity') else "غير معروف"
-        
-        # بناء رسالة المعلومات
         manual_status = " (يدوي)" if user.get('manual_vip') else ""
-        info_text = (  # <-- استخدم 8 مسافات (وليس Tab)
+        
+        info_text = (
             f"👤 **معلومات المستخدم**\n\n"
             f"🆔 **الآيدي:** `{user['user_id']}`\n"
             f"👤 **اليوزر:** @{user['username'] or 'غير موجود'}\n"
@@ -2776,54 +2072,18 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             f"• إجمالي المبالغ: {orders.get('total_amount', 0):,.0f} ل.س\n"
             f"• الطلبات المكتملة: {orders.get('completed_count', 0)} طلب\n"
             f"• قيمة المكتملة: {orders.get('completed_amount', 0):,.0f} ل.س\n"
-            f"• نقاط مكتسبة من الطلبات: {orders.get('total_points_earned', 0)}\n\n"
-            
-            f"👥 **الإحالات:**\n"
-            f"• عدد المحالين: {referrals.get('total_referrals', 0)}\n"
-            f"• إيداعات المحالين: {referrals.get('referrals_deposits', 0):,.0f} ل.س\n"
-            f"• طلبات المحالين: {referrals.get('referrals_orders', 0)}"
+            f"• نقاط مكتسبة من الطلبات: {orders.get('total_points_earned', 0)}\n"
         )
         
-        # أزرار للإجراءات السريعة
         builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(
-                text="🔓 فك الحظر" if user.get('is_banned') else "🔒 حظر",
-                callback_data=f"toggle_ban_{user['user_id']}"
-            ),
-            types.InlineKeyboardButton(
-                text="💰 تعديل الرصيد",
-                callback_data=f"edit_bal_{user['user_id']}"
-            )
-        )
-        builder.row(
-            types.InlineKeyboardButton(
-                text="⭐ إضافة نقاط",
-                callback_data=f"add_points_{user['user_id']}"
-            )
-        )
-        # ===== زر جديد لرفع مستوى VIP =====
-        builder.row(
-            types.InlineKeyboardButton(
-                text="👑 رفع مستوى VIP",
-                callback_data=f"upgrade_vip_{user['user_id']}"
-            )
-        )
-        # في قسم الأزرار، بعد زر رفع مستوى VIP
-        builder.row(
-            types.InlineKeyboardButton(
-                text="⬇️ خفض مستوى VIP",
-                callback_data=f"downgrade_vip_{user['user_id']}"
-            )
-        )
-        # =================================
-
-        await message.answer(
-            info_text,
-            reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
-        )
+        builder.row(types.InlineKeyboardButton(text="🔓 فك الحظر" if user.get('is_banned') else "🔒 حظر",
+                                               callback_data=f"toggle_ban_{user['user_id']}"),
+                    types.InlineKeyboardButton(text="💰 تعديل الرصيد", callback_data=f"edit_bal_{user['user_id']}"))
+        builder.row(types.InlineKeyboardButton(text="⭐ إضافة نقاط", callback_data=f"add_points_{user['user_id']}"),
+                    types.InlineKeyboardButton(text="👑 رفع مستوى VIP", callback_data=f"upgrade_vip_{user['user_id']}"))
+        builder.row(types.InlineKeyboardButton(text="⬇️ خفض مستوى VIP", callback_data=f"downgrade_vip_{user['user_id']}"))
         
+        await message.answer(info_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
         await state.clear()
         
     except ValueError:
@@ -2834,13 +2094,16 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
 
+# ============= إدارة النقاط والرصيد =============
+
 @router.callback_query(F.data.startswith("add_points_"))
 async def add_points_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء إضافة نقاط لمستخدم"""
     try:
         user_id = int(callback.data.split("_")[2])
         await state.update_data(target_user=user_id)
-        await callback.message.answer(f"⭐ **أدخل عدد النقاط لإضافتها للمستخدم {user_id}:**")
+        await callback.message.answer(f"⭐ **أدخل عدد النقاط لإضافتها للمستخدم {user_id}:**\n\nأو أرسل /cancel للإلغاء",
+                                      reply_markup=get_cancel_keyboard())
         await state.set_state(AdminStates.waiting_points_amount)
     except Exception as e:
         logger.error(f"خطأ في بدء إضافة نقاط: {e}")
@@ -2848,11 +2111,12 @@ async def add_points_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_points_amount)
 async def add_points_finalize(message: types.Message, state: FSMContext, db_pool):
+    """إضافة النقاط للمستخدم"""
     try:
         points = int(message.text)
         
         if points <= 0:
-            return await message.answer("⚠️ يرجى إدخال رقم موجب")
+            return await message.answer("⚠️ يرجى إدخال رقم موجب:", reply_markup=get_cancel_keyboard())
         
         data = await state.get_data()
         user_id = data['target_user']
@@ -2880,30 +2144,73 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
         await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):", reply_markup=get_cancel_keyboard())
     except Exception as e:
         logger.error(f"خطأ في إضافة نقاط: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
-# تبديل حالة الحظر
+@router.callback_query(F.data.startswith("edit_bal_"))
+async def edit_balance_from_info(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل الرصيد"""
+    try:
+        user_id = int(callback.data.split("_")[2])
+        await state.update_data(target_user=user_id)
+        await callback.message.answer(f"💰 **أدخل الرصيد الجديد للمستخدم {user_id}:**\n\nأو أرسل /cancel للإلغاء",
+                                      reply_markup=get_cancel_keyboard())
+        await state.set_state(AdminStates.waiting_balance_amount)
+    except Exception as e:
+        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+
+@router.message(AdminStates.waiting_balance_amount)
+async def finalize_add_balance(message: types.Message, state: FSMContext, db_pool):
+    """إضافة رصيد يدوي"""
+    try:
+        amount = float(message.text)
+    except ValueError:
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 5000):", reply_markup=get_cancel_keyboard())
+    
+    data = await state.get_data()
+    user_id = data['target_user']
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET balance = balance + $1, total_deposits = total_deposits + $1 WHERE user_id = $2", amount, user_id)
+        user = await conn.fetchrow("SELECT username, balance, total_points FROM users WHERE user_id = $1", user_id)
+    
+    await message.answer(
+        f"✅ **تمت إضافة الرصيد بنجاح**\n\n"
+        f"👤 **المستخدم:** {user['username'] or 'بدون اسم'}\n"
+        f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
+        f"💳 **الرصيد الجديد:** {user['balance']:,.0f} ل.س\n"
+        f"⭐ **النقاط:** {user['total_points']}",
+        parse_mode="Markdown"
+    )
+    
+    try:
+        await message.bot.send_message(
+            user_id,
+            f"✅ **تم إضافة رصيد إلى حسابك!**\n\n"
+            f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
+            f"💳 **الرصيد الحالي:** {user['balance']:,.0f} ل.س",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
+    
+    await state.clear()
+
 @router.callback_query(F.data.startswith("toggle_ban_"))
 async def toggle_ban_from_info(callback: types.CallbackQuery, db_pool):
+    """تبديل حالة الحظر"""
     try:
         user_id = int(callback.data.split("_")[2])
         
         async with db_pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT is_banned FROM users WHERE user_id = $1",
-                user_id
-            )
+            user = await conn.fetchrow("SELECT is_banned FROM users WHERE user_id = $1", user_id)
             
             if user:
                 new_status = not user['is_banned']
-                await conn.execute(
-                    "UPDATE users SET is_banned = $1 WHERE user_id = $2",
-                    new_status, user_id
-                )
+                await conn.execute("UPDATE users SET is_banned = $1 WHERE user_id = $2", new_status, user_id)
                 
                 status_text = "محظور" if new_status else "نشط"
                 await callback.message.answer(f"✅ تم تغيير حالة المستخدم إلى: {status_text}")
@@ -2922,16 +2229,237 @@ async def toggle_ban_from_info(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-# تعديل الرصيد
-@router.callback_query(F.data.startswith("edit_bal_"))
-async def edit_balance_from_info(callback: types.CallbackQuery, state: FSMContext):
+# ============= تعديل سعر الصرف =============
+
+@router.callback_query(F.data == "edit_rate")
+async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """بدء تعديل سعر الصرف"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_exchange_rate
+    current_rate = await get_exchange_rate(db_pool)
+    
+    await callback.message.answer(
+        f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س\n\n"
+        f"📝 **أدخل السعر الجديد:**\n\n"
+        f"أو أرسل /cancel للإلغاء",
+        parse_mode="Markdown",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_new_rate)
+
+@router.message(AdminStates.waiting_new_rate)
+async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
+    """حفظ سعر الصرف الجديد"""
+    if not is_admin(message.from_user.id):
+        return
+    
     try:
-        user_id = int(callback.data.split("_")[2])
-        await state.update_data(target_user=user_id)
-        await callback.message.answer(f"💰 **أدخل الرصيد الجديد للمستخدم {user_id}:**")
-        await state.set_state(AdminStates.waiting_balance_amount)
+        new_rate = float(message.text)
+        
+        if new_rate <= 0:
+            return await message.answer("⚠️ يرجى إدخال رقم موجب:", reply_markup=get_cancel_keyboard())
+        
+        from database import set_exchange_rate
+        await set_exchange_rate(db_pool, new_rate)
+        
+        import config
+        config.USD_TO_SYP = new_rate
+        
+        await message.answer(f"✅ تم تحديث سعر الصرف إلى {new_rate}")
+        
+        for mod_id in MODERATORS:
+            if mod_id and mod_id != message.from_user.id:
+                try:
+                    await message.bot.send_message(mod_id, f"ℹ️ تم تغيير السعر إلى {new_rate}")
+                except:
+                    pass
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):", reply_markup=get_cancel_keyboard())
     except Exception as e:
-        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+# ============= إرسال رسالة جماعية =============
+
+@router.callback_query(F.data == "broadcast")
+async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إرسال رسالة للجميع"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.answer(
+        "📢 **إرسال رسالة للجميع**\n\n"
+        "أدخل الرسالة التي تريد إرسالها لجميع المستخدمين:\n\n"
+        "✏️ يمكنك استخدام Markdown للتنسيق:\n"
+        "• **نص عريض**\n"
+        "• *نص مائل*\n"
+        "• `كود`\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_broadcast_msg)
+# ============= إرسال رسالة جماعية (تابع) =============
+
+@router.message(AdminStates.waiting_broadcast_msg)
+async def send_broadcast(message: types.Message, state: FSMContext, db_pool, bot: Bot):
+    """إرسال رسالة لجميع المستخدمين مع إمكانية الإلغاء"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء الإرسال.")
+        return
+    
+    broadcast_text = message.text
+    
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
+        total_users = len(users)
+        banned_count = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_banned")
+    
+    if total_users == 0:
+        await message.answer("⚠️ لا يوجد مستخدمين في قاعدة البيانات")
+        await state.clear()
+        return
+    
+    try:
+        await bot.send_message(
+            message.from_user.id,
+            f"📢 **معاينة الرسالة:**\n\n{broadcast_text}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="✅ تأكيد الإرسال", callback_data="confirm_broadcast"),
+                    types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_broadcast"))
+        builder.row(types.InlineKeyboardButton(text="📝 تعديل الرسالة", callback_data="edit_broadcast"))
+        
+        await message.answer(
+            f"📊 **معلومات الإرسال**\n\n"
+            f"👥 عدد المستلمين: {total_users} مستخدم\n"
+            f"🚫 المحظورين: {banned_count} (لن يستلموا)\n\n"
+            f"هل أنت متأكد من إرسال الرسالة؟",
+            reply_markup=builder.as_markup()
+        )
+        
+        await state.update_data(broadcast_text=broadcast_text, total_users=total_users)
+        
+    except Exception as e:
+        await message.answer(
+            f"❌ **خطأ في تنسيق Markdown**\n\n"
+            f"الخطأ: {str(e)}\n\n"
+            f"تأكد من إغلاق جميع الرموز بشكل صحيح:\n"
+            f"• `**نص**` للنص العريض\n"
+            f"• `*نص*` للنص المائل\n"
+            f"• `` `نص` `` للكود"
+        )
+
+@router.callback_query(F.data == "edit_broadcast")
+async def edit_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    """تعديل رسالة البث"""
+    await callback.message.edit_text(
+        "📝 **أدخل الرسالة الجديدة:**\n\n"
+        "✏️ يمكنك استخدام Markdown للتنسيق:\n"
+        "• **نص عريض**\n"
+        "• *نص مائل*\n"
+        "• `كود`\n\n"
+        "أو أرسل /cancel للإلغاء"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "confirm_broadcast")
+async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
+    """تأكيد إرسال البث"""
+    data = await state.get_data()
+    broadcast_text = data.get('broadcast_text')
+    total_users = data.get('total_users', 0)
+    
+    if not broadcast_text:
+        await callback.answer("❌ لا توجد رسالة للإرسال", show_alert=True)
+        await state.clear()
+        return
+    
+    await callback.message.edit_text("⏳ **جاري الإرسال...**\nقد يستغرق هذا بعض الوقت.")
+    
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM users WHERE NOT is_banned")
+    
+    success_count = 0
+    failed_count = 0
+    failed_users = []
+    
+    for i, user in enumerate(users):
+        user_id = user['user_id']
+        
+        if user_id == callback.from_user.id:
+            continue
+        
+        try:
+            await bot.send_message(
+                user_id,
+                f"📢 **رسالة من الإدارة:**\n\n{broadcast_text}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            success_count += 1
+            
+        except Exception:
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"📢 رسالة من الإدارة:\n\n{broadcast_text}"
+                )
+                success_count += 1
+            except Exception:
+                failed_count += 1
+                failed_users.append(str(user_id))
+        
+        if (i + 1) % 10 == 0:
+            await callback.message.edit_text(
+                f"⏳ **جاري الإرسال...**\n"
+                f"✅ تم: {success_count}\n"
+                f"❌ فشل: {failed_count}\n"
+                f"📊 المتبقي: {total_users - (i + 1)}"
+            )
+        
+        await asyncio.sleep(0.05)
+    
+    result_text = (
+        f"✅ **تم إرسال الرسالة**\n\n"
+        f"📊 **نتيجة الإرسال:**\n"
+        f"• ✅ نجح: {success_count}\n"
+        f"• ❌ فشل: {failed_count}\n"
+        f"• 👥 الإجمالي: {total_users}\n\n"
+    )
+    
+    if failed_users:
+        failed_sample = failed_users[:10]
+        result_text += f"⚠️ أمثلة على المستخدمين الذين فشل الإرسال لهم:\n"
+        result_text += f"`{', '.join(failed_sample)}`\n"
+        if len(failed_users) > 10:
+            result_text += f"... و{len(failed_users) - 10} آخرين\n"
+    
+    await callback.message.edit_text(result_text)
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO logs (user_id, action, details, created_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+        ''', callback.from_user.id, 'broadcast', 
+           f'إرسال رسالة جماعية - نجح: {success_count}, فشل: {failed_count}')
+    
+    await state.clear()
+
+@router.callback_query(F.data == "cancel_broadcast")
+async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    """إلغاء البث"""
+    await state.clear()
+    await callback.message.edit_text("✅ تم إلغاء الإرسال.")
 
 # ============= معالجة طلبات الشحن من المجموعة =============
 
@@ -2953,16 +2481,10 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
         logger.info(f"✅ موافقة على شحن: user={user_id}, amount={amount}")
         
         async with db_pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT username, balance FROM users WHERE user_id = $1",
-                user_id
-            )
+            user = await conn.fetchrow("SELECT username, balance FROM users WHERE user_id = $1", user_id)
             
             if not user:
-                await conn.execute(
-                    "INSERT INTO users (user_id, balance, created_at) VALUES ($1, 0, CURRENT_TIMESTAMP)",
-                    user_id
-                )
+                await conn.execute("INSERT INTO users (user_id, balance, created_at) VALUES ($1, 0, CURRENT_TIMESTAMP)", user_id)
                 user = {'username': None, 'balance': 0}
             
             new_balance = user['balance'] + amount
@@ -2971,7 +2493,6 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                 new_balance, amount, user_id
             )
             
-            # تحديث حالة الطلب
             await conn.execute('''
                 UPDATE deposit_requests 
                 SET status = 'approved', updated_at = CURRENT_TIMESTAMP
@@ -2983,10 +2504,8 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                 )
             ''', user_id, amount)
         
-        # استخدام توقيت دمشق للمستخدم
         damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # إرسال إشعار للمستخدم مع توقيت دمشق
         try:
             await bot.send_message(
                 user_id,
@@ -2997,33 +2516,17 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                 f"🔸 **شكراً لاستخدامك خدماتنا**",
                 parse_mode="Markdown"
             )
-            logger.info(f"✅ تم إرسال رسالة النجاح للمستخدم {user_id}")
         except Exception as e:
             logger.error(f"❌ فشل إرسال رسالة للمستخدم {user_id}: {e}")
         
-        # تحديث رسالة المجموعة - نسخة محسنة
         try:
-            # التحقق من وجود نص في الرسالة
             current_text = callback.message.text or callback.message.caption or ""
-            
-            # إضافة نص التأكيد مع توقيت دمشق
             new_text = current_text + f"\n\n✅ **تمت الموافقة على الطلب**\n📅 **بتاريخ:** {damascus_time}"
             
-            # التحقق من نوع الرسالة (نص أو صورة)
             if callback.message.photo:
-                # إذا كانت رسالة تحتوي على صورة
-                await callback.message.edit_caption(
-                    caption=new_text,
-                    reply_markup=None
-                )
+                await callback.message.edit_caption(caption=new_text, reply_markup=None)
             else:
-                # إذا كانت رسالة نصية عادية
-                await callback.message.edit_text(
-                    text=new_text,
-                    reply_markup=None
-                )
-                
-            logger.info(f"✅ تم تحديث رسالة المجموعة بنجاح")
+                await callback.message.edit_text(text=new_text, reply_markup=None)
         except Exception as e:
             logger.error(f"❌ فشل تحديث رسالة المجموعة: {e}")
         
@@ -3043,7 +2546,6 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
         user_id = int(callback.data.split("_")[2])
         
         async with db_pool.acquire() as conn:
-            # تحديث حالة الطلب
             await conn.execute('''
                 UPDATE deposit_requests 
                 SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
@@ -3055,10 +2557,8 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
                 )
             ''', user_id)
         
-        # استخدام توقيت دمشق للمستخدم
         damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # إرسال إشعار للمستخدم مع توقيت دمشق
         try:
             await bot.send_message(
                 user_id,
@@ -3071,29 +2571,17 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
                 f"📞 **للمساعدة تواصل مع الدعم.**",
                 parse_mode="Markdown"
             )
-            logger.info(f"✅ تم إرسال رسالة الرفض للمستخدم {user_id}")
         except Exception as e:
             logger.error(f"❌ فشل إرسال رسالة الرفض للمستخدم {user_id}: {e}")
         
-        # تحديث رسالة المجموعة مع توقيت دمشق
         try:
-            # التحقق من نوع الرسالة (صورة أو نص)
             current_text = callback.message.text or callback.message.caption or ""
-            
-            # إضافة نص الرفض مع التاريخ
             new_text = current_text + f"\n\n❌ **تم رفض الطلب**\n📅 **بتاريخ:** {damascus_time}"
             
             if callback.message.photo:
-                await callback.message.edit_caption(
-                    caption=new_text,
-                    reply_markup=None
-                )
+                await callback.message.edit_caption(caption=new_text, reply_markup=None)
             else:
-                await callback.message.edit_text(
-                    text=new_text,
-                    reply_markup=None
-                )
-            logger.info(f"✅ تم تحديث رسالة المجموعة للرفض")
+                await callback.message.edit_text(text=new_text, reply_markup=None)
         except Exception as e:
             logger.error(f"❌ فشل تحديث رسالة المجموعة: {e}")
         
@@ -3103,7 +2591,8 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
         logger.error(f"❌ خطأ في رفض الشحن: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-# معالجة طلبات التطبيقات من المجموعة
+# ============= معالجة طلبات التطبيقات من المجموعة =============
+
 @router.callback_query(F.data.startswith("appr_order_"))
 async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
     """موافقة على طلب تطبيق من المجموعة"""
@@ -3119,16 +2608,10 @@ async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: 
             ''', order_id)
             
             if order:
-                # تحديث حالة الطلب إلى processing
-                await conn.execute(
-                    "UPDATE orders SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-                    order_id
-                )
+                await conn.execute("UPDATE orders SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1", order_id)
                 
-                # جلب نقاط الطلب (التي أضيفت بالفعل عند إنشاء الطلب)
                 points = order['points_earned'] or 0
                 
-                # إرسال إشعار للمستخدم (بدون إضافة نقاط جديدة)
                 try:
                     message_text = (
                         f"✅ تمت الموافقة على طلبك #{order_id}\n\n"
@@ -3139,25 +2622,16 @@ async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: 
                         f"⏳ جاري تنفيذ طلبك عبر النظام..."
                     )
                     await bot.send_message(order['user_id'], message_text)
-                    logger.info(f"✅ تم إرسال رسالة الموافقة للمستخدم {order['user_id']}")
                 except Exception as e:
                     logger.error(f"❌ فشل إرسال رسالة للمستخدم: {e}")
                 
-                # تحديث رسالة المجموعة
                 builder = InlineKeyboardBuilder()
                 builder.row(
-                    types.InlineKeyboardButton(
-                        text="✅ تم التنفيذ", 
-                        callback_data=f"compl_order_{order_id}"
-                    ),
-                    types.InlineKeyboardButton(
-                        text="❌ تعذر التنفيذ", 
-                        callback_data=f"fail_order_{order_id}"
-                    ),
+                    types.InlineKeyboardButton(text="✅ تم التنفيذ", callback_data=f"compl_order_{order_id}"),
+                    types.InlineKeyboardButton(text="❌ تعذر التنفيذ", callback_data=f"fail_order_{order_id}"),
                     width=2
                 )
                 
-                # تعديل رسالة المجموعة
                 new_text = callback.message.text + "\n\n🔄 **جاري التنفيذ...**"
                 await callback.message.edit_text(new_text, reply_markup=builder.as_markup())
                 
@@ -3176,21 +2650,11 @@ async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: B
         order_id = int(callback.data.split("_")[2])
         
         async with db_pool.acquire() as conn:
-            order = await conn.fetchrow(
-                "SELECT user_id, total_amount_syp FROM orders WHERE id = $1",
-                order_id
-            )
+            order = await conn.fetchrow("SELECT user_id, total_amount_syp FROM orders WHERE id = $1", order_id)
             
             if order:
-                await conn.execute(
-                    "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
-                    order['total_amount_syp'], order['user_id']
-                )
-                
-                await conn.execute(
-                    "UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-                    order_id
-                )
+                await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", order['total_amount_syp'], order['user_id'])
+                await conn.execute("UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = $1", order_id)
                 
                 try:
                     await bot.send_message(
@@ -3220,7 +2684,7 @@ async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: B
 
 @router.callback_query(F.data.startswith("compl_order_"))
 async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """تأكيد تنفيذ الطلب من المجموعة - مع إضافة النقاط"""
+    """تأكيد تنفيذ الطلب من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -3236,56 +2700,32 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
                 await callback.answer("❌ الطلب غير موجود", show_alert=True)
                 return
             
-            # جلب عدد النقاط من الإعدادات
             from database import get_points_per_order
             points = await get_points_per_order(db_pool)
             
-            # تحديث حالة الطلب إلى completed
-            await conn.execute(
-                "UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-                order_id
-            )
+            await conn.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1", order_id)
             
-            # ========== إضافة النقاط للمستخدم هنا ==========
-            # تحديث نقاط المستخدم
             await conn.execute(
                 "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
                 points, order['user_id']
             )
             
-            # تحديث نقاط الطلب في جدول orders
-            await conn.execute(
-                "UPDATE orders SET points_earned = $1 WHERE id = $2",
-                points, order_id
-            )
+            await conn.execute("UPDATE orders SET points_earned = $1 WHERE id = $2", points, order_id)
             
-            # تسجيل في سجل النقاط
             await conn.execute('''
                 INSERT INTO points_history (user_id, points, action, description, created_at)
                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
             ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
             
-            logger.info(f"✅ تم إضافة {points} نقاط للمستخدم {order['user_id']} من الطلب المكتمل {order_id}")
-            
-            # ========== تحديث مستوى VIP مع تصحيح ==========
             from database import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
             
-            # 🟢🟢🟢 سطور التصحيح 🟢🟢🟢
-            logger.info(f"🔍 VIP UPDATE - User: {order['user_id']}")
-            logger.info(f"🔍 VIP INFO: {vip_info}")
-            
-            # حساب إجمالي مشتريات المستخدم للتحقق
             total_spent = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
                 WHERE user_id = $1 AND status = 'completed'
             ''', order['user_id'])
             
-            logger.info(f"🔍 TOTAL SPENT: {total_spent} SYP")
-            # 🟢🟢🟢 نهاية التصحيح 🟢🟢🟢
-            
-            # جلب معلومات VIP للعرض
             if vip_info:
                 vip_discount = vip_info.get('discount', 0)
                 vip_level = vip_info.get('level', 0)
@@ -3296,13 +2736,8 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
             vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
             
-            # حساب رصيد النقاط الجديد
-            user_points = await conn.fetchval(
-                "SELECT total_points FROM users WHERE user_id = $1",
-                order['user_id']
-            ) or 0
+            user_points = await conn.fetchval("SELECT total_points FROM users WHERE user_id = $1", order['user_id']) or 0
             
-            # إرسال إشعار للمستخدم
             try:
                 await bot.send_message(
                     order['user_id'],
@@ -3316,7 +2751,6 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             except Exception as e:
                 logger.error(f"❌ فشل إرسال رسالة للمستخدم: {e}")
             
-            # إخفاء رسالة المجموعة
             await callback.message.edit_text(
                 callback.message.text.replace("🔄 **جاري التنفيذ...**", "") + "\n\n✅ **تم التنفيذ بنجاح**",
                 reply_markup=None
@@ -3330,30 +2764,17 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
 
 @router.callback_query(F.data.startswith("fail_order_"))
 async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """تعذر تنفيذ الطلب من المجموعة - بدون إضافة نقاط"""
+    """تعذر تنفيذ الطلب من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
         async with db_pool.acquire() as conn:
-            order = await conn.fetchrow(
-                "SELECT user_id, total_amount_syp FROM orders WHERE id = $1",
-                order_id
-            )
+            order = await conn.fetchrow("SELECT user_id, total_amount_syp FROM orders WHERE id = $1", order_id)
             
             if order:
-                # إعادة الرصيد للمستخدم (النقاط ما تضاف)
-                await conn.execute(
-                    "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
-                    order['total_amount_syp'], order['user_id']
-                )
+                await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", order['total_amount_syp'], order['user_id'])
+                await conn.execute("UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = $1", order_id)
                 
-                # تحديث حالة الطلب إلى failed
-                await conn.execute(
-                    "UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-                    order_id
-                )
-                
-                # إرسال إشعار للمستخدم
                 try:
                     await bot.send_message(
                         order['user_id'],
@@ -3365,7 +2786,6 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
                 except Exception as e:
                     logger.error(f"❌ فشل إرسال رسالة للمستخدم: {e}")
                 
-                # إخفاء رسالة المجموعة
                 await callback.message.edit_text(
                     callback.message.text.replace("🔄 **جاري التنفيذ...**", "") + "\n\n❌ **تعذر التنفيذ وتم إعادة الرصيد**",
                     reply_markup=None
@@ -3378,471 +2798,11 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
     except Exception as e:
         logger.error(f"❌ خطأ في تعذر التنفيذ: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
-# ============= دوال إدارة المشرفين =============
 
-async def get_all_admins(pool):
-    """جلب جميع المشرفين من قاعدة البيانات"""
-    try:
-        async with pool.acquire() as conn:
-            # جلب المشرفين الأساسيين من config
-            from config import ADMIN_ID, MODERATORS
-            admin_ids = [ADMIN_ID] + MODERATORS
-            
-            # جلب معلومات المشرفين من جدول users
-            admins = await conn.fetch('''
-                SELECT user_id, username, first_name, last_name, 
-                       created_at, last_activity, 
-                       CASE 
-                           WHEN user_id = $1 THEN 'owner'
-                           ELSE 'admin'
-                       END as role
-                FROM users 
-                WHERE user_id = ANY($2::bigint[])
-                ORDER BY 
-                    CASE WHEN user_id = $1 THEN 0 ELSE 1 END,
-                    username
-            ''', ADMIN_ID, admin_ids)
-            
-            return admins
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب المشرفين: {e}")
-        return []
-
-async def add_admin(pool, user_id, added_by):
-    """إضافة مشرف جديد"""
-    try:
-        async with pool.acquire() as conn:
-            # التحقق من وجود المستخدم
-            user = await conn.fetchrow(
-                "SELECT user_id FROM users WHERE user_id = $1",
-                user_id
-            )
-            
-            if not user:
-                return False, "المستخدم غير موجود في قاعدة البيانات"
-            
-            # تحديث ملف config - هذا يحتاج إعادة تشغيل
-            # هنضيف للمتغير MODERATORS في config
-            from config import MODERATORS
-            if user_id in MODERATORS:
-                return False, "المستخدم مشرف بالفعل"
-            
-            # هنضيف للقائمة مؤقتاً، وبعد إعادة التشغيل راح يثبت
-            MODERATORS.append(user_id)
-            
-            # تسجيل العملية
-            await conn.execute('''
-                INSERT INTO logs (user_id, action, details, created_at)
-                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-            ''', added_by, 'add_admin', f'تمت إضافة المشرف {user_id}')
-            
-            return True, "تمت إضافة المشرف بنجاح"
-    except Exception as e:
-        logging.error(f"❌ خطأ في إضافة مشرف: {e}")
-        return False, str(e)
-
-async def remove_admin(pool, user_id, removed_by):
-    """إزالة مشرف"""
-    try:
-        async with pool.acquire() as conn:
-            from config import ADMIN_ID, MODERATORS
-            
-            # منع إزالة المالك
-            if user_id == ADMIN_ID:
-                return False, "لا يمكن إزالة المالك"
-            
-            # التحقق من وجوده في القائمة
-            if user_id not in MODERATORS:
-                return False, "المستخدم ليس مشرفاً"
-            
-            # إزالته من القائمة
-            MODERATORS.remove(user_id)
-            
-            # تسجيل العملية
-            await conn.execute('''
-                INSERT INTO logs (user_id, action, details, created_at)
-                VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-            ''', removed_by, 'remove_admin', f'تمت إزالة المشرف {user_id}')
-            
-            return True, "تمت إزالة المشرف بنجاح"
-    except Exception as e:
-        logging.error(f"❌ خطأ في إزالة مشرف: {e}")
-        return False, str(e)
-
-async def get_admin_info(pool, user_id):
-    """جلب معلومات مفصلة عن مشرف"""
-    try:
-        async with pool.acquire() as conn:
-            # معلومات المستخدم
-            user = await conn.fetchrow('''
-                SELECT user_id, username, first_name, last_name, 
-                       created_at, last_activity,
-                       total_deposits, total_orders, total_points,
-                       referral_count
-                FROM users 
-                WHERE user_id = $1
-            ''', user_id)
-            
-            if not user:
-                return None
-            
-            # آخر نشاطات المشرف
-            recent_actions = await conn.fetch('''
-                SELECT action, details, created_at
-                FROM logs
-                WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT 10
-            ''', user_id)
-            
-            # عدد العمليات التي قام بها
-            stats = await conn.fetchrow('''
-                SELECT 
-                    COUNT(*) as total_actions,
-                    COUNT(CASE WHEN action LIKE '%approve%' THEN 1 END) as approvals,
-                    COUNT(CASE WHEN action LIKE '%reject%' THEN 1 END) as rejections
-                FROM logs
-                WHERE user_id = $1
-            ''', user_id)
-            
-            return {
-                'user': dict(user),
-                'recent_actions': recent_actions,
-                'stats': dict(stats) if stats else {}
-            }
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب معلومات المشرف {user_id}: {e}")
-        return None
-# ============= إدارة المشرفين =============
-
-@router.callback_query(F.data == "manage_admins")
-async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
-    """قائمة إدارة المشرفين"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    from database import get_all_admins
-    
-    admins = await get_all_admins(db_pool)
-    
-    # تجهيز قائمة المشرفين
-    admins_text = "👑 **قائمة المشرفين**\n\n"
-    
-    for admin in admins:
-        role_icon = "👑" if admin['role'] == 'owner' else "🛡️"
-        username = f"@{admin['username']}" if admin['username'] else f"ID: {admin['user_id']}"
-        name = admin['first_name'] or ""
-        
-        admins_text += f"{role_icon} {username}\n"
-        admins_text += f"   🆔 `{admin['user_id']}`\n"
-        admins_text += f"   📝 {name}\n\n"
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="➕ إضافة مشرف", callback_data="add_admin"),
-        types.InlineKeyboardButton(text="❌ إزالة مشرف", callback_data="remove_admin")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="📋 معلومات مشرف", callback_data="admin_info"),
-        types.InlineKeyboardButton(text="📊 سجل النشاطات", callback_data="admin_logs")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin_panel")
-    )
-    
-    await callback.message.edit_text(
-        admins_text,
-        reply_markup=builder.as_markup()
-    )
-
-@router.callback_query(F.data == "add_admin")
-async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء إضافة مشرف جديد"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.message.edit_text(
-        "👤 **إضافة مشرف جديد**\n\n"
-        "أدخل الآيدي (ID) الخاص بالمستخدم الذي تريد إضافته كمشرف:\n\n"
-        "💡 *يمكن للمستخدم الحصول على آيديه عبر إرسال /id للبوت*"
-    )
-    await state.set_state(AdminStates.waiting_admin_id)
-
-@router.message(AdminStates.waiting_admin_id)
-async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
-    """تأكيد إضافة مشرف"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        new_admin_id = int(message.text.strip())
-        
-        from database import add_admin, get_user_by_id
-        
-        # التحقق من وجود المستخدم
-        user = await get_user_by_id(db_pool, new_admin_id)
-        
-        if not user:
-            return await message.answer(
-                "❌ المستخدم غير موجود في قاعدة البيانات.\n"
-                "يجب على المستخدم استخدام البوت مرة واحدة على الأقل."
-            )
-        
-        # إضافة المشرف
-        success, msg = await add_admin(db_pool, new_admin_id, message.from_user.id)
-        
-        if success:
-            await message.answer(
-                f"✅ **تمت إضافة المشرف بنجاح!**\n\n"
-                f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
-                f"🆔 الآيدي: `{new_admin_id}`\n\n"
-                f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل الصلاحيات."
-            )
-            
-            # إرسال إشعار للمشرف الجديد
-            try:
-                await message.bot.send_message(
-                    new_admin_id,
-                    f"🎉 **مبروك! تمت إضافتك كمشرف في البوت**\n\n"
-                    f"🔸 يمكنك الآن استخدام لوحة التحكم عبر إرسال /admin\n"
-                    f"👤 تمت الإضافة بواسطة: @{message.from_user.username}"
-                )
-            except:
-                pass
-        else:
-            await message.answer(f"❌ {msg}")
-        
-        await state.clear()
-        
-    except ValueError:
-        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط)")
-    except Exception as e:
-        await message.answer(f"❌ حدث خطأ: {str(e)}")
-        await state.clear()
-
-@router.callback_query(F.data == "remove_admin")
-async def remove_admin_list(callback: types.CallbackQuery, db_pool):
-    """عرض قائمة المشرفين للإزالة"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    from config import ADMIN_ID, MODERATORS
-    
-    builder = InlineKeyboardBuilder()
-    
-    for admin_id in MODERATORS:
-        async with db_pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT username, first_name FROM users WHERE user_id = $1",
-                admin_id
-            )
-        
-        name = user['username'] or user['first_name'] or str(admin_id)
-        builder.row(types.InlineKeyboardButton(
-            text=f"❌ {name}",
-            callback_data=f"remove_admin_{admin_id}"
-        ))
-    
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data="manage_admins"
-    ))
-    
-    await callback.message.edit_text(
-        "🗑️ **اختر المشرف الذي تريد إزالته:**",
-        reply_markup=builder.as_markup()
-    )
-
-@router.callback_query(F.data.startswith("remove_admin_"))
-async def remove_admin_confirm(callback: types.CallbackQuery, db_pool):
-    """تأكيد إزالة مشرف"""
-    admin_id = int(callback.data.split("_")[2])
-    
-    from config import ADMIN_ID
-    
-    if admin_id == ADMIN_ID:
-        return await callback.answer("لا يمكن إزالة المالك!", show_alert=True)
-    
-    from database import remove_admin
-    
-    success, msg = await remove_admin(db_pool, admin_id, callback.from_user.id)
-    
-    if success:
-        await callback.message.edit_text(
-            f"✅ **تمت إزالة المشرف بنجاح**\n\n"
-            f"🆔 الآيدي: `{admin_id}`\n\n"
-            f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل التغييرات."
-        )
-        
-        # إشعار المشرف الذي تمت إزالته
-        try:
-            await callback.bot.send_message(
-                admin_id,
-                f"⚠️ **تمت إزالتك من قائمة المشرفين**\n\n"
-                f"لم تعد تملك صلاحيات الإدارة في البوت.\n"
-                f"تمت الإزالة بواسطة: @{callback.from_user.username}"
-            )
-        except:
-            pass
-    else:
-        await callback.answer(f"❌ {msg}", show_alert=True)
-
-@router.callback_query(F.data == "admin_info")
-async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء البحث عن معلومات مشرف"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.message.edit_text(
-        "🔍 **معلومات مشرف**\n\n"
-        "أدخل الآيدي (ID) الخاص بالمشرف:\n\n"
-        "💡 *يمكنك إدخال آيدي المستخدم أو اليوزر نيم*"
-    )
-    await state.set_state(AdminStates.waiting_admin_info)
-
-@router.message(AdminStates.waiting_admin_info)
-async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
-    """عرض معلومات المشرف - مع دعم الإلغاء"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    # ===== التحقق من أوامر الإلغاء أولاً =====
-    if message.text in ["/cancel", "/الغاء", "/رجوع", "🔙 رجوع للقائمة"]:
-        await state.clear()
-        from handlers.start import get_main_menu_keyboard
-        await message.answer(
-            "✅ **تم إلغاء العملية**\n\n"
-            "👋 أهلاً بعودتك للقائمة الرئيسية.",
-            reply_markup=get_main_menu_keyboard(is_admin(message.from_user.id))
-        )
-        return
-    # ==========================================
-    
-    search_term = message.text.strip()
-    
-    from database import get_admin_info, get_user_by_id
-    
-    # محاولة تحويل النص إلى رقم إذا كان آيدي
-    try:
-        user_id = int(search_term)
-    except ValueError:
-        # البحث باليوزر نيم
-        async with db_pool.acquire() as conn:
-            user = await conn.fetchrow(
-                "SELECT user_id FROM users WHERE username = $1",
-                search_term.replace('@', '')
-            )
-            if user:
-                user_id = user['user_id']
-            else:
-                return await message.answer(
-                    "❌ **المستخدم غير موجود**\n\n"
-                    "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.\n"
-                    "أو أرسل /cancel للإلغاء"
-                )
-    
-    info = await get_admin_info(db_pool, user_id)
-    
-    if not info:
-        return await message.answer(
-            "❌ **المستخدم غير موجود أو ليس مشرفاً**\n\n"
-            "أدخل آيدي مشرف صحيح أو أرسل /cancel للإلغاء"
-        )
-    
-    user = info['user']
-    stats = info['stats']
-    
-    # تنسيق الوقت
-    from database import format_local_time
-    join_date = format_local_time(user['created_at'])
-    last_active = format_local_time(user['last_activity'])
-    
-    # تحديد الدور
-    from config import ADMIN_ID
-    role = "👑 **المالك**" if user_id == ADMIN_ID else "🛡️ **مشرف**"
-    
-    text = (
-        f"{role}\n\n"
-        f"🆔 **الآيدي:** `{user['user_id']}`\n"
-        f"👤 **اليوزر:** @{user['username'] or 'غير معروف'}\n"
-        f"📝 **الاسم:** {user['first_name'] or ''} {user['last_name'] or ''}\n"
-        f"📅 **تاريخ التسجيل:** {join_date}\n"
-        f"⏰ **آخر نشاط:** {last_active}\n\n"
-        
-        f"📊 **إحصائيات:**\n"
-        f"• إجمالي العمليات: {stats.get('total_actions', 0)}\n"
-        f"• ✅ موافقات: {stats.get('approvals', 0)}\n"
-        f"• ❌ رفض: {stats.get('rejections', 0)}\n\n"
-        
-        f"💰 **حساب المستخدم:**\n"
-        f"• إجمالي الإيداعات: {user['total_deposits']:,.0f} ل.س\n"
-        f"• عدد الطلبات: {user['total_orders']}\n"
-        f"• النقاط: {user['total_points']}\n"
-        f"• الإحالات: {user['referral_count']}\n\n"
-    )
-    
-    if info['recent_actions']:
-        text += "📋 **آخر النشاطات:**\n"
-        for action in info['recent_actions'][:5]:
-            action_time = format_local_time(action['created_at'])
-            text += f"• {action['action']}: {action['details']}\n"
-            text += f"  🕐 {action_time}\n"
-    
-    # إرسال المعلومات
-    try:
-        await message.answer(text, parse_mode="Markdown")
-    except Exception as e:
-        # إذا فشل الـ Markdown، نرسل بدون تنسيق
-        logger.error(f"خطأ في تنسيق Markdown: {e}")
-        await message.answer(text, parse_mode=None)
-    
-    await state.clear()
-
-@router.callback_query(F.data == "admin_logs")
-async def show_admin_logs(callback: types.CallbackQuery, db_pool):
-    """عرض سجل نشاطات المشرفين"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    async with db_pool.acquire() as conn:
-        logs = await conn.fetch('''
-            SELECT l.*, u.username 
-            FROM logs l
-            LEFT JOIN users u ON l.user_id = u.user_id
-            ORDER BY l.created_at DESC
-            LIMIT 30
-        ''')
-    
-    if not logs:
-        return await callback.answer("لا توجد نشاطات مسجلة", show_alert=True)
-    
-    text = "📋 **سجل نشاطات المشرفين**\n\n"
-    
-    from database import format_local_time
-    
-    for log in logs:
-        log_time = format_local_time(log['created_at'])
-        username = f"@{log['username']}" if log['username'] else f"ID: {log['user_id']}"
-        
-        text += f"👤 {username}\n"
-        text += f"🔹 {log['action']}: {log['details']}\n"
-        text += f"🕐 {log_time}\n\n"
-    
-    # تقطيع النص إذا كان طويلاً
-    if len(text) > 4000:
-        text = text[:4000] + "...\n(هناك المزيد من السجلات)"
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data="manage_admins"
-    ))
-    
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
-# ============= رفع مستوى VIP ومنح خصم مخصص =============
+# ============= رفع مستوى VIP =============
 
 @router.callback_query(F.data.startswith("upgrade_vip_"))
-async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db_pool):  # أضف db_pool
+async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء رفع مستوى VIP لمستخدم"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
@@ -3850,8 +2810,7 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     user_id = int(callback.data.split("_")[2])
     await state.update_data(target_user=user_id)
     
-    # جلب معلومات المستخدم الحالية
-    async with db_pool.acquire() as conn:  # ✅ صححناها
+    async with db_pool.acquire() as conn:
         user = await conn.fetchrow(
             "SELECT username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
             user_id
@@ -3865,7 +2824,6 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     current_discount = user['discount_percent']
     total_spent = user['total_spent']
     
-    # رسالة اختيار مستوى VIP
     text = (
         f"👑 **رفع مستوى VIP للمستخدم**\n\n"
         f"👤 المستخدم: @{username}\n"
@@ -3876,32 +2834,18 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     )
     
     builder = InlineKeyboardBuilder()
-    # أزرار المستويات
     levels = [
-        ("🟢 VIP 0 (0%)", 0, 0),
-        ("🔵 VIP 1 (1%)", 1, 1),
-        ("🟣 VIP 2 (2%)", 2, 2),
-        ("🟡 VIP 3 (3%)", 3, 3),
-        ("🔴 VIP 4 (5%)", 4, 5),
-        ("💎 VIP 5 (7%)", 5, 7),
+        ("🟢 VIP 0 (0%)", 0, 0), ("🔵 VIP 1 (1%)", 1, 1), ("🟣 VIP 2 (2%)", 2, 2),
+        ("🟡 VIP 3 (3%)", 3, 3), ("🔴 VIP 4 (5%)", 4, 5), ("💎 VIP 5 (7%)", 5, 7),
         ("👑 VIP 6 (10%)", 6, 10),
     ]
     
     for btn_text, level, discount in levels:
-        if level != current_vip:  # ما نظهر المستوى الحالي
-            builder.row(types.InlineKeyboardButton(
-                text=btn_text,
-                callback_data=f"set_vip_{user_id}_{level}_{discount}"
-            ))
+        if level != current_vip:
+            builder.row(types.InlineKeyboardButton(text=btn_text, callback_data=f"set_vip_{user_id}_{level}_{discount}"))
     
-    builder.row(types.InlineKeyboardButton(
-        text="🎯 خصم مخصص",
-        callback_data=f"custom_discount_{user_id}"
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data=f"user_info_cancel"
-    ))
+    builder.row(types.InlineKeyboardButton(text="🎯 خصم مخصص", callback_data=f"custom_discount_{user_id}"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"user_info_cancel"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
@@ -3914,19 +2858,13 @@ async def set_vip_level(callback: types.CallbackQuery, db_pool):
     discount = int(parts[4])
     
     async with db_pool.acquire() as conn:
-        # تحديث مستوى VIP والخصم مع تعليمه كـ "يدوي"
         await conn.execute('''
             UPDATE users 
-            SET vip_level = $1, 
-                discount_percent = $2,
-                manual_vip = TRUE  -- ✅ نخزن أنه يدوي
+            SET vip_level = $1, discount_percent = $2, manual_vip = TRUE
             WHERE user_id = $3
         ''', level, discount, user_id)
         
-        user = await conn.fetchrow(
-            "SELECT username, first_name FROM users WHERE user_id = $1",
-            user_id
-        )
+        user = await conn.fetchrow("SELECT username, first_name FROM users WHERE user_id = $1", user_id)
     
     username = user['username'] or user['first_name'] or str(user_id)
     
@@ -3939,7 +2877,6 @@ async def set_vip_level(callback: types.CallbackQuery, db_pool):
         f"⚠️ هذا المستوى يدوي ولن يتغير تلقائياً."
     )
     
-    # إرسال إشعار للمستخدم
     try:
         vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
         icon = vip_icons[level] if level < len(vip_icons) else "⭐"
@@ -3954,7 +2891,7 @@ async def set_vip_level(callback: types.CallbackQuery, db_pool):
         pass
 
 @router.callback_query(F.data.startswith("custom_discount_"))
-async def custom_discount_start(callback: types.CallbackQuery, state: FSMContext, db_pool):  # أضف db_pool
+async def custom_discount_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء إعطاء خصم مخصص"""
     user_id = int(callback.data.split("_")[2])
     await state.update_data(target_user=user_id)
@@ -3973,7 +2910,6 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من الإلغاء
     if message.text in ["/cancel", "/الغاء", "/رجوع", "🔙 رجوع للقائمة"]:
         await state.clear()
         await message.answer("✅ تم إلغاء العملية")
@@ -3982,25 +2918,19 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
     try:
         discount = float(message.text.strip())
         if discount < 0 or discount > 100:
-            return await message.answer("❌ نسبة الخصم يجب أن تكون بين 0 و 100")
+            return await message.answer("❌ نسبة الخصم يجب أن تكون بين 0 و 100:", reply_markup=get_cancel_keyboard())
         
         data = await state.get_data()
         user_id = data['target_user']
         
         async with db_pool.acquire() as conn:
-            # تحديث الخصم فقط (المستوى يبقى كما هو)
             await conn.execute('''
                 UPDATE users 
-                SET discount_percent = $1,
-		    manual_vip = TRUE  -- ✅ نخزن أنه يدوي 
+                SET discount_percent = $1, manual_vip = TRUE 
                 WHERE user_id = $2
             ''', discount, user_id)
             
-            # جلب معلومات المستخدم
-            user = await conn.fetchrow(
-                "SELECT username, first_name, vip_level FROM users WHERE user_id = $1",
-                user_id
-            )
+            user = await conn.fetchrow("SELECT username, first_name, vip_level FROM users WHERE user_id = $1", user_id)
         
         username = user['username'] or user['first_name'] or str(user_id)
         vip_level = user['vip_level']
@@ -4013,7 +2943,6 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
             f"💰 نسبة الخصم الجديدة: {discount}%"
         )
         
-        # إرسال إشعار للمستخدم
         try:
             await message.bot.send_message(
                 user_id,
@@ -4028,8 +2957,7 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
         await state.clear()
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح")
-# ============= خفض مستوى VIP مع تحذير =============
+        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
 
 @router.callback_query(F.data.startswith("downgrade_vip_"))
 async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -4040,7 +2968,6 @@ async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, 
     user_id = int(callback.data.split("_")[2])
     await state.update_data(target_user=user_id)
     
-    # جلب معلومات المستخدم الحالية
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow(
             "SELECT username, first_name, vip_level, discount_percent, manual_vip FROM users WHERE user_id = $1",
@@ -4055,7 +2982,6 @@ async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, 
     current_discount = user['discount_percent']
     manual_status = " (يدوي)" if user['manual_vip'] else ""
     
-    # رسالة اختيار مستوى VIP الجديد
     text = (
         f"⚠️ **خفض مستوى VIP للمستخدم**\n\n"
         f"👤 المستخدم: @{username}\n"
@@ -4065,42 +2991,27 @@ async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, 
     )
     
     builder = InlineKeyboardBuilder()
-    # أزرار المستويات (الأقل فقط)
-    levels = []
-    for level in range(0, current_vip):  # فقط المستويات الأقل
+    for level in range(0, current_vip):
         if level == 0:
-            discount = 0
-            btn_text = f"🟢 VIP 0 (0%)"
+            discount = 0; btn_text = f"🟢 VIP 0 (0%)"
         elif level == 1:
-            discount = 1
-            btn_text = f"🔵 VIP 1 (1%)"
+            discount = 1; btn_text = f"🔵 VIP 1 (1%)"
         elif level == 2:
-            discount = 2
-            btn_text = f"🟣 VIP 2 (2%)"
+            discount = 2; btn_text = f"🟣 VIP 2 (2%)"
         elif level == 3:
-            discount = 3
-            btn_text = f"🟡 VIP 3 (3%)"
+            discount = 3; btn_text = f"🟡 VIP 3 (3%)"
         elif level == 4:
-            discount = 5
-            btn_text = f"🔴 VIP 4 (5%)"
+            discount = 5; btn_text = f"🔴 VIP 4 (5%)"
         elif level == 5:
-            discount = 7
-            btn_text = f"💎 VIP 5 (7%)"
+            discount = 7; btn_text = f"💎 VIP 5 (7%)"
         elif level == 6:
-            discount = 10
-            btn_text = f"👑 VIP 6 (10%)"
+            discount = 10; btn_text = f"👑 VIP 6 (10%)"
         else:
             continue
-            
-        builder.row(types.InlineKeyboardButton(
-            text=btn_text,
-            callback_data=f"downgrade_to_{user_id}_{level}_{discount}"
-        ))
+        
+        builder.row(types.InlineKeyboardButton(text=btn_text, callback_data=f"downgrade_to_{user_id}_{level}_{discount}"))
     
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data=f"user_info_cancel"
-    ))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"user_info_cancel"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
@@ -4112,11 +3023,7 @@ async def downgrade_vip_ask_reason(callback: types.CallbackQuery, state: FSMCont
     new_level = int(parts[3])
     new_discount = int(parts[4])
     
-    await state.update_data(
-        target_user=user_id,
-        new_level=new_level,
-        new_discount=new_discount
-    )
+    await state.update_data(target_user=user_id, new_level=new_level, new_discount=new_discount)
     
     await callback.message.edit_text(
         f"⚠️ **خفض مستوى VIP**\n\n"
@@ -4138,30 +3045,21 @@ async def downgrade_vip_execute(message: types.Message, state: FSMContext, db_po
     new_level = data['new_level']
     new_discount = data['new_discount']
     
-    # التحقق من سبب التخطي
     reason = None
     if message.text and message.text != "/skip":
         reason = message.text.strip()
     
     async with db_pool.acquire() as conn:
-        # تحديث مستوى VIP (يبقى يدوي أو يصبح تلقائي؟ هنا بنخليه يدوي)
         await conn.execute('''
             UPDATE users 
-            SET vip_level = $1, 
-                discount_percent = $2,
-                manual_vip = TRUE  -- نبقيه يدوي عشان ما يتغير تلقائياً
+            SET vip_level = $1, discount_percent = $2, manual_vip = TRUE
             WHERE user_id = $3
         ''', new_level, new_discount, user_id)
         
-        # جلب معلومات المستخدم
-        user = await conn.fetchrow(
-            "SELECT username, first_name FROM users WHERE user_id = $1",
-            user_id
-        )
+        user = await conn.fetchrow("SELECT username, first_name FROM users WHERE user_id = $1", user_id)
     
     username = user['username'] or user['first_name'] or str(user_id)
     
-    # رسالة تأكيد للأدمن
     admin_text = (
         f"✅ **تم خفض مستوى VIP بنجاح**\n\n"
         f"👤 المستخدم: @{username}\n"
@@ -4177,7 +3075,6 @@ async def downgrade_vip_execute(message: types.Message, state: FSMContext, db_po
     
     await message.answer(admin_text)
     
-    # إرسال إشعار للمستخدم (تحذير)
     try:
         user_message = (
             f"⚠️ **تم تعديل مستواك في البوت**\n\n"
@@ -4204,39 +3101,6 @@ async def user_info_cancel(callback: types.CallbackQuery):
     """إلغاء والعودة لمعلومات المستخدم"""
     await callback.message.edit_text("✅ تم الإلغاء")
 
-@router.callback_query(F.data == "back_to_admin_panel")
-async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
-    """العودة للوحة التحكم الرئيسية"""
-    from database import get_bot_status
-    
-    bot_status = await get_bot_status(db_pool)
-    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
-    
-    kb = [
-        [
-            types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
-            types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")
-        ],
-        [
-            types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
-            types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")
-        ],
-        [
-            types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
-            types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")
-        ],
-        [
-            types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")
-        ]
-    ]
-    
-    await callback.message.edit_text(
-        f"🛠 **لوحة تحكم الإدارة**\n\n"
-        f"حالة البوت: {status_text}\n\n"
-        f"🔸 **اختر الإجراء المطلوب:**",
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb),
-        parse_mode="Markdown"
-    )
 @router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel"]))
 async def admin_back_handler(message: types.Message, state: FSMContext, db_pool):
     """الرجوع من أي عملية إدارية"""
@@ -4246,16 +3110,15 @@ async def admin_back_handler(message: types.Message, state: FSMContext, db_pool)
         await state.clear()
     
     from database import is_admin_user
+    is_admin_flag = await is_admin_user(db_pool, message.from_user.id)
     
-    is_admin = await is_admin_user(db_pool, message.from_user.id)
-    
-    if is_admin:
+    if is_admin_flag:
         await message.answer(
             "👋 تم الإلغاء. استخدم /admin للعودة للوحة التحكم",
-            reply_markup=get_main_menu_keyboard(is_admin)  # 👈 مستوردة من keyboards
+            reply_markup=get_main_menu_keyboard(is_admin_flag)
         )
     else:
         await message.answer(
             "✅ تم الإلغاء",
-            reply_markup=get_back_keyboard()  # 👈 مستوردة من keyboards
+            reply_markup=get_back_keyboard()
         )
