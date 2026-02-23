@@ -7,7 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import USD_TO_SYP, ADMIN_ID
 from datetime import datetime
 import logging
-from handlers.keyboards import get_back_inline_keyboard
+from handlers.keyboards import get_back_inline_keyboard, get_main_menu_keyboard
+from database import get_user_full_stats, get_user_points, get_exchange_rate, get_redemption_rate, is_admin_user
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -15,12 +16,12 @@ router = Router()
 class ProfileStates(StatesGroup):
     waiting_referral_code = State()
 
+# ============= الملف الشخصي الرئيسي =============
+
 @router.message(F.text == "👤 حسابي")
 async def show_profile(message: types.Message, db_pool):
     """عرض الملف الشخصي للمستخدم"""
     user_id = message.from_user.id
-    
-    from database import get_user_full_stats, get_user_points
     
     # جلب إحصائيات المستخدم
     stats = await get_user_full_stats(db_pool, user_id)
@@ -44,21 +45,21 @@ async def show_profile(message: types.Message, db_pool):
     
     user = stats['user']
     
-    # حساب قيمة النقاط
-    async with db_pool.acquire() as conn:
-        redemption_rate = await conn.fetchval(
-            "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
-        ) or '500'
-        redemption_rate = int(redemption_rate)
+    # جلب الإعدادات
+    redemption_rate = await get_redemption_rate(db_pool)
+    exchange_rate = await get_exchange_rate(db_pool)
     
+    # حساب قيمة النقاط
     points_value_usd = (user.get('total_points', 0) / redemption_rate) * 5
-    points_value_syp = points_value_usd * USD_TO_SYP
+    points_value_syp = points_value_usd * exchange_rate
     
     # تنسيق تاريخ التسجيل
     join_date = "غير معروف"
     if user.get('created_at'):
         if isinstance(user['created_at'], datetime):
             join_date = user['created_at'].strftime("%Y-%m-%d")
+        else:
+            join_date = str(user['created_at'])
     
     # بناء رسالة الملف الشخصي
     profile_text = (
@@ -78,7 +79,7 @@ async def show_profile(message: types.Message, db_pool):
         f"⭐ **نظام النقاط:**\n"
         f"• رصيد النقاط: {user.get('total_points', 0)}\n"
         f"• قيمة النقاط: {points_value_syp:,.0f} ل.س\n"
-        f"• كل {redemption_rate} نقطة = 5$ ({redemption_rate * USD_TO_SYP:,.0f} ل.س)\n\n"
+        f"• كل {redemption_rate} نقطة = 5$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n\n"
         
         f"🔗 **الإحالة:**\n"
         f"• كود الإحالة: `{user.get('referral_code', 'غير متوفر')}`\n"
@@ -144,79 +145,90 @@ async def show_simple_profile(message: types.Message, user_id, balance, points, 
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
+
+# ============= سجل النقاط =============
+
 @router.callback_query(F.data == "points_history")
 async def show_points_history(callback: types.CallbackQuery, db_pool):
     """عرض سجل النقاط مع توقيت دمشق"""
-    async with db_pool.acquire() as conn:
-        # ضبط المنطقة الزمنية للاتصال
-        await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+    try:
+        async with db_pool.acquire() as conn:
+            # ضبط المنطقة الزمنية للاتصال
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # جلب سجل النقاط مع تحويل التوقيت
+            history = await conn.fetch('''
+                SELECT points, action, description, 
+                       created_at AT TIME ZONE 'Asia/Damascus' as created_at_local
+                FROM points_history
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 20
+            ''', callback.from_user.id)
+            
+            # جلب إحصائيات
+            stats = await conn.fetchrow('''
+                SELECT 
+                    COALESCE(SUM(CASE WHEN points > 0 THEN points ELSE 0 END), 0) as total_earned,
+                    COALESCE(SUM(CASE WHEN points < 0 THEN ABS(points) ELSE 0 END), 0) as total_spent
+                FROM points_history
+                WHERE user_id = $1
+            ''', callback.from_user.id)
         
-        # جلب سجل النقاط مع تحويل التوقيت
-        history = await conn.fetch('''
-            SELECT points, action, description, 
-                   (created_at AT TIME ZONE 'Asia/Damascus') as created_at_local
-            FROM points_history
-            WHERE user_id = $1
-            ORDER BY created_at DESC
-            LIMIT 20
-        ''', callback.from_user.id)
+        if not history:
+            await callback.answer("❌ لا يوجد سجل نقاط حالياً", show_alert=True)
+            return
         
-        # جلب إحصائيات
-        stats = await conn.fetchrow('''
-            SELECT 
-                COALESCE(SUM(CASE WHEN points > 0 THEN points ELSE 0 END), 0) as total_earned,
-                COALESCE(SUM(CASE WHEN points < 0 THEN ABS(points) ELSE 0 END), 0) as total_spent
-            FROM points_history
-            WHERE user_id = $1
-        ''', callback.from_user.id)
-    
-    if not history:
-        return await callback.answer("❌ لا يوجد سجل نقاط حالياً", show_alert=True)
-    
-    total_earned = stats['total_earned'] if stats else 0
-    total_spent = stats['total_spent'] if stats else 0
-    
-    text = "⭐ **سجل النقاط (توقيت دمشق)**\n\n"
-    
-    for i, item in enumerate(history[:10], 1):
-        symbol = "➕" if item['points'] > 0 else "➖"
-        points_abs = abs(item['points'])
+        total_earned = stats['total_earned'] if stats else 0
+        total_spent = stats['total_spent'] if stats else 0
+        current_balance = total_earned - total_spent
         
-        # تنسيق التاريخ
-        if item['created_at_local']:
-            if hasattr(item['created_at_local'], 'strftime'):
-                date = item['created_at_local'].strftime("%Y-%m-%d %H:%M:%S")
+        text = "⭐ **سجل النقاط (توقيت دمشق)**\n\n"
+        
+        for i, item in enumerate(history[:10], 1):
+            symbol = "➕" if item['points'] > 0 else "➖"
+            points_abs = abs(item['points'])
+            
+            # تنسيق التاريخ
+            if item['created_at_local']:
+                if hasattr(item['created_at_local'], 'strftime'):
+                    date = item['created_at_local'].strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    date = str(item['created_at_local'])
             else:
-                date = str(item['created_at_local'])
-        else:
-            date = "وقت غير معروف"
+                date = "وقت غير معروف"
+            
+            action_names = {
+                'order_completed': 'طلب مكتمل',
+                'order': 'طلب',
+                'referral': 'إحالة',
+                'admin_add': 'إضافة من الأدمن',
+                'redemption': 'استرداد نقاط',
+                'points_spent': 'خصم نقاط'
+            }
+            
+            action_text = action_names.get(item['action'], item['action'])
+            description = item.get('description', action_text)
+            
+            text += f"{i}. {symbol} **{points_abs} نقطة**\n"
+            text += f"   📝 {description}\n"
+            text += f"   🕐 {date}\n\n"
         
-        action_names = {
-            'order_completed': 'طلب مكتمل',
-            'order': 'طلب',
-            'referral': 'إحالة',
-            'admin_add': 'إضافة من الأدمن',
-            'redemption': 'استرداد نقاط',
-            'points_spent': 'خصم نقاط'
-        }
+        text += "📊 **الإحصائيات:**\n"
+        text += f"• إجمالي المكتسب: {total_earned} نقطة\n"
+        text += f"• إجمالي المستخدم: {total_spent} نقطة\n"
+        text += f"• الرصيد الحالي: {current_balance} نقطة"
         
-        action_text = action_names.get(item['action'], item['action'])
-        description = item.get('description', action_text)
-        
-        text += f"{i}. {symbol} **{points_abs} نقطة**\n"
-        text += f"   📝 {description}\n"
-        text += f"   🕐 {date}\n\n"
-    
-    text += "📊 **الإحصائيات:**\n"
-    text += f"• إجمالي المكتسب: {total_earned} نقطة\n"
-    text += f"• إجمالي المستخدم: {total_spent} نقطة\n"
-    text += f"• الرصيد الحالي: {total_earned - total_spent} نقطة"
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_back_inline_keyboard("back_to_profile"),
-        parse_mode="Markdown"
-    )
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_back_inline_keyboard("back_to_profile"),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"خطأ في سجل النقاط: {e}")
+        await callback.answer("❌ حدث خطأ في جلب السجل", show_alert=True)
+
+# ============= رابط الإحالة =============
 
 @router.callback_query(F.data == "referral_link")
 async def show_referral_link(callback: types.CallbackQuery, db_pool):
@@ -251,6 +263,8 @@ async def show_referral_link(callback: types.CallbackQuery, db_pool):
             callback.from_user.id
         ) or 0
     
+    exchange_rate = await get_exchange_rate(db_pool)
+    
     text = (
         f"🔗 **رابط الإحالة الخاص بك**\n\n"
         f"`{link}`\n\n"
@@ -260,16 +274,22 @@ async def show_referral_link(callback: types.CallbackQuery, db_pool):
         f"**🎁 مميزات الإحالة:**\n"
         f"• 5 نقاط لكل مشترك جديد\n"
         f"• النقاط قابلة للاستبدال برصيد\n"
-        f"• كل 500 نقطة = 5$ ({500 * USD_TO_SYP:,.0f} ل.س)\n\n"
+        f"• كل 500 نقطة = 5$ ({500 * exchange_rate:,.0f} ل.س)\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("back_to_profile"),
+        parse_mode="Markdown"
+    )
+
+# ============= استرداد النقاط =============
 
 @router.callback_query(F.data == "redeem_points")
 async def start_redeem_points(callback: types.CallbackQuery, db_pool):
     """بدء عملية استرداد النقاط"""
-    from database import get_user_points, get_redemption_rate, get_exchange_rate, calculate_points_value
+    from database import get_user_points
     
     user_id = callback.from_user.id
     points = await get_user_points(db_pool, user_id)
@@ -279,10 +299,11 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
     exchange_rate = await get_exchange_rate(db_pool)
     
     if points < redemption_rate:
-        return await callback.answer(
-            f"تحتاج {redemption_rate} نقطة على الأقل للاسترداد.\nلديك {points} نقطة فقط.", 
+        await callback.answer(
+            f"❌ تحتاج {redemption_rate} نقطة على الأقل للاسترداد.\nلديك {points} نقطة فقط.", 
             show_alert=True
         )
+        return
     
     # حساب المبالغ الممكنة
     possible_redemptions = []
@@ -291,17 +312,16 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
     for i in range(1, max_redemptions + 1):
         points_needed = i * redemption_rate
         usd_amount = i * 5
-        syp_amount = usd_amount * exchange_rate  # استخدام سعر الصرف الحالي
+        syp_amount = usd_amount * exchange_rate
         possible_redemptions.append((points_needed, usd_amount, syp_amount))
     
     builder = InlineKeyboardBuilder()
     for points_needed, usd_amount, syp_amount in possible_redemptions:
         builder.row(types.InlineKeyboardButton(
             text=f"{usd_amount}$ ({syp_amount:,.0f} ل.س) - {points_needed} نقطة",
-            callback_data=f"redeem_{points_needed}_{syp_amount}_{exchange_rate}"
+            callback_data=f"redeem_{points_needed}_{syp_amount:.0f}_{exchange_rate}"
         ))
     
-    # ✅ استخدام الدالة المستوردة لزر الرجوع
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع", 
         callback_data="back_to_profile"
@@ -315,12 +335,21 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
         f"اختر المبلغ الذي تريد استرداده:"
     )
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+
 @router.callback_query(F.data.startswith("redeem_"))
 async def process_redeem(callback: types.CallbackQuery, db_pool):
     """معالجة طلب الاسترداد"""
     try:
         parts = callback.data.split("_")
+        if len(parts) < 3:
+            await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
+            return
+            
         points = int(parts[1])
         amount_syp = float(parts[2])
         exchange_rate = float(parts[3]) if len(parts) > 3 else None
@@ -348,7 +377,8 @@ async def process_redeem(callback: types.CallbackQuery, db_pool):
                 f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n\n"
                 f"⏳ في انتظار موافقة الإدارة.\n"
                 f"📋 رقم الطلب: #{request_id}",
-                reply_markup=get_back_inline_keyboard("back_to_profile")  # 👈 مستوردة
+                reply_markup=get_back_inline_keyboard("back_to_profile"),
+                parse_mode="Markdown"
             )
             
             # إشعار المشرفين
@@ -372,8 +402,13 @@ async def process_redeem(callback: types.CallbackQuery, db_pool):
                     except:
                         pass
                 
+    except ValueError as e:
+        await callback.answer(f"❌ خطأ في البيانات: {str(e)}", show_alert=True)
     except Exception as e:
-        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+        logger.error(f"خطأ في معالجة الاسترداد: {e}")
+        await callback.answer(f"❌ حدث خطأ: {str(e)}", show_alert=True)
+
+# ============= إحصائيات مفصلة =============
 
 @router.callback_query(F.data == "my_stats")
 async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
@@ -383,7 +418,8 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
     stats = await get_user_full_stats(db_pool, callback.from_user.id)
     
     if not stats:
-        return await callback.answer("لا توجد إحصائيات كافية بعد", show_alert=True)
+        await callback.answer("لا توجد إحصائيات كافية بعد", show_alert=True)
+        return
     
     text = (
         "📊 **إحصائياتك التفصيلية**\n\n"
@@ -409,9 +445,11 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(
         text,
-        reply_markup=get_back_inline_keyboard("back_to_profile"),  # 👈 مستوردة
+        reply_markup=get_back_inline_keyboard("back_to_profile"),
         parse_mode="Markdown"
     )
+
+# ============= آخر الطلبات =============
 
 @router.callback_query(F.data == "recent_orders")
 async def show_recent_orders(callback: types.CallbackQuery, db_pool):
@@ -421,12 +459,19 @@ async def show_recent_orders(callback: types.CallbackQuery, db_pool):
     stats = await get_user_full_stats(db_pool, callback.from_user.id)
     
     if not stats or not stats.get('recent_orders'):
-        return await callback.answer("لا توجد طلبات حديثة", show_alert=True)
+        await callback.answer("لا توجد طلبات حديثة", show_alert=True)
+        return
     
     text = "📋 **آخر 5 طلبات**\n\n"
     
     for order in stats['recent_orders']:
-        date = order['created_at'].strftime("%Y-%m-%d %H:%M") if order['created_at'] else "تاريخ غير معروف"
+        date = "تاريخ غير معروف"
+        if order['created_at']:
+            if hasattr(order['created_at'], 'strftime'):
+                date = order['created_at'].strftime("%Y-%m-%d %H:%M")
+            else:
+                date = str(order['created_at'])
+        
         status_emoji = {
             'pending': '⏳',
             'processing': '🔄',
@@ -445,12 +490,38 @@ async def show_recent_orders(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(
         text,
-        reply_markup=get_back_inline_keyboard("back_to_profile"),  # 👈 مستوردة
+        reply_markup=get_back_inline_keyboard("back_to_profile"),
         parse_mode="Markdown"
     )
+
+# ============= العودة للملف الشخصي =============
+
 @router.callback_query(F.data == "back_to_profile")
 async def back_to_profile(callback: types.CallbackQuery, db_pool):
     """العودة إلى الملف الشخصي"""
-    # إنشاء رسالة جديدة بدلاً من تعديل القديمة
-    await callback.message.delete()
-    await show_profile(callback.message, db_pool)
+    try:
+        # إنشاء رسالة جديدة بدلاً من تعديل القديمة
+        await callback.message.delete()
+        await show_profile(callback.message, db_pool)
+    except Exception as e:
+        logger.error(f"خطأ في العودة للملف الشخصي: {e}")
+        # إذا فشل الحذف، نرسل رسالة جديدة
+        await callback.message.answer("👋 تم العودة")
+        await show_profile(callback.message, db_pool)
+
+# ============= معالج الرجوع العام =============
+
+@router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel", "🏠 القائمة الرئيسية", "❌ إلغاء"]))
+async def profile_back_handler(message: types.Message, state: FSMContext, db_pool):
+    """معالج الرجوع من الملف الشخصي"""
+    current_state = await state.get_state()
+    
+    if current_state is not None:
+        await state.clear()
+    
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    
+    await message.answer(
+        "👋 أهلاً بك في القائمة الرئيسية",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
