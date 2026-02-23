@@ -1150,7 +1150,7 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
 # ============= تعديل خيار =============
 
 @router.callback_query(F.data.startswith("edit_option_"))
-async def edit_option_menu_fixed(callback: types.CallbackQuery, state: FSMContext, db_pool):
+async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """عرض قائمة تعديل الخيار - نسخة مصححة"""
     try:
         # استخراج option_id من callback data
@@ -1168,43 +1168,38 @@ async def edit_option_menu_fixed(callback: types.CallbackQuery, state: FSMContex
         if not option:
             return await callback.answer("❌ الخيار غير موجود", show_alert=True)
         
-        # حفظ البيانات في state
         await state.update_data(
             option_id=option_id,
             product_id=option['product_id']
         )
         
-        # بناء أزرار التعديل
+        # بناء أزرار التعديل - باستخدام تنسيق بسيط وواضح
         builder = InlineKeyboardBuilder()
         
-        # زر تعديل الاسم
+        # أزرار التعديل - كل زر في صف منفصل
         builder.row(types.InlineKeyboardButton(
             text="📝 تعديل الاسم", 
-            callback_data=f"edit_opt_field_name_{option_id}"
+            callback_data=f"edit_fld_name_{option_id}"
         ))
         
-        # زر تعديل الكمية
         builder.row(types.InlineKeyboardButton(
             text="🔢 تعديل الكمية", 
-            callback_data=f"edit_opt_field_quantity_{option_id}"
+            callback_data=f"edit_fld_quantity_{option_id}"
         ))
         
-        # زر تعديل السعر
         builder.row(types.InlineKeyboardButton(
-            text="💰 تعديل السعر", 
-            callback_data=f"edit_opt_field_price_{option_id}"
+            text="💰 تعديل سعر المورد", 
+            callback_data=f"edit_fld_price_{option_id}"
         ))
         
-        # زر تعديل الربح
         builder.row(types.InlineKeyboardButton(
-            text="📈 تعديل الربح", 
-            callback_data=f"edit_opt_field_profit_{option_id}"
+            text="📈 تعديل نسبة الربح", 
+            callback_data=f"edit_fld_profit_{option_id}"
         ))
         
-        # زر تعديل الوصف
         builder.row(types.InlineKeyboardButton(
             text="📝 تعديل الوصف", 
-            callback_data=f"edit_opt_field_desc_{option_id}"
+            callback_data=f"edit_fld_desc_{option_id}"
         ))
         
         # زر الرجوع
@@ -1213,13 +1208,12 @@ async def edit_option_menu_fixed(callback: types.CallbackQuery, state: FSMContex
             callback_data=f"prod_options_{option['product_id']}"
         ))
         
-        # نص المعلومات
         text = (
             f"✏️ **تعديل الخيار**\n\n"
             f"**البيانات الحالية:**\n"
             f"• الاسم: {option['name']}\n"
             f"• الكمية: {option['quantity']}\n"
-            f"• السعر: ${option['price_usd']:.3f}\n"
+            f"• سعر المورد: ${option['price_usd']:.3f}\n"
         )
         
         if option.get('description'):
@@ -1228,34 +1222,28 @@ async def edit_option_menu_fixed(callback: types.CallbackQuery, state: FSMContex
         await callback.message.edit_text(text, reply_markup=builder.as_markup())
         
     except Exception as e:
-        logger.error(f"❌ خطأ في edit_option_menu_fixed: {e}")
+        logger.error(f"❌ خطأ في edit_option_menu: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-
-@router.callback_query(F.data.startswith("edit_opt_field_"))
-async def edit_option_field_start_fixed(callback: types.CallbackQuery, state: FSMContext):
-    """بدء تعديل حقل معين - نسخة مصححة"""
+@router.callback_query(F.data.startswith("edit_fld_"))
+async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل حقل معين - نسخة مبسطة"""
     try:
-        # تحليل callback data: edit_opt_field_name_123
+        # تحليل callback data: edit_fld_name_123
         parts = callback.data.split("_")
         
-        if len(parts) >= 5:
-            # التنسيق: edit_opt_field_name_123
-            field_type = parts[3]  # name, quantity, price, profit, desc
-            option_id = int(parts[4])
-        elif len(parts) == 4:
-            # التنسيق: edit_opt_field_name_123 (إذا كان الـ prefix مختلف)
-            field_type = parts[2]
-            option_id = int(parts[3])
-        else:
+        if len(parts) != 4:
             await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
             return
         
-        # أسماء الحقول للتنسيق
+        field_type = parts[2]  # name, quantity, price, profit, desc
+        option_id = int(parts[3])
+        
+        # أسماء الحقول للعرض
         field_names = {
             'name': 'الاسم',
             'quantity': 'الكمية',
-            'price': 'السعر',
+            'price': 'سعر المورد',
             'profit': 'نسبة الربح',
             'desc': 'الوصف'
         }
@@ -1268,11 +1256,11 @@ async def edit_option_field_start_fixed(callback: types.CallbackQuery, state: FS
             option_id=option_id
         )
         
-        # تعليمات الإدخال حسب نوع الحقل
+        # تعليمات الإدخال
         instructions = {
             'name': "أدخل الاسم الجديد:",
             'quantity': "أدخل الكمية الجديدة (رقم فقط):",
-            'price': "أدخل السعر الجديد (بالدولار):",
+            'price': "أدخل سعر المورد الجديد (بالدولار):",
             'profit': "أدخل نسبة الربح الجديدة (%):",
             'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
         }
@@ -1281,19 +1269,23 @@ async def edit_option_field_start_fixed(callback: types.CallbackQuery, state: FS
         await callback.message.edit_text(
             f"✏️ **تعديل {field_name}**\n\n"
             f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
-            f"❌ للإلغاء أرسل /cancel"
+            f"📝 أرسل القيمة الجديدة الآن\n"
+            f"❌ أو أرسل /cancel للإلغاء"
         )
         
+        # تغيير حالة FSM
         await state.set_state(AdminStates.waiting_edit_option_value)
         
+        # إرسال تأكيد للمستخدم أن البوت ينتظر الإدخال
+        await callback.answer("📝 جاري انتظار الإدخال...")
+        
     except Exception as e:
-        logger.error(f"❌ خطأ في edit_option_field_start_fixed: {e}")
+        logger.error(f"❌ خطأ في edit_field_start: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-
 @router.message(AdminStates.waiting_edit_option_value)
-async def edit_option_value_save_fixed(message: types.Message, state: FSMContext, db_pool):
-    """حفظ القيمة المعدلة - نسخة مصححة"""
+async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
+    """حفظ القيمة المعدلة - نسخة محسنة"""
     if not is_admin(message.from_user.id):
         return
     
@@ -1346,7 +1338,7 @@ async def edit_option_value_save_fixed(message: types.Message, state: FSMContext
                     await message.answer("❌ السعر يجب أن يكون أكبر من 0:")
                     return
                 update_value = price
-                field_name = "السعر"
+                field_name = "سعر المورد"
             except ValueError:
                 await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):")
                 return
@@ -1388,6 +1380,8 @@ async def edit_option_value_save_fixed(message: types.Message, state: FSMContext
                     await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
                 else:
                     await message.answer("❌ لم يتم العثور على الخيار")
+                    await state.clear()
+                    return
             else:
                 # تحديث الخيار مباشرة
                 await conn.execute(
@@ -1405,21 +1399,27 @@ async def edit_option_value_save_fixed(message: types.Message, state: FSMContext
                 option_id
             )
             if option:
-                # إنشاء callback وهمي للعودة لقائمة الخيارات
-                fake_callback = types.CallbackQuery(
-                    id='0',
-                    from_user=message.from_user,
-                    message=types.Message(
-                        message_id=0,
-                        date=datetime.now(),
-                        chat=types.Chat(id=message.from_user.id, type='private'),
-                        text=''
-                    ),
+                # استدعاء دالة عرض الخيارات مباشرة
+                from handlers.admin import show_product_options
+                
+                # إنشاء كائن callback بسيط
+                class FakeCallback:
+                    def __init__(self, user, message, data, bot):
+                        self.from_user = user
+                        self.message = message
+                        self.data = data
+                        self.bot = bot
+                    
+                    async def answer(self, text=None, show_alert=False):
+                        pass
+                
+                fake_callback = FakeCallback(
+                    user=message.from_user,
+                    message=message,
                     data=f"prod_options_{option['product_id']}",
                     bot=message.bot
                 )
-                # استدعاء دالة عرض الخيارات
-                from handlers.admin import show_product_options
+                
                 await show_product_options(fake_callback, db_pool)
         
     except Exception as e:
