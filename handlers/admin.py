@@ -1906,48 +1906,34 @@ async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_p
 
 @router.message(AdminStates.waiting_new_rate)
 async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
-    """حفظ سعر الصرف الجديد"""
     if not is_admin(message.from_user.id):
         return
     
-    # التحقق من صحة الإدخال
     try:
         new_rate = float(message.text)
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118)")
-    
-    if new_rate <= 0:
-        return await message.answer("⚠️ يرجى إدخال رقم موجب")
-    
-    from database import set_exchange_rate
-    await set_exchange_rate(db_pool, new_rate)
-    
-    # تحديث المتغير العام في config
-    import config
-    config.USD_TO_SYP = new_rate
-    
-    await message.answer(
-        f"✅ **تم تحديث سعر الصرف بنجاح**\n\n"
-        f"💰 السعر الجديد: {new_rate:,.0f} ل.س = 1$"
-    )
-    
-    # إرسال إشعار للمشرفين الآخرين
-    from config import MODERATORS
-    for mod_id in MODERATORS:
-        if mod_id and mod_id != message.from_user.id:
-            try:
-                await message.bot.send_message(
-                    mod_id,
-                    f"ℹ️ تم تغيير سعر الصرف بواسطة @{message.from_user.username}\n"
-                    f"💰 السعر الجديد: {new_rate:,.0f} ل.س"
-                )
-            except:
-                pass
-    
-    await state.clear()
+        
+        if new_rate <= 0:
+            return await message.answer("⚠️ يرجى إدخال رقم موجب")
+        
+        from database import set_exchange_rate
+        await set_exchange_rate(db_pool, new_rate)
+        
+        import config
+        config.USD_TO_SYP = new_rate
+        
+        await message.answer(f"✅ تم تحديث سعر الصرف إلى {new_rate}")
+        
+        for mod_id in MODERATORS:
+            if mod_id and mod_id != message.from_user.id:
+                try:
+                    await message.bot.send_message(mod_id, f"ℹ️ تم تغيير السعر إلى {new_rate}")
+                except:
+                    pass
+        
+        await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ يرجى إدخال رقم صحيح")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118)")
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
@@ -2554,68 +2540,39 @@ async def add_points_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_points_amount)
 async def add_points_finalize(message: types.Message, state: FSMContext, db_pool):
-    """إضافة النقاط للمستخدم"""
     try:
         points = int(message.text)
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
-    
-    if points <= 0:
-        return await message.answer("⚠️ يرجى إدخال رقم موجب")
-    
-    data = await state.get_data()
-    user_id = data['target_user']
-    
-    async with db_pool.acquire() as conn:
-        # التحقق من وجود المستخدم
-        user = await conn.fetchrow(
-            "SELECT username, total_points FROM users WHERE user_id = $1",
-            user_id
-        )
         
-        if not user:
-            return await message.answer("❌ المستخدم غير موجود")
+        if points <= 0:
+            return await message.answer("⚠️ يرجى إدخال رقم موجب")
         
-        # إضافة النقاط للمستخدم
-        await conn.execute(
-            "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
-            points, user_id
-        )
+        data = await state.get_data()
+        user_id = data['target_user']
         
-        # تسجيل في سجل النقاط
-        await conn.execute('''
-            INSERT INTO points_history (user_id, points, action, description, created_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-        ''', user_id, points, 'admin_add', f'إضافة نقاط من الأدمن: {points}')
+        async with db_pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT username, total_points FROM users WHERE user_id = $1", user_id)
+            if not user:
+                return await message.answer("❌ المستخدم غير موجود")
+            
+            await conn.execute("UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2", points, user_id)
+            await conn.execute('''
+                INSERT INTO points_history (user_id, points, action, description, created_at)
+                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+            ''', user_id, points, 'admin_add', f'إضافة نقاط من الأدمن: {points}')
+            
+            new_total = await conn.fetchval("SELECT total_points FROM users WHERE user_id = $1", user_id)
         
-        # جلب الرصيد الجديد
-        new_total = await conn.fetchval(
-            "SELECT total_points FROM users WHERE user_id = $1",
-            user_id
-        )
-    
-    await message.answer(
-        f"✅ **تم إضافة {points} نقطة للمستخدم {user_id}**\n\n"
-        f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
-        f"⭐ الرصيد السابق: {user['total_points']}\n"
-        f"⭐ الرصيد الجديد: {new_total}"
-    )
-    
-    # إرسال إشعار للمستخدم
-    try:
-        await message.bot.send_message(
-            user_id,
-            f"✅ **تم إضافة نقاط إلى رصيدك!**\n\n"
-            f"⭐ المبلغ المضاف: +{points} نقطة\n"
-            f"⭐ رصيدك الحالي: {new_total} نقطة"
-        )
-    except Exception as e:
-        logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
-    
-    await state.clear()
+        await message.answer(f"✅ تم إضافة {points} نقطة للمستخدم @{user['username']}\n⭐ الرصيد الجديد: {new_total}")
+        
+        try:
+            await message.bot.send_message(user_id, f"✅ تم إضافة {points} نقطة إلى رصيدك!\n⭐ رصيدك الحالي: {new_total}")
+        except Exception as e:
+            logger.error(f"فشل إرسال إشعار للمستخدم {user_id}: {e}")
+        
+        await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ يرجى إدخال رقم صحيح")
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100)")
     except Exception as e:
         logger.error(f"خطأ في إضافة نقاط: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
