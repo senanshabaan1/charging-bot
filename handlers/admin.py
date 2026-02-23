@@ -14,6 +14,7 @@ from aiogram import types
 from aiogram.utils import markdown as md
 from aiogram.enums import ParseMode
 import re
+from handlers.keyboards import get_cancel_keyboard, get_back_keyboard, get_main_menu_keyboard
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
@@ -82,11 +83,6 @@ class AdminStates(StatesGroup):
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
 
-def get_cancel_keyboard():
-    """إنشاء زر إلغاء موحد"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="❌ إلغاء"))
-    return builder.as_markup(resize_keyboard=True)
 
 @router.message(F.text == "❌ إلغاء")
 async def global_cancel_handler(message: types.Message, state: FSMContext):
@@ -95,14 +91,14 @@ async def global_cancel_handler(message: types.Message, state: FSMContext):
     if current_state is not None:
         await state.clear()
     
-    from handlers.start import get_main_menu_keyboard
+    # ✅ استخدم الدالة المستوردة مباشرة
     from database import is_admin_user
     
     is_admin_user_flag = await is_admin_user(None, message.from_user.id)
     
     await message.answer(
         "✅ تم إلغاء العملية",
-        reply_markup=get_main_menu_keyboard(is_admin_user_flag)
+        reply_markup=get_main_menu_keyboard(is_admin_user_flag)  # 👈 مستوردة من keyboards
     )
 
 # ============= لوحة التحكم الرئيسية =============
@@ -4031,7 +4027,6 @@ async def admin_back_handler(message: types.Message, state: FSMContext, db_pool)
     if current_state is not None:
         await state.clear()
     
-    from handlers.start import get_main_menu_keyboard
     from database import is_admin_user
     
     is_admin = await is_admin_user(db_pool, message.from_user.id)
@@ -4039,10 +4034,10 @@ async def admin_back_handler(message: types.Message, state: FSMContext, db_pool)
     if is_admin:
         await message.answer(
             "👋 تم الإلغاء. استخدم /admin للعودة للوحة التحكم",
-            reply_markup=get_main_menu_keyboard(is_admin)
+            reply_markup=get_main_menu_keyboard(is_admin)  # 👈 مستوردة من keyboards
         )
     else:
         await message.answer(
             "✅ تم الإلغاء",
-            reply_markup=get_back_keyboard()
+            reply_markup=get_back_keyboard()  # 👈 مستوردة من keyboards
         )
