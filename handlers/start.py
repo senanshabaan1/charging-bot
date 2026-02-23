@@ -7,6 +7,7 @@ from config import ADMIN_ID, MODERATORS, USD_TO_SYP
 import logging
 from datetime import datetime
 import pytz  # أضف pytz
+from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -38,29 +39,6 @@ async def notify_admins(bot, message_text, db_pool=None):
 def is_admin(user_id):
     return user_id == ADMIN_ID or user_id in MODERATORS
 
-def get_main_menu_keyboard(is_admin_user=False):
-    """إنشاء قائمة الأزرار الرئيسية"""
-    builder = ReplyKeyboardBuilder()
-    
-    builder.row(types.KeyboardButton(text="📱 خدمات الشحن"))
-    builder.row(
-        types.KeyboardButton(text="💰 شحن المحفظة"), 
-        types.KeyboardButton(text="👤 حسابي")
-    )
-    
-    if is_admin_user:
-        builder.row(types.KeyboardButton(text="🛠 لوحة التحكم"))
-    
-    builder.row(types.KeyboardButton(text="❓ مساعدة"))
-    
-    return builder.as_markup(resize_keyboard=True)
-
-def get_back_keyboard():
-    """إنشاء زر رجوع فقط"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
-    builder.row(types.KeyboardButton(text="/رجوع"))  # أضف هذا السطر كخيار إضافي
-    return builder.as_markup(resize_keyboard=True)
 # ========== أضف الكود الجديد هنا ==========
 
 @router.message(Command("cancel"))
