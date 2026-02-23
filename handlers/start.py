@@ -517,8 +517,11 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "show_points")
 async def show_points_info(callback: types.CallbackQuery, db_pool):
-    """عرض معلومات النقاط مع سعر الصرف الحالي"""
+    """عرض معلومات النقاط مع سعر الصرف الحالي وتوقيت دمشق"""
     async with db_pool.acquire() as conn:
+        # ضبط المنطقة الزمنية للاتصال
+        await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+        
         # جلب الرصيد الحالي
         current_points = await conn.fetchval(
             "SELECT total_points FROM users WHERE user_id = $1",
@@ -534,33 +537,41 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         from database import get_exchange_rate
         exchange_rate = await get_exchange_rate(db_pool)
         
-        # قيمة 100 نقطة بالليرة
-        base_syp = 1 * exchange_rate
+        # قيمة النقاط
+        points_value_usd = (current_points / redemption_rate) 
+        points_value_syp = points_value_usd * exchange_rate
         
-        # جلب إجمالي النقاط المكتسبة (فقط النقاط الموجبة)
+        # جلب إجمالي النقاط المكتسبة والمستخدمة
         points_earned = await conn.fetchval(
             "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND points > 0",
             callback.from_user.id
         ) or 0
         
-        # جلب إجمالي النقاط المستخدمة (فقط النقاط السالبة)
         points_used = await conn.fetchval(
             "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND points < 0",
             callback.from_user.id
         ) or 0
         
-        # جلب آخر 5 حركات
+        # جلب آخر 5 حركات - مع توقيت دمشق
         recent = await conn.fetch('''
-            SELECT points, description, created_at 
+            SELECT points, description, 
+                   (created_at AT TIME ZONE 'Asia/Damascus') as created_at_local
             FROM points_history 
             WHERE user_id = $1 
             ORDER BY created_at DESC 
             LIMIT 5
         ''', callback.from_user.id)
+        
+        # جلب وقت آخر تحديث للنقاط
+        last_update = await conn.fetchval('''
+            SELECT (created_at AT TIME ZONE 'Asia/Damascus') 
+            FROM points_history 
+            WHERE user_id = $1 
+            ORDER BY created_at DESC 
+            LIMIT 1
+        ''', callback.from_user.id)
     
-    # حساب القيمة بالسعر الحالي
-    points_value_usd = (current_points / redemption_rate) 
-    points_value_syp = points_value_usd * exchange_rate
+    base_syp = 1 * exchange_rate
     
     text = (
         f"⭐ **رصيد النقاط**\n\n"
@@ -574,13 +585,28 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
         f"• صافي النقاط: {points_earned - abs(points_used)}\n\n"
     )
     
+    if last_update:
+        if hasattr(last_update, 'strftime'):
+            last_update_str = last_update.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            last_update_str = str(last_update)
+        text += f"🕐 **آخر تحديث:** {last_update_str} (دمشق)\n\n"
+    
     if recent:
-        text += "**آخر الحركات:**\n"
+        text += "**آخر الحركات (بتوقيت دمشق):**\n"
         for r in recent:
-            date = r['created_at'].strftime("%Y-%m-%d %H:%M") if r['created_at'] else ""
+            if 'created_at_local' in r and r['created_at_local']:
+                if hasattr(r['created_at_local'], 'strftime'):
+                    date = r['created_at_local'].strftime("%Y-%m-%d %H:%M")
+                else:
+                    date = str(r['created_at_local'])
+            else:
+                date = "وقت غير معروف"
+            
             sign = "➕" if r['points'] > 0 else "➖"
             emoji = "✅" if r['points'] > 0 else "❌"
-            text += f"{emoji} {sign} {abs(r['points'])} نقطة - {r['description']}\n   📅 {date}\n\n"
+            text += f"{emoji} {sign} {abs(r['points'])} نقطة - {r['description']}\n"
+            text += f"   🕐 {date}\n\n"
     
     await callback.message.edit_text(text, parse_mode="Markdown")
     
@@ -591,12 +617,16 @@ async def show_points_info(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "points_history_simple")
 async def points_history_simple(callback: types.CallbackQuery, db_pool):
-    """عرض سجل النقاط"""
+    """عرض سجل النقاط - مع توقيت دمشق"""
     try:
         async with db_pool.acquire() as conn:
-            # جلب سجل النقاط
+            # ضبط المنطقة الزمنية للاتصال
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # جلب سجل النقاط - مع تحويل التوقيت
             history = await conn.fetch('''
-                SELECT points, description, created_at 
+                SELECT points, description, 
+                       (created_at AT TIME ZONE 'Asia/Damascus') as created_at_local
                 FROM points_history 
                 WHERE user_id = $1 
                 ORDER BY created_at DESC 
@@ -619,15 +649,24 @@ async def points_history_simple(callback: types.CallbackQuery, db_pool):
                 "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND points < 0",
                 callback.from_user.id
             ) or 0
+            
+            # جلب آخر تحديث (اختياري)
+            last_update = await conn.fetchval('''
+                SELECT (created_at AT TIME ZONE 'Asia/Damascus') 
+                FROM points_history 
+                WHERE user_id = $1 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            ''', callback.from_user.id)
     except Exception as e:
         print(f"خطأ في جلب سجل النقاط: {e}")
         history = []
         current_points = 0
         total_earned = 0
         total_used = 0
+        last_update = None
     
     if not history:
-        # إذا ما في سجل، نعرض رسالة
         text = (
             f"📋 **سجل النقاط**\n\n"
             f"⭐ **رصيدك الحالي:** {current_points} نقطة\n\n"
@@ -637,13 +676,27 @@ async def points_history_simple(callback: types.CallbackQuery, db_pool):
     else:
         text = f"📋 **سجل النقاط**\n\n"
         text += f"⭐ **رصيدك الحالي:** {current_points} نقطة\n"
-        text += f"📊 **إجمالي المكتسب:** {total_earned} | **المستخدم:** {abs(total_used)}\n\n"
+        text += f"📊 **إجمالي المكتسب:** {total_earned} | **المستخدم:** {abs(total_used)}\n"
+        
+        if last_update:
+            last_update_str = last_update.strftime('%Y-%m-%d %H:%M:%S') if hasattr(last_update, 'strftime') else str(last_update)
+            text += f"🕐 **آخر تحديث:** {last_update_str}\n\n"
         
         for h in history:
-            date = h['created_at'].strftime("%Y-%m-%d %H:%M") if h['created_at'] else ""
+            # استخراج الوقت بتوقيت دمشق
+            if 'created_at_local' in h and h['created_at_local']:
+                if hasattr(h['created_at_local'], 'strftime'):
+                    date = h['created_at_local'].strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    date = str(h['created_at_local'])
+            else:
+                date = "وقت غير معروف"
+            
             sign = "➕" if h['points'] > 0 else "➖"
             emoji = "✅" if h['points'] > 0 else "🔄"
-            text += f"{emoji} {sign} {abs(h['points'])} نقطة\n   📝 {h['description']}\n   📅 {date}\n\n"
+            text += f"{emoji} {sign} {abs(h['points'])} نقطة\n"
+            text += f"   📝 {h['description']}\n"
+            text += f"   🕐 {date} (دمشق)\n\n"
     
     await callback.message.edit_text(text, parse_mode="Markdown")
     
@@ -733,16 +786,21 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         if error:
             await callback.answer(f"❌ {error}", show_alert=True)
         else:
+            # الحصول على الوقت الحالي بتوقيت دمشق
+            from handlers.time_utils import get_damascus_time_now
+            current_time = get_damascus_time_now().strftime("%Y-%m-%d %H:%M:%S")
+            
             await callback.message.edit_text(
                 f"✅ **تم إرسال طلب الاسترداد بنجاح!**\n\n"
                 f"⭐ النقاط: {points}\n"
                 f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
-                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س = 1$\n\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س = 1$\n"
+                f"🕐 وقت الطلب: {current_time} (دمشق)\n\n"
                 f"⏳ في انتظار موافقة الإدارة.\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
             
-            # استخدام دالة notify_admins بدلاً من الحلقة المباشرة
+            # إشعار المشرفين
             await notify_admins(
                 callback.bot,
                 f"🆕 **طلب استرداد نقاط جديد**\n\n"
@@ -751,6 +809,7 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 f"⭐ النقاط: {points}\n"
                 f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
                 f"💵 سعر الصرف: {exchange_rate:.0f} ل.س\n"
+                f"🕐 وقت الطلب: {current_time} (دمشق)\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
             
@@ -764,7 +823,6 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 
     except Exception as e:
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
-
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
     """العودة إلى الملف الشخصي - مع سعر الصرف الحالي وتفاصيل VIP"""
