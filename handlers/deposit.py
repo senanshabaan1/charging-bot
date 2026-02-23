@@ -3,13 +3,13 @@ from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from config import SYRIATEL_NUMS, SHAM_CASH_NUM, SHAM_CASH_NUM_USD, USDT_BEP20_WALLET, DEPOSIT_GROUP
-from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncio
 import logging
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from datetime import datetime
-from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard
-
+from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
+from database import is_admin_user
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -19,13 +19,34 @@ class DepStates(StatesGroup):
     waiting_tx = State()
     waiting_photo = State()
 
-
 def get_damascus_time():
     """الحصول على الوقت الحالي بتوقيت دمشق"""
     return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
+# ============= معالج الرجوع الموحد =============
+
+@router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]))
+async def deposit_back_handler(message: types.Message, state: FSMContext, db_pool):
+    """الرجوع من عملية الشحن"""
+    current_state = await state.get_state()
+    
+    if current_state is not None:
+        await state.clear()
+    
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    
+    await message.answer(
+        "✅ تم إلغاء عملية الشحن" if current_state else "👋 أنت في القائمة الرئيسية",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+
+# ============= قائمة طرق الدفع =============
+
 @router.message(F.text == "💰 شحن المحفظة")
-async def choose_meth(message: types.Message):
+async def choose_meth(message: types.Message, db_pool):
+    """عرض قائمة طرق الدفع"""
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    
     kb = [
         [types.InlineKeyboardButton(text="Syriatel Cash (ل.س)", callback_data="m_syr")],
         [types.InlineKeyboardButton(text="Sham Cash (ل.س)", callback_data="m_sham_syp")],
@@ -33,34 +54,25 @@ async def choose_meth(message: types.Message):
         [types.InlineKeyboardButton(text="USDT BEP20 ($)", callback_data="m_usdt")],
         [types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")]
     ]
+    
     await message.answer(
         "💳 **اختر وسيلة الدفع المناسبة:**", 
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
 @router.callback_query(F.data == "back_to_main")
-async def back_from_deposit(callback: types.CallbackQuery):
+async def back_from_deposit(callback: types.CallbackQuery, db_pool):
+    """العودة للقائمة الرئيسية"""
     await callback.message.delete()
+    
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    
     await callback.message.answer(
         "تم العودة للقائمة الرئيسية.",
-        reply_markup=get_main_menu_keyboard()  # 👈 استخدم الدالة المستوردة
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
-@router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel"]))
-async def deposit_back_handler(message: types.Message, state: FSMContext):
-    """الرجوع من عملية الشحن"""
-    current_state = await state.get_state()
-    
-    if current_state is not None:
-        await state.clear()
-        await message.answer(
-            "✅ تم إلغاء عملية الشحن",
-            reply_markup=get_back_keyboard()  # 👈 استخدم الدالة المستوردة
-        )
-    else:
-        await message.answer(
-            "👋 أنت في القائمة الرئيسية",
-            reply_markup=get_main_menu_keyboard()  # 👈 استخدم الدالة المستوردة
-        )
+
+# ============= بدء عملية الشحن =============
 
 @router.callback_query(F.data.startswith("m_"))
 async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -75,6 +87,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     # جلب أرقام سيرياتل من قاعدة البيانات
     syriatel_nums = await get_syriatel_numbers(db_pool)
     
+    # تحديد اسم المحفظة حسب الطريقة
     if method == "m_sham_syp":
         method_name = "شام كاش (ل.س)"
         wallet = SHAM_CASH_NUM
@@ -88,8 +101,8 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
         method_name = "USDT BEP20"
         wallet = USDT_BEP20_WALLET
     else:
-        method_name = "غير معروف"
-        wallet = "غير محدد"
+        await callback.answer("❌ طريقة دفع غير معروفة", show_alert=True)
+        return
     
     await state.update_data(
         method=method,
@@ -105,34 +118,72 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     msg += f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
     
     if method in ["m_syr", "m_sham_syp"]:
-        msg += "أدخل المبلغ بالليرة السورية:"
+        msg += "أدخل المبلغ بالليرة السورية (مثال: 5000):"
     else:
-        msg += "أدخل المبلغ بالدولار ($):"
+        msg += "أدخل المبلغ بالدولار (مثال: 50):"
     
     await callback.message.answer(
         msg,
-        reply_markup=get_back_keyboard()
+        reply_markup=get_cancel_keyboard()
     )
+
+# ============= استلام المبلغ =============
 
 @router.message(DepStates.waiting_amount)
 async def get_amount(message: types.Message, state: FSMContext):
-    if message.text == "🔙 رجوع للقائمة":
+    """استلام المبلغ والتحقق من صحته"""
+    if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
         await state.clear()
-        await message.answer("تم إلغاء عملية الشحن.")
+        from database import is_admin_user
+        is_admin = await is_admin_user(None, message.from_user.id)
+        await message.answer(
+            "✅ تم إلغاء عملية الشحن.",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
         return
     
-    # تنظيف النص من الفواصل
+    # تنظيف النص من الفواصل والمسافات
     text = message.text.replace(',', '').replace(' ', '')
-    if not text.replace('.', '').isdigit():
+    
+    # التحقق من صحة الرقم
+    try:
+        # السماح بالأرقام العشرية
+        if '.' in text:
+            if not text.replace('.', '').isdigit() or text.count('.') > 1:
+                raise ValueError
+        else:
+            if not text.isdigit():
+                raise ValueError
+        
+        amt = float(text)
+        
+        # التحقق من أن المبلغ أكبر من 0
+        if amt <= 0:
+            return await message.answer(
+                "⚠️ المبلغ يجب أن يكون أكبر من 0.\n"
+                "الرجاء إدخال مبلغ صحيح:",
+                reply_markup=get_cancel_keyboard()
+            )
+        
+        # التحقق من الحد الأدنى للمبلغ
+        if amt < 1:
+            return await message.answer(
+                "⚠️ الحد الأدنى للمبلغ هو 1.\n"
+                "الرجاء إدخال مبلغ أكبر:",
+                reply_markup=get_cancel_keyboard()
+            )
+        
+    except ValueError:
         return await message.answer(
-            "يرجى إدخال رقم صحيح",
-            reply_markup=get_back_keyboard()
+            "⚠️ خطأ في الصيغة!\n"
+            "الرجاء إدخال رقم صحيح (مثال: 5000 أو 50.5):",
+            reply_markup=get_cancel_keyboard()
         )
     
-    amt = float(text)
     data = await state.get_data()
-    current_rate = data.get('current_rate', 25000)
-
+    current_rate = data.get('current_rate', 118)
+    
+    # حساب المبلغ بالليرة
     if data['method'] in ["m_usdt", "m_sham_usd"]:
         amount_syp = amt * current_rate
         display_amount = f"{amt:,.2f}$ ≈ {amount_syp:,.0f} ل.س"
@@ -146,11 +197,10 @@ async def get_amount(message: types.Message, state: FSMContext):
         display_amount=display_amount
     )
     
+    # عرض تعليمات التحويل حسب الطريقة
     if data['method'] == "m_syr":
-        # جلب أرقام سيرياتل
         syriatel_nums = data.get('syriatel_nums', ["74091109", "63826779"])
         
-        # بناء نص الأرقام
         nums_text = ""
         for i, num in enumerate(syriatel_nums, 1):
             nums_text += f"📞 **رقم {i}:** `{num}`\n"
@@ -160,13 +210,12 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"{nums_text}\n"
             f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على الرقم لنسخه*",
-            reply_markup=get_back_keyboard(),
+            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] in ["m_sham_syp", "m_sham_usd"]:
-        # تحديد نوع العملة
         currency = "ل.س" if data['method'] == "m_sham_syp" else "$"
         
         await message.answer(
@@ -175,7 +224,7 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"`{data['wallet']}`\n\n"
             f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على رقم المحفظة لنسخه*",
-            reply_markup=get_back_keyboard(),
+            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -187,10 +236,12 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"`{data['wallet']}`\n\n"
             f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
             f"💡 *اضغط على العنوان لنسخه*",
-            reply_markup=get_back_keyboard(),
+            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_photo)
+
+# ============= إرسال الطلب للمجموعة =============
 
 async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id: str = None):
     """إرسال طلب الشحن للمجموعة مع أزرار - بتوقيت دمشق"""
@@ -223,7 +274,7 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
         builder.row(
             types.InlineKeyboardButton(
                 text="✅ موافقة", 
-                callback_data=f"appr_dep_{data['user_id']}_{data['amount_syp']}"
+                callback_data=f"appr_dep_{data['user_id']}_{data['amount_syp']:.0f}"
             ),
             types.InlineKeyboardButton(
                 text="❌ رفض", 
@@ -248,36 +299,54 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
                 parse_mode="Markdown"
             )
         
+        logger.info(f"✅ تم إرسال طلب الشحن للمجموعة، message_id: {msg.message_id}")
         return msg.message_id
+        
     except Exception as e:
-        print(f"خطأ في إرسال للمجموعة: {e}")
+        logger.error(f"❌ خطأ في إرسال للمجموعة: {e}")
         return None
+
+# ============= معالجة رقم العملية =============
 
 @router.message(DepStates.waiting_tx)
 async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_pool):
-    if message.text == "🔙 رجوع للقائمة":
+    """معالجة رقم العملية"""
+    if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
         await state.clear()
-        await message.answer("تم إلغاء عملية الشحن.")
+        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        await message.answer(
+            "✅ تم إلغاء عملية الشحن.",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
         return
     
     data = await state.get_data()
     tx = message.text.strip()
     
-    if data['method'] == "m_syr" and len(tx) < 12:
-        return await message.answer(
-            "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون 12 رقم على الأقل.\n"
-            "📝 يرجى إدخال رقم صحيح:",
-            reply_markup=get_back_keyboard(),
-            parse_mode="Markdown"
-        )
+    # التحقق من صحة رقم العملية لسيرياتل كاش
+    if data['method'] == "m_syr":
+        # إزالة أي مسافات أو شرطات
+        clean_tx = tx.replace(' ', '').replace('-', '')
+        if not clean_tx.isdigit() or len(clean_tx) < 8:
+            return await message.answer(
+                "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون أرقام فقط وطوله 8 أرقام على الأقل.\n"
+                "📝 يرجى إدخال رقم صحيح:",
+                reply_markup=get_cancel_keyboard(),
+                parse_mode="Markdown"
+            )
     
+    # حفظ الطلب في قاعدة البيانات
     async with db_pool.acquire() as conn:
+        # إضافة أو تحديث المستخدم
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
             VALUES ($1, $2, 0, CURRENT_TIMESTAMP) 
-            ON CONFLICT (user_id) DO UPDATE SET username = $2
+            ON CONFLICT (user_id) DO UPDATE SET 
+                username = EXCLUDED.username,
+                last_activity = CURRENT_TIMESTAMP
         ''', message.from_user.id, message.from_user.username)
         
+        # إنشاء طلب الشحن
         deposit_id = await conn.fetchval('''
             INSERT INTO deposit_requests 
             (user_id, username, method, amount, amount_syp, tx_info, status, created_at)
@@ -292,6 +361,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
         tx
         )
         
+        # تجهيز بيانات الإرسال للمجموعة
         channel_data = {
             'user_id': message.from_user.id,
             'username': message.from_user.username or 'غير معروف',
@@ -300,8 +370,10 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             'method_name': data['method_name'],
         }
         
+        # إرسال للمجموعة
         group_msg_id = await send_to_group(bot, channel_data, tx)
         
+        # تحديث معرف رسالة المجموعة
         if group_msg_id:
             await conn.execute(
                 "UPDATE deposit_requests SET group_message_id = $1 WHERE id = $2",
@@ -309,25 +381,54 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             )
     
     await message.answer(
-        "✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
-        "⏳ **بانتظار موافقة الإدارة.**\n"
-        "📋 **الوقت المتوقع 5 دقائق.**",
-        reply_markup=get_back_keyboard(),
+        f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
+        f"💰 **المبلغ:** {data['display_amount']}\n"
+        f"🆔 **رقم الطلب:** #{deposit_id}\n"
+        f"⏳ **بانتظار موافقة الإدارة.**\n"
+        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
+        reply_markup=None,
         parse_mode="Markdown"
     )
+    
+    # إرسال رسالة تأكيد مع العودة للقائمة
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    await message.answer(
+        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+    
     await state.clear()
+
+# ============= معالجة الصور =============
 
 @router.message(DepStates.waiting_photo, F.photo)
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_pool):
+    """معالجة لقطة الشاشة"""
+    if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
+        await state.clear()
+        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        await message.answer(
+            "✅ تم إلغاء عملية الشحن.",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
+        return
+    
     data = await state.get_data()
     
+    # استخدام أعلى جودة للصورة
+    photo_file_id = message.photo[-1].file_id
+    
     async with db_pool.acquire() as conn:
+        # إضافة أو تحديث المستخدم
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
             VALUES ($1, $2, 0, CURRENT_TIMESTAMP) 
-            ON CONFLICT (user_id) DO UPDATE SET username = $2
+            ON CONFLICT (user_id) DO UPDATE SET 
+                username = EXCLUDED.username,
+                last_activity = CURRENT_TIMESTAMP
         ''', message.from_user.id, message.from_user.username)
         
+        # إنشاء طلب الشحن مع الصورة
         deposit_id = await conn.fetchval('''
             INSERT INTO deposit_requests 
             (user_id, username, method, amount, amount_syp, tx_info, photo_file_id, status, created_at)
@@ -340,9 +441,10 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
         data['amt'],
         data['amount_syp'],
         "USDT Transfer",
-        message.photo[-1].file_id
+        photo_file_id
         )
         
+        # تجهيز بيانات الإرسال للمجموعة
         channel_data = {
             'user_id': message.from_user.id,
             'username': message.from_user.username or 'غير معروف',
@@ -351,8 +453,10 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
             'method_name': data['method_name'],
         }
         
-        group_msg_id = await send_to_group(bot, channel_data, photo_file_id=message.photo[-1].file_id)
+        # إرسال للمجموعة مع الصورة
+        group_msg_id = await send_to_group(bot, channel_data, photo_file_id=photo_file_id)
         
+        # تحديث معرف رسالة المجموعة
         if group_msg_id:
             await conn.execute(
                 "UPDATE deposit_requests SET group_message_id = $1 WHERE id = $2",
@@ -360,10 +464,32 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
             )
     
     await message.answer(
-        "✅ **تم إرسال لقطة الشاشة بنجاح!**\n\n"
-        "⏳ **بانتظار موافقة الإدارة.**\n"
-        "📋 **الوقت المتوقع 5 دقائق.**",
-        reply_markup=get_back_keyboard(),
+        f"✅ **تم إرسال لقطة الشاشة بنجاح!**\n\n"
+        f"💰 **المبلغ:** {data['display_amount']}\n"
+        f"🆔 **رقم الطلب:** #{deposit_id}\n"
+        f"⏳ **بانتظار موافقة الإدارة.**\n"
+        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
+        reply_markup=None,
         parse_mode="Markdown"
     )
+    
+    # إرسال رسالة تأكيد مع العودة للقائمة
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    await message.answer(
+        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+    
     await state.clear()
+
+# ============= معالج الصور غير الصالحة =============
+
+@router.message(DepStates.waiting_photo)
+async def invalid_photo(message: types.Message):
+    """معالج إذا أرسل المستخدم نص بدل صورة"""
+    await message.answer(
+        "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n"
+        "📸 أرسل الصورة الآن، أو اضغط على زر الإلغاء.",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode="Markdown"
+    )
