@@ -266,6 +266,7 @@ async def init_db():
                     (1, 'VIP 1', 2000, 1, '🔵'),
                     (2, 'VIP 2', 4000, 2, '🟣'),
                     (3, 'VIP 3', 8000, 4, '🟡')
+                ON CONFLICT (level) DO UPDATE SET
                     min_spent = EXCLUDED.min_spent,
                     discount_percent = EXCLUDED.discount_percent,
                     icon = EXCLUDED.icon;
