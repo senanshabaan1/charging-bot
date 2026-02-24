@@ -210,9 +210,9 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     ))
     
     # إظهار مستوى المستخدم
-    vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
-    vip_text = vip_icons[vip_level] if vip_level <= 5 else "VIP 0 🟢"
-    
+
+    vip_icons = ["⚪ VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3"]
+    vip_text = vip_icons[vip_level] if vip_level < len(vip_icons) else "VIP 0 ⚪"
     await callback.message.edit_text(
         f"📱 **{category['display_name']}**\n\n"
         f"👤 مستواك: {vip_text} (خصم {discount}%)\n"
