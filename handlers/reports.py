@@ -11,6 +11,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 import asyncio
 import logging
 import os
+import re
 from io import BytesIO
 from config import ADMIN_ID, MODERATORS
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
@@ -28,13 +29,12 @@ def is_admin(user_id):
     """التحقق من صلاحيات المشرف"""
     return user_id == ADMIN_ID or user_id in MODERATORS
 
-def prepare_df_for_excel(df):
-    """تحسين الـ DataFrame لتقليل استهلاك الذاكرة وتعديل التواريخ للإكسل"""
+def remove_timezone_from_df(df):
+    """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""
     if df.empty:
         return df
     
     for col in df.columns:
-        # إذا كان العمود يحتوي على تواريخ، نقوم بإزالة المنطقة الزمنية لتوافق الإكسل
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             try:
                 df[col] = pd.to_datetime(df[col]).dt.tz_localize(None)
@@ -42,118 +42,685 @@ def prepare_df_for_excel(df):
                 pass
     return df
 
-async def create_excel_report(data, sheet_name="Report"):
-    """إنشاء ملف إكسل في الذاكرة (BytesIO) لتوفير الرام وتجنب تخزين ملفات على رندر"""
-    loop = asyncio.get_event_loop()
-    
-    def generate():
-        output = BytesIO()
-        df = pd.DataFrame(data)
-        df = prepare_df_for_excel(df)
-        
-        # استخدام Engine openpyxl بطريقة محسنة
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name=sheet_name)
-            
-            # تنسيق بسيط وسريع للأعمدة
-            worksheet = writer.sheets[sheet_name]
-            header_fill = PatternFill(start_color='D7E4BC', end_color='D7E4BC', fill_type='solid')
-            header_font = Font(bold=True)
-            
-            for cell in worksheet[1]:
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(horizontal='center')
+# ============= توليد تقرير Excel =============
 
+async def generate_excel_report(db_pool, period='all'):
+    """توليد تقرير Excel شامل"""
+    try:
+        output = BytesIO()
+        
+        async with db_pool.acquire() as conn:
+            # ضبط المنطقة الزمنية
+            await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
+            
+            # 1. تقرير المستخدمين
+            users_df = pd.DataFrame(await conn.fetch('''
+                SELECT 
+                    user_id, username, first_name, last_name, 
+                    balance, total_points, vip_level, discount_percent,
+                    total_deposits, total_orders, total_spent,
+                    referral_count, referral_earnings,
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
+                    last_activity AT TIME ZONE 'Asia/Damascus' as last_activity, 
+                    is_banned
+                FROM users 
+                ORDER BY created_at DESC
+            '''))
+            
+            # 2. تقرير الإيداعات
+            deposits_query = '''
+                SELECT 
+                    id, user_id, username, method, amount, amount_syp,
+                    status, created_at AT TIME ZONE 'Asia/Damascus' as created_at, 
+                    updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
+                FROM deposit_requests 
+            '''
+            if period == 'day':
+                deposits_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            deposits_query += " ORDER BY created_at DESC"
+            deposits_df = pd.DataFrame(await conn.fetch(deposits_query))
+            
+            # 3. تقرير الطلبات
+            orders_query = '''
+                SELECT 
+                    o.id, o.user_id, o.username, 
+                    COALESCE(a.name, o.app_name) as app_name, 
+                    o.quantity, o.total_amount_syp,
+                    o.points_earned, o.status, o.target_id,
+                    o.created_at AT TIME ZONE 'Asia/Damascus' as created_at,
+                    o.updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
+                FROM orders o
+                LEFT JOIN applications a ON o.app_id = a.id
+            '''
+            if period == 'day':
+                orders_query += " WHERE DATE(o.created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            orders_query += " ORDER BY o.created_at DESC"
+            orders_df = pd.DataFrame(await conn.fetch(orders_query))
+            
+            # 4. تقرير النقاط
+            points_query = '''
+                SELECT 
+                    id, user_id, points, action, description, 
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at
+                FROM points_history 
+            '''
+            if period == 'day':
+                points_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            points_query += " ORDER BY created_at DESC LIMIT 1000"
+            points_df = pd.DataFrame(await conn.fetch(points_query))
+            
+            # 5. تقرير استرداد النقاط
+            redemptions_query = '''
+                SELECT 
+                    id, user_id, username, points, amount_usd, amount_syp,
+                    created_at AT TIME ZONE 'Asia/Damascus' as created_at,
+                    updated_at AT TIME ZONE 'Asia/Damascus' as updated_at
+                FROM redemption_requests 
+            '''
+            if period == 'day':
+                redemptions_query += " WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE"
+            redemptions_query += " ORDER BY created_at DESC"
+            redemptions_df = pd.DataFrame(await conn.fetch(redemptions_query))
+            
+            # 6. إحصائيات عامة
+            if period == 'day':
+                stats = await conn.fetchrow('''
+                    SELECT 
+                        (SELECT COUNT(*) FROM users) as total_users,
+                        (SELECT COUNT(*) FROM users WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as new_users_today,
+                        (SELECT COALESCE(SUM(balance), 0) FROM users) as total_balance,
+                        (SELECT COALESCE(SUM(total_points), 0) FROM users) as total_points,
+                        (SELECT COUNT(*) FROM deposit_requests WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_deposits,
+                        (SELECT COALESCE(SUM(amount_syp), 0) FROM deposit_requests WHERE status = 'approved' AND DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_deposit_amount,
+                        (SELECT COUNT(*) FROM orders WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_orders,
+                        (SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE status = 'completed' AND DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_order_amount,
+                        (SELECT COALESCE(SUM(points_earned), 0) FROM orders WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as total_points_given
+                ''')
+            else:
+                stats = await conn.fetchrow('''
+                    SELECT 
+                        (SELECT COUNT(*) FROM users) as total_users,
+                        (SELECT COUNT(*) FROM users WHERE DATE(created_at AT TIME ZONE 'Asia/Damascus') = CURRENT_DATE) as new_users_today,
+                        (SELECT COALESCE(SUM(balance), 0) FROM users) as total_balance,
+                        (SELECT COALESCE(SUM(total_points), 0) FROM users) as total_points,
+                        (SELECT COUNT(*) FROM deposit_requests) as total_deposits,
+                        (SELECT COALESCE(SUM(amount_syp), 0) FROM deposit_requests WHERE status = 'approved') as total_deposit_amount,
+                        (SELECT COUNT(*) FROM orders) as total_orders,
+                        (SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE status = 'completed') as total_order_amount,
+                        (SELECT COALESCE(SUM(points_earned), 0) FROM orders) as total_points_given
+                ''')
+            
+            # إزالة المنطقة الزمنية من جميع البيانات
+            users_df = remove_timezone_from_df(users_df)
+            deposits_df = remove_timezone_from_df(deposits_df)
+            orders_df = remove_timezone_from_df(orders_df)
+            points_df = remove_timezone_from_df(points_df)
+            redemptions_df = remove_timezone_from_df(redemptions_df)
+            
+            # إنشاء ملف Excel
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # ملخص عام
+                if stats:
+                    summary_data = {
+                        'البيان': [
+                            'إجمالي المستخدمين',
+                            'مستخدمين جدد اليوم',
+                            'إجمالي الأرصدة',
+                            'إجمالي النقاط',
+                            'إجمالي الإيداعات',
+                            'قيمة الإيداعات (ل.س)',
+                            'إجمالي الطلبات',
+                            'قيمة الطلبات (ل.س)',
+                            'نقاط ممنوحة'
+                        ],
+                        'القيمة': [
+                            stats['total_users'],
+                            stats['new_users_today'],
+                            f"{stats['total_balance']:,.0f} ل.س" if stats['total_balance'] else "0 ل.س",
+                            stats['total_points'] or 0,
+                            stats['total_deposits'] or 0,
+                            f"{stats['total_deposit_amount']:,.0f} ل.س" if stats['total_deposit_amount'] else "0 ل.س",
+                            stats['total_orders'] or 0,
+                            f"{stats['total_order_amount']:,.0f} ل.س" if stats['total_order_amount'] else "0 ل.س",
+                            stats['total_points_given'] or 0
+                        ]
+                    }
+                    summary_df = pd.DataFrame(summary_data)
+                    summary_df.to_excel(writer, sheet_name='ملخص عام', index=False)
+                
+                # باقي الأوراق
+                if not users_df.empty:
+                    users_df.to_excel(writer, sheet_name='المستخدمين', index=False)
+                if not deposits_df.empty:
+                    deposits_df.to_excel(writer, sheet_name='الإيداعات', index=False)
+                if not orders_df.empty:
+                    orders_df.to_excel(writer, sheet_name='الطلبات', index=False)
+                if not points_df.empty:
+                    points_df.to_excel(writer, sheet_name='النقاط', index=False)
+                if not redemptions_df.empty:
+                    redemptions_df.to_excel(writer, sheet_name='استرداد النقاط', index=False)
+            
         output.seek(0)
         return output
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في توليد التقرير: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
-    # تشغيل في Thread منفصل لكي لا يتوقف البوت عن الرد أثناء معالجة البيانات
-    return await loop.run_in_executor(None, generate)
+# ============= إرسال التقرير اليومي التلقائي =============
 
-# ============= معالجات التقارير (Handlers) =============
+async def send_daily_report(bot: Bot, db_pool):
+    """إرسال التقرير اليومي للمشرفين"""
+    try:
+        settings = await get_report_settings(db_pool)
+        
+        if settings.get('daily_report_enabled') != 'true':
+            logger.info("📊 التقرير اليومي معطل")
+            return
+        
+        excel_file = await generate_excel_report(db_pool, 'day')
+        
+        if excel_file:
+            recipients = []
+            if settings.get('report_recipients') == 'owner_only':
+                recipients = [ADMIN_ID]
+            else:
+                recipients = [ADMIN_ID] + MODERATORS
+            
+            today = get_damascus_time_now().strftime('%Y-%m-%d')
+            
+            for admin_id in recipients:
+                if admin_id:
+                    try:
+                        file = types.BufferedInputFile(
+                            file=excel_file.getvalue(),
+                            filename=f'report_{today}.xlsx'
+                        )
+                        
+                        await bot.send_document(
+                            chat_id=admin_id,
+                            document=file,
+                            caption=f"📊 **التقرير اليومي - {today}**\n\n"
+                                   f"✅ تم توليد التقرير بنجاح\n"
+                                   f"⏰ وقت الإرسال: {get_damascus_time_now().strftime('%H:%M:%S')}"
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ فشل إرسال التقرير للمشرف {admin_id}: {e}")
+    except Exception as e:
+        logger.error(f"❌ خطأ في إرسال التقرير اليومي: {e}")
 
-@router.callback_query(F.data == "admin_reports")
+# ============= قائمة التقارير =============
+
+@router.callback_query(F.data == "reports_menu")
 async def reports_menu(callback: types.CallbackQuery):
+    """قائمة التقارير"""
     if not is_admin(callback.from_user.id):
-        return await callback.answer("❌ غير مصرح لك", show_alert=True)
+        return await callback.answer("غير مصرح", show_alert=True)
     
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="📊 تقرير المبيعات (24 ساعة)", callback_data="report_sales_24h"))
-    builder.row(types.InlineKeyboardButton(text="💰 تقرير الإيداعات (24 ساعة)", callback_data="report_deposits_24h"))
-    builder.row(types.InlineKeyboardButton(text="⚙️ إعدادات التقارير التلقائية", callback_data="report_settings"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_main"))
+    builder.row(
+        types.InlineKeyboardButton(text="📊 تقرير شامل", callback_data="full_report"),
+        types.InlineKeyboardButton(text="📅 تقرير يومي", callback_data="daily_report")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="💰 تقرير الأرباح", callback_data="profits_report"),
+        types.InlineKeyboardButton(text="👥 تقرير المستخدمين", callback_data="users_report")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="📱 تقرير التطبيقات", callback_data="apps_report"),
+        types.InlineKeyboardButton(text="⭐ تقرير النقاط", callback_data="points_report")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="💾 نسخ احتياطي", callback_data="backup_db"),
+        types.InlineKeyboardButton(text="⚙️ إعدادات التقارير", callback_data="report_settings")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin")
+    )
     
     await callback.message.edit_text(
-        "📊 **قسم التقارير والإحصائيات**\n\nاختر نوع التقرير المطلوب استخراجه بصيغة إكسل:",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        "📊 **نظام التقارير والنسخ الاحتياطي**\n\n"
+        "اختر نوع التقرير المطلوب:",
+        reply_markup=builder.as_markup()
     )
 
-@router.callback_query(F.data.startswith("report_"))
-async def generate_quick_report(callback: types.CallbackQuery, db_pool):
-    if not is_admin(callback.from_user.id): return
-    
-    report_type = callback.data
-    if report_type == "report_settings": return # سيتم معالجته في دالة أخرى
-    
-    await callback.message.edit_text("⏳ جاري استخراج البيانات وتحويلها لملف Excel...")
-    
-    async with db_pool.acquire() as conn:
-        if report_type == "report_sales_24h":
-            query = "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
-            filename = f"sales_{get_damascus_time_now().strftime('%Y%m%d')}.xlsx"
-            data = await conn.fetch(query)
-        elif report_type == "report_deposits_24h":
-            query = "SELECT * FROM deposit_requests WHERE created_at > NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
-            filename = f"deposits_{get_damascus_time_now().strftime('%Y%m%d')}.xlsx"
-            data = await conn.fetch(query)
-        else:
-            return
+# ============= التقارير المختلفة =============
 
-    if not data:
-        return await callback.message.edit_text("📭 لا توجد سجلات جديدة في الـ 24 ساعة الماضية.", 
-                                         reply_markup=get_back_inline_keyboard("admin_reports"))
-
-    try:
-        # تحويل البيانات إلى قاموس تمهيداً للإكسل
-        data_dict = [dict(r) for r in data]
-        excel_file = await create_excel_report(data_dict)
+@router.callback_query(F.data == "full_report")
+async def full_report(callback: types.CallbackQuery, db_pool):
+    """تقرير شامل"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text("⏳ جاري توليد التقرير الشامل...")
+    
+    excel_file = await generate_excel_report(db_pool, 'all')
+    
+    if excel_file:
+        today = get_damascus_time_now().strftime('%Y-%m-%d_%H-%M')
         
-        # إرسال الملف باستخدام BufferedInputFile لضمان عدم استهلاك مساحة القرص
-        input_file = types.BufferedInputFile(excel_file.getvalue(), filename=filename)
+        file = types.BufferedInputFile(
+            file=excel_file.getvalue(),
+            filename=f'full_report_{today}.xlsx'
+        )
         
         await callback.message.answer_document(
-            document=input_file,
-            caption=f"✅ تقرير جاهز\n📅 تم التوليد في: {format_damascus_time(datetime.now())}"
+            document=file,
+            caption=f"📊 **التقرير الشامل**\n"
+                   f"📅 {get_damascus_time_now().strftime('%Y-%m-%d %H:%M')}"
         )
-        await callback.message.delete()
-    except Exception as e:
-        logger.error(f"Error in report generation: {e}")
-        await callback.message.edit_text(f"❌ فشل إنشاء التقرير: {str(e)}")
+    else:
+        await callback.message.edit_text("❌ فشل في توليد التقرير")
 
-# ============= إعدادات التقارير التلقائية =============
+@router.callback_query(F.data == "daily_report")
+async def daily_report(callback: types.CallbackQuery, db_pool):
+    """تقرير يومي"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text("⏳ جاري توليد التقرير اليومي...")
+    
+    try:
+        excel_file = await generate_excel_report(db_pool, 'day')
+        
+        if excel_file:
+            today = get_damascus_time_now().strftime('%Y-%m-%d')
+            
+            file = types.BufferedInputFile(
+                file=excel_file.getvalue(),
+                filename=f'daily_report_{today}.xlsx'
+            )
+            
+            await callback.message.answer_document(
+                document=file,
+                caption=f"📅 **التقرير اليومي**\n"
+                       f"📆 {today}"
+            )
+        else:
+            await callback.message.edit_text("❌ فشل في توليد التقرير")
+    except Exception as e:
+        logger.error(f"❌ خطأ في daily_report: {e}")
+        await callback.message.edit_text(f"❌ خطأ: {str(e)}")
+
+@router.callback_query(F.data == "profits_report")
+async def profits_report(callback: types.CallbackQuery, db_pool):
+    """تقرير الأرباح المفصل"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text("⏳ جاري حساب الأرباح...")
+    
+    exchange_rate = await get_exchange_rate(db_pool)
+    
+    async with db_pool.acquire() as conn:
+        orders = await conn.fetch('''
+            SELECT 
+                o.id,
+                o.user_id,
+                o.app_id,
+                o.quantity,
+                o.total_amount_syp as final_price_syp,
+                o.unit_price_usd as final_unit_price_usd,
+                o.points_earned,
+                a.name as app_name,
+                a.unit_price_usd as default_price_usd,
+                a.profit_percentage as app_profit_percent,
+                u.vip_level,
+                u.discount_percent as user_discount,
+                o.variant_id,
+                o.variant_name,
+                o.created_at
+            FROM orders o
+            JOIN applications a ON o.app_id = a.id
+            JOIN users u ON o.user_id = u.user_id
+            WHERE o.status = 'completed'
+            ORDER BY o.created_at DESC
+        ''')
+        
+        if not orders:
+            await callback.message.edit_text("📊 لا توجد مبيعات مكتملة بعد.")
+            return
+        
+        # إحصائيات التطبيقات
+        app_stats = {}
+        
+        # إحصائيات VIP
+        vip_stats = {}
+        for level in range(0, 6):
+            vip_stats[level] = {
+                'orders': 0,
+                'revenue': 0,
+                'supplier_cost': 0,
+                'profit': 0,
+                'discount_given': 0
+            }
+        
+        # متغيرات عامة
+        total_orders = len(orders)
+        total_revenue = 0
+        total_supplier_cost = 0
+        total_profit = 0
+        total_discount_given = 0
+        
+        for order in orders:
+            app_name = order['app_name']
+            quantity = order['quantity'] or 1
+            final_price_syp = float(order['final_price_syp'])
+            vip_level = order['vip_level'] or 0
+            user_discount = float(order['user_discount'] or 0)
+            
+            # البحث عن سعر المورد
+            supplier_price_usd = None
+            
+            if order['variant_id']:
+                variant = await conn.fetchrow(
+                    "SELECT price_usd FROM product_options WHERE id = $1",
+                    order['variant_id']
+                )
+                if variant:
+                    supplier_price_usd = float(variant['price_usd'])
+            
+            if supplier_price_usd is None:
+                default_price = float(order['default_price_usd'] or 0)
+                supplier_price_usd = default_price * quantity
+            
+            supplier_cost_syp = supplier_price_usd * exchange_rate
+            profit_syp = final_price_syp - supplier_cost_syp
+            
+            # حساب الخصم الممنوح
+            app_profit_percent = float(order['app_profit_percent'] or 0) / 100
+            expected_price_usd = supplier_price_usd * (1 + app_profit_percent)
+            expected_price_syp = expected_price_usd * exchange_rate
+            
+            discount_syp = expected_price_syp - final_price_syp
+            if discount_syp < 0:
+                discount_syp = 0
+            
+            # إضافة للإجماليات
+            total_revenue += final_price_syp
+            total_supplier_cost += supplier_cost_syp
+            total_profit += profit_syp
+            total_discount_given += discount_syp
+            
+            # إحصائيات التطبيق
+            if app_name not in app_stats:
+                app_stats[app_name] = {
+                    'orders': 0,
+                    'total_quantity': 0,
+                    'revenue': 0,
+                    'supplier_cost': 0,
+                    'profit': 0,
+                    'profit_percent': float(order['app_profit_percent'] or 0),
+                    'discount_given': 0
+                }
+            
+            app_stats[app_name]['orders'] += 1
+            app_stats[app_name]['total_quantity'] += quantity
+            app_stats[app_name]['revenue'] += final_price_syp
+            app_stats[app_name]['supplier_cost'] += supplier_cost_syp
+            app_stats[app_name]['profit'] += profit_syp
+            app_stats[app_name]['discount_given'] += discount_syp
+            
+            # إحصائيات VIP
+            vip_stats[vip_level]['orders'] += 1
+            vip_stats[vip_level]['revenue'] += final_price_syp
+            vip_stats[vip_level]['supplier_cost'] += supplier_cost_syp
+            vip_stats[vip_level]['profit'] += profit_syp
+            vip_stats[vip_level]['discount_given'] += discount_syp
+    
+    # حساب النسب
+    profit_margin = (total_profit / total_revenue * 100) if total_revenue > 0 else 0
+    cost_percent = (total_supplier_cost / total_revenue * 100) if total_revenue > 0 else 0
+    discount_percent = (total_discount_given / total_revenue * 100) if total_revenue > 0 else 0
+    
+    text = (
+        "💰 **تقرير الأرباح التفصيلي**\n"
+        f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$\n"
+        f"📊 إجمالي الطلبات: **{total_orders}**\n"
+        "➖➖➖➖➖➖➖➖\n\n"
+    )
+    
+    # تفاصيل التطبيقات
+    text += "📱 **تفاصيل التطبيقات:**\n\n"
+    sorted_apps = sorted(app_stats.items(), key=lambda x: x[1]['revenue'], reverse=True)
+    
+    for app_name, stats in sorted_apps:
+        app_margin = (stats['profit'] / stats['revenue'] * 100) if stats['revenue'] > 0 else 0
+        app_discount = (stats['discount_given'] / stats['revenue'] * 100) if stats['revenue'] > 0 else 0
+        
+        text += (
+            f"**{app_name}**\n"
+            f"• طلبات: {stats['orders']} | وحدات: {stats['total_quantity']}\n"
+            f"• نسبة ربح التطبيق: {stats['profit_percent']}%\n"
+            f"• إيرادات: {stats['revenue']:,.0f} ل.س\n"
+            f"• تكلفة المورد: {stats['supplier_cost']:,.0f} ل.س\n"
+            f"• الربح: {stats['profit']:,.0f} ل.س (هامش {app_margin:.1f}%)\n"
+            f"• خصومات VIP: {stats['discount_given']:,.0f} ل.س ({app_discount:.1f}%)\n"
+            "➖➖➖➖➖➖\n"
+        )
+    
+    # تحليل VIP
+    text += "\n👑 **تحليل حسب مستوى VIP:**\n\n"
+    vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
+    
+    active_levels = [l for l in vip_stats if vip_stats[l]['orders'] > 0]
+    for level in sorted(active_levels):
+        stats = vip_stats[level]
+        level_margin = (stats['profit'] / stats['revenue'] * 100) if stats['revenue'] > 0 else 0
+        level_discount = (stats['discount_given'] / stats['revenue'] * 100) if stats['revenue'] > 0 else 0
+        
+        icon = vip_icons[level] if level < len(vip_icons) else f"VIP {level}"
+        text += (
+            f"{icon}\n"
+            f"• طلبات: {stats['orders']}\n"
+            f"• إيرادات: {stats['revenue']:,.0f} ل.س\n"
+            f"• تكلفة: {stats['supplier_cost']:,.0f} ل.س\n"
+            f"• ربح: {stats['profit']:,.0f} ل.س (هامش {level_margin:.1f}%)\n"
+            f"• خصم ممنوح: {stats['discount_given']:,.0f} ل.س ({level_discount:.1f}%)\n\n"
+        )
+    
+    # ملخص عام
+    text += (
+        "📊 **الملخص العام**\n"
+        f"💰 إجمالي الإيرادات: **{total_revenue:,.0f} ل.س**\n"
+        f"📦 تكلفة الموردين: **{total_supplier_cost:,.0f} ل.س**\n"
+        f"💵 صافي الربح: **{total_profit:,.0f} ل.س**\n"
+        f"📈 هامش الربح: **{profit_margin:.1f}%**\n"
+        f"🎁 خصومات VIP: **{total_discount_given:,.0f} ل.س ({discount_percent:.1f}%)**\n"
+        f"💎 الربح بعد الخصم: **{total_profit - total_discount_given:,.0f} ل.س**"
+    )
+    
+    # تقسيم النص إذا كان طويلاً
+    if len(text) > 4000:
+        file = BytesIO()
+        file.write(text.encode('utf-8'))
+        file.seek(0)
+        
+        await callback.message.answer_document(
+            types.BufferedInputFile(
+                file=file.getvalue(),
+                filename=f"profits_report_{get_damascus_time_now().strftime('%Y-%m-%d')}.txt"
+            ),
+            caption="📊 تقرير الأرباح (نص طويل)"
+        )
+    else:
+        await callback.message.edit_text(text)
+
+@router.callback_query(F.data == "users_report")
+async def users_report(callback: types.CallbackQuery, db_pool):
+    """تقرير المستخدمين"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        users_stats = await conn.fetchrow('''
+            SELECT 
+                COUNT(*) as total_users,
+                COUNT(CASE WHEN is_banned THEN 1 END) as banned_users,
+                COUNT(CASE WHEN vip_level > 0 THEN 1 END) as vip_users,
+                COALESCE(AVG(balance), 0) as avg_balance,
+                COALESCE(SUM(balance), 0) as total_balance,
+                COUNT(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 END) as new_today
+            FROM users
+        ''')
+        
+        top_users = await conn.fetch('''
+            SELECT username, total_spent, vip_level
+            FROM users
+            WHERE total_spent > 0
+            ORDER BY total_spent DESC
+            LIMIT 5
+        ''')
+    
+    text = (
+        f"👥 **تقرير المستخدمين**\n\n"
+        f"📊 **إحصائيات:**\n"
+        f"• إجمالي المستخدمين: {users_stats['total_users']}\n"
+        f"• مستخدمين جدد اليوم: {users_stats['new_today']}\n"
+        f"• المحظورين: {users_stats['banned_users']}\n"
+        f"• أعضاء VIP: {users_stats['vip_users']}\n"
+        f"• متوسط الرصيد: {users_stats['avg_balance']:,.0f} ل.س\n"
+        f"• إجمالي الأرصدة: {users_stats['total_balance']:,.0f} ل.س\n\n"
+    )
+    
+    if top_users:
+        text += "🏆 **أكثر المستخدمين إنفاقاً:**\n"
+        for i, user in enumerate(top_users, 1):
+            username = user['username'] or f"مستخدم"
+            text += f"{i}. {username} - {user['total_spent']:,.0f} ل.س (VIP {user['vip_level']})\n"
+    
+    await callback.message.edit_text(text)
+
+@router.callback_query(F.data == "apps_report")
+async def apps_report(callback: types.CallbackQuery, db_pool):
+    """تقرير التطبيقات"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        apps_stats = await conn.fetch('''
+            SELECT 
+                a.name,
+                COUNT(o.id) as order_count,
+                COALESCE(SUM(o.total_amount_syp), 0) as total_revenue
+            FROM applications a
+            LEFT JOIN orders o ON a.id = o.app_id AND o.status = 'completed'
+            GROUP BY a.id, a.name
+            ORDER BY total_revenue DESC
+            LIMIT 10
+        ''')
+    
+    text = "📱 **تقرير التطبيقات**\n\n"
+    
+    if apps_stats:
+        for app in apps_stats:
+            text += f"• **{app['name']}**\n"
+            text += f"  طلبات: {app['order_count']} | إيرادات: {app['total_revenue']:,.0f} ل.س\n\n"
+    else:
+        text += "لا توجد بيانات كافية بعد."
+    
+    await callback.message.edit_text(text)
+
+@router.callback_query(F.data == "points_report")
+async def points_report(callback: types.CallbackQuery, db_pool):
+    """تقرير النقاط"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        points_stats = await conn.fetchrow('''
+            SELECT 
+                COALESCE(SUM(total_points), 0) as total_points,
+                COALESCE(SUM(total_points_earned), 0) as total_earned,
+                COALESCE(SUM(total_points_redeemed), 0) as total_redeemed,
+                COUNT(CASE WHEN total_points > 0 THEN 1 END) as users_with_points
+            FROM users
+        ''')
+        
+        redemptions = await conn.fetchrow('''
+            SELECT 
+                COUNT(*) as redemption_count,
+                COALESCE(SUM(amount_syp), 0) as total_redemption_value
+            FROM redemption_requests
+            WHERE status = 'approved'
+        ''')
+    
+    text = (
+        f"⭐ **تقرير النقاط**\n\n"
+        f"📊 **إحصائيات:**\n"
+        f"• إجمالي النقاط: {points_stats['total_points']}\n"
+        f"• نقاط مكتسبة: {points_stats['total_earned']}\n"
+        f"• نقاط مستردة: {points_stats['total_redeemed']}\n"
+        f"• مستخدمين لديهم نقاط: {points_stats['users_with_points']}\n\n"
+        f"💰 **الاسترداد:**\n"
+        f"• عدد عمليات الاسترداد: {redemptions['redemption_count']}\n"
+        f"• قيمة المستردة: {redemptions['total_redemption_value']:,.0f} ل.س"
+    )
+    
+    await callback.message.edit_text(text)
+
+@router.callback_query(F.data == "backup_db")
+async def backup_database(callback: types.CallbackQuery, db_pool):
+    """نسخ احتياطي لقاعدة البيانات"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text("⏳ جاري إنشاء نسخة احتياطية...")
+    
+    excel_file = await generate_excel_report(db_pool, 'all')
+    
+    if excel_file:
+        today = get_damascus_time_now().strftime('%Y-%m-%d_%H-%M')
+        
+        file = types.BufferedInputFile(
+            file=excel_file.getvalue(),
+            filename=f'backup_{today}.xlsx'
+        )
+        
+        await callback.message.answer_document(
+            document=file,
+            caption=f"💾 **نسخة احتياطية كاملة**\n"
+                   f"📅 {get_damascus_time_now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                   f"✅ تم حفظ جميع البيانات"
+        )
+    else:
+        await callback.message.edit_text("❌ فشل في إنشاء النسخة الاحتياطية")
+
+# ============= إعدادات التقارير =============
 
 @router.callback_query(F.data == "report_settings")
-async def show_report_settings(callback: types.CallbackQuery, db_pool):
-    if not is_admin(callback.from_user.id): return
+async def report_settings(callback: types.CallbackQuery, db_pool):
+    """إعدادات التقارير"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
     
     settings = await get_report_settings(db_pool)
-    status = "✅ مفعلة" if settings.get('auto_reports_enabled') else "❌ معطلة"
-    period = settings.get('report_period', 'daily')
-    time_str = settings.get('report_time', '09:00')
+    
+    enabled_status = "✅ مفعل" if settings.get('daily_report_enabled') == 'true' else "❌ معطل"
+    recipients_text = "👑 المالك فقط" if settings.get('report_recipients') == 'owner_only' else "👥 جميع المشرفين"
     
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text=f"الحالة: {status}", callback_data="toggle_auto_reports"))
     builder.row(
-        types.InlineKeyboardButton(text=f"الفترة: {period}", callback_data="change_report_period"),
-        types.InlineKeyboardButton(text=f"الوقت: {time_str}", callback_data="change_report_time")
+        types.InlineKeyboardButton(text="🔁 تبديل التفعيل", callback_data="toggle_daily_report")
     )
-    builder.row(types.InlineKeyboardButton(text="👤 مستلمي التقارير", callback_data="manage_report_recipients"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_reports"))
+    builder.row(
+        types.InlineKeyboardButton(text="⏰ تغيير وقت التقرير", callback_data="change_report_time")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="👤 تغيير المستلمين", callback_data="change_recipients")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="reports_menu")
+    )
     
     await callback.message.edit_text(
-        "⚙️ **إعدادات التقارير التلقائية**\n\nقم بضبط وقت إرسال التقارير اليومية للمشرفين:",
+        f"⚙️ **إعدادات التقارير**\n\n"
+        f"• حالة التقرير اليومي: {enabled_status}\n"
+        f"• وقت الإرسال: {settings.get('report_time', '00:00')}\n"
+        f"• المستلمون: {recipients_text}\n\n"
+        f"اختر الإجراء المطلوب:",
         reply_markup=builder.as_markup()
     )
 
