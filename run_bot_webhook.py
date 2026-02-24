@@ -121,16 +121,15 @@ async def main():
     
     logger.info("🚀 بدأ تشغيل البوت...")
     
-        try:
-        # 1. إنشاء مجمع الاتصالات (الآن يضبط الوقت تلقائياً ويحمي سوبابيز)
+    try:
+        # 1. إنشاء مجمع الاتصالات
         db_pool = await get_pool()
         
         if not db_pool:
             logger.error("❌ فشل بدء البوت: تعذر الاتصال بقاعدة البيانات")
             return
 
-        # 2. تهيئة قاعدة البيانات والتأكد من الجداول
-        # ملاحظة: تأكد أن دالة init_db في ملفك الأصلي تأخذ db_pool كبارامتر
+        # 2. تهيئة قاعدة البيانات
         await init_db(db_pool) 
         
         # 3. إصلاح الجداول إذا لزم الأمر
@@ -178,14 +177,14 @@ async def main():
         # إنشاء البوت
         bot = Bot(token=TOKEN)
         
-        # ✅ إضافة ميدل وير باستخدام الكلاس من ملف middleware.py
+        # ✅ إضافة ميدل وير
         dp.message.middleware(BotStatusMiddleware(db_pool))
         dp.callback_query.middleware(BotStatusMiddleware(db_pool))
         
         # تهيئة الجدولة
         await init_scheduler(bot, db_pool)
         
-        # تسجيل الهاندلرز - ترتيب مهم
+        # تسجيل الهاندلرز
         dp.include_routers(
             start.router,
             admin.router,
@@ -230,13 +229,13 @@ async def main():
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', PORT)
         
-        # تعيين webhook عند بدء التشغيل
+        # تعيين webhook
         await on_startup(bot, BASE_URL, db_pool)
         
         try:
             await site.start()
             logger.info(f"✅ الخادم يعمل على المنفذ {PORT}")
-            await asyncio.Event().wait()  # الانتظار إلى الأبد
+            await asyncio.Event().wait()
         except KeyboardInterrupt:
             logger.info("⏹️ تم إيقاف البوت")
         finally:
