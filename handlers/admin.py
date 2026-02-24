@@ -3038,7 +3038,6 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_broadcast_msg)
-
 # ============= إرسال رسالة جماعية (تابع) =============
 
 @router.message(AdminStates.waiting_broadcast_msg)
@@ -3201,7 +3200,7 @@ async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("appr_dep_"))
 async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """موافقة على طلب شحن من المجموعة - مع زيادة total_deposits للمنافسة"""
+    """موافقة على طلب شحن من المجموعة"""
     try:
         logger.info(f"📩 استقبال موافقة شحن: {callback.data}")
         
@@ -3223,14 +3222,12 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                 await conn.execute("INSERT INTO users (user_id, balance, created_at) VALUES ($1, 0, CURRENT_TIMESTAMP)", user_id)
                 user = {'username': None, 'balance': 0}
             
-            # ====== نقطة مهمة: زيادة total_deposits للمنافسة ======
             new_balance = user['balance'] + amount
             await conn.execute(
                 "UPDATE users SET balance = $1, total_deposits = total_deposits + $2, last_activity = CURRENT_TIMESTAMP WHERE user_id = $3",
                 new_balance, amount, user_id
             )
             
-            # تحديث حالة الطلب
             await conn.execute('''
                 UPDATE deposit_requests 
                 SET status = 'approved', updated_at = CURRENT_TIMESTAMP
@@ -3241,12 +3238,6 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                     LIMIT 1
                 )
             ''', user_id, amount)
-            
-            # إضافة نقاط للشحن إذا كان مفعلاً
-            from database import get_points_per_deposit, add_points_for_deposit
-            points_per_deposit = await get_points_per_deposit(db_pool)
-            if points_per_deposit > 0:
-                await add_points_for_deposit(db_pool, user_id, 0, points_per_deposit)
         
         damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
         
@@ -3428,7 +3419,7 @@ async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: B
 
 @router.callback_query(F.data.startswith("compl_order_"))
 async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """تأكيد تنفيذ الطلب من المجموعة - مع زيادة total_orders و total_spent للمنافسة ونظام VIP"""
+    """تأكيد تنفيذ الطلب من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -3447,18 +3438,12 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             from database import get_points_per_order
             points = await get_points_per_order(db_pool)
             
-            # ====== تحديث حالة الطلب ======
             await conn.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1", order_id)
             
-            # ====== إحصائيات المنافسة: زيادة total_orders و total_spent ======
-            await conn.execute('''
-                UPDATE users 
-                SET total_orders = total_orders + 1,
-                    total_spent = total_spent + $1,
-                    total_points = total_points + $2,
-                    total_points_earned = total_points_earned + $2
-                WHERE user_id = $3
-            ''', order['total_amount_syp'], points, order['user_id'])
+            await conn.execute(
+                "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
+                points, order['user_id']
+            )
             
             await conn.execute("UPDATE orders SET points_earned = $1 WHERE id = $2", points, order_id)
             
@@ -3467,11 +3452,9 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
             ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
             
-            # ====== تحديث مستوى VIP ======
             from database import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
             
-            # جلب إجمالي المشتريات الجديد
             total_spent = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
@@ -3485,7 +3468,7 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
                 vip_discount = 0
                 vip_level = 0
                 
-            vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+            vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
             vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
             
             user_points = await conn.fetchval("SELECT total_points FROM users WHERE user_id = $1", order['user_id']) or 0
@@ -3497,8 +3480,7 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
                     f"📱 التطبيق: {order['app_name']}\n"
                     f"⭐ نقاط مكتسبة: +{points}\n"
                     f"💰 رصيد النقاط الجديد: {user_points}\n"
-                    f"👑 مستواك: {vip_icon} VIP {vip_level} (خصم {vip_discount}%)\n"
-                    f"💵 إجمالي المشتريات: {total_spent:,.0f} ل.س\n\n"
+                    f"👑 مستواك: {vip_icon} VIP {vip_level} (خصم {vip_discount}%)\n\n"
                     f"شكراً لاستخدامك خدماتنا"
                 )
             except Exception as e:
@@ -3589,7 +3571,7 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     builder = InlineKeyboardBuilder()
     levels = [
         ("🟢 VIP 0 (0%)", 0, 0), ("🔵 VIP 1 (1%)", 1, 1), ("🟣 VIP 2 (2%)", 2, 2),
-        ("🟡 VIP 3 (4%)", 3, 4), ("🔴 VIP 4 (5%)", 4, 5), ("💎 VIP 5 (7%)", 5, 7),
+        ("🟡 VIP 3 (3%)", 3, 3), ("🔴 VIP 4 (5%)", 4, 5), ("💎 VIP 5 (7%)", 5, 7),
         ("👑 VIP 6 (10%)", 6, 10),
     ]
     
@@ -3752,7 +3734,7 @@ async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, 
         elif level == 2:
             discount = 2; btn_text = f"🟣 VIP 2 (2%)"
         elif level == 3:
-            discount = 4; btn_text = f"🟡 VIP 3 (4%)"
+            discount = 3; btn_text = f"🟡 VIP 3 (3%)"
         elif level == 4:
             discount = 5; btn_text = f"🔴 VIP 4 (5%)"
         elif level == 5:
