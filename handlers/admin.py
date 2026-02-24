@@ -1275,7 +1275,7 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
-    """عرض المنتجات لإدارة خياراتها"""
+    """عرض جميع المنتجات لإدارة خياراتها"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -1284,30 +1284,34 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
             SELECT a.id, a.name, c.display_name, a.type
             FROM applications a
             LEFT JOIN categories c ON a.category_id = c.id
-            WHERE a.type IN ('game', 'subscription')
             ORDER BY c.sort_order, a.name
         ''')
     
-    text = "🎮 **إدارة خيارات الألعاب والاشتراكات**\n\n"
+    text = "📦 **إدارة خيارات المنتجات**\n\n"
     
     if not products:
-        text += "⚠️ لا توجد ألعاب أو اشتراكات حالياً."
+        text += "⚠️ لا توجد منتجات حالياً."
     else:
-        text += "**التطبيقات المتوفرة:**\n\n"
+        text += "**جميع المنتجات:**\n\n"
+        type_icons = {
+            'game': '🎮',
+            'subscription': '📅',
+            'service': '📱'
+        }
         for p in products:
-            type_icon = "🎮" if p['type'] == 'game' else "📅"
-            text += f"{type_icon} **{p['name']}** - {p['display_name']}\n"
+            icon = type_icons.get(p['type'], '📦')
+            text += f"{icon} **{p['name']}** - {p['display_name'] or 'بدون قسم'}\n"
     
     builder = InlineKeyboardBuilder()
     
     for product in products:
-        type_icon = "🎮" if product['type'] == 'game' else "📅"
+        type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
         builder.row(types.InlineKeyboardButton(
             text=f"{type_icon} {product['name']}",
             callback_data=f"prod_options_{product['id']}"
         ))
     
-    builder.row(types.InlineKeyboardButton(text="➕ إضافة لعبة أو اشتراك جديد", callback_data="add_new_game"))
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة منتج جديد", callback_data="add_product"))
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
@@ -1324,19 +1328,27 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
             product_id
         )
     
-    text = f"📱 **{product['name']}**\n\n"
+    # تحديد نوع المنتج
+    type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
+    
+    text = f"{type_icon} **{product['name']}**\n"
+    text += f"📝 **النوع:** {product['type']}\n"
+    if product.get('description'):
+        text += f"📄 {product['description']}\n"
+    text += "➖➖➖➖➖➖\n\n"
     
     if not options:
         text += "⚠️ لا توجد خيارات لهذا المنتج."
     else:
-        text += "**الخيارات الحالية:**\n\n"
-        for opt in options:
-            text += f"🆔 **{opt['id']}** | **{opt['name']}**\n"
-            text += f"📦 الكمية: {opt['quantity']}\n"
-            text += f"💰 السعر: ${float(opt['price_usd']):.2f}\n"
+        text += f"**الخيارات الحالية ({len(options)}):**\n\n"
+        for i, opt in enumerate(options, 1):
+            text += f"**{i}. {opt['name']}**\n"
+            text += f"   🆔 `{opt['id']}`\n"
+            text += f"   📦 الكمية: {opt['quantity']}\n"
+            text += f"   💰 سعر المورد: ${float(opt['price_usd']):.3f}\n"
             if opt.get('description'):
-                text += f"📝 {opt['description']}\n"
-            text += "➖➖➖➖➖➖\n"
+                text += f"   📝 {opt['description']}\n"
+            text += "   ➖➖➖➖\n"
     
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
@@ -1347,9 +1359,213 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
             types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
+    builder.row(types.InlineKeyboardButton(text="📋 إضافة قوالب جاهزة", callback_data=f"templates_menu_{product_id}"))
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("templates_menu_"))
+async def templates_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """عرض قائمة القوالب الجاهزة حسب نوع المنتج"""
+    product_id = int(callback.data.split("_")[2])
+    
+    async with db_pool.acquire() as conn:
+        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+    
+    await state.update_data(product_id=product_id, product_type=product['type'])
+    
+    builder = InlineKeyboardBuilder()
+    
+    # قوالب للألعاب
+    if product['type'] == 'game':
+        builder.row(types.InlineKeyboardButton(text="🎯 قالب PUBG", callback_data=f"template_pubg_{product_id}"))
+        builder.row(types.InlineKeyboardButton(text="🔥 قالب Free Fire", callback_data=f"template_ff_{product_id}"))
+        builder.row(types.InlineKeyboardButton(text="⚔️ قالب Clash of Clans", callback_data=f"template_coc_{product_id}"))
+    
+    # قوالب للاشتراكات
+    elif product['type'] == 'subscription':
+        builder.row(types.InlineKeyboardButton(text="📅 اشتراكات شهرية", callback_data=f"template_monthly_{product_id}"))
+        builder.row(types.InlineKeyboardButton(text="📅 اشتراكات سنوية", callback_data=f"template_yearly_{product_id}"))
+    
+    # قوالب للخدمات العادية
+    elif product['type'] == 'service':
+        builder.row(types.InlineKeyboardButton(text="📊 متابعين انستغرام", callback_data=f"template_insta_{product_id}"))
+        builder.row(types.InlineKeyboardButton(text="🎵 متابعين تيك توك", callback_data=f"template_tiktok_{product_id}"))
+        builder.row(types.InlineKeyboardButton(text="⭐ نجوم تليجرام", callback_data=f"template_stars_{product_id}"))
+    
+    builder.row(types.InlineKeyboardButton(text="✏️ إدخال يدوي", callback_data=f"add_option_{product_id}"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"prod_options_{product_id}"))
+    
+    await callback.message.edit_text(
+        f"📋 **قوالب جاهزة لـ {product['name']}**\n\n"
+        f"اختر القالب المناسب:",
+        reply_markup=builder.as_markup()
+    )
+@router.callback_query(F.data.startswith("template_insta_"))
+async def add_instagram_template(callback: types.CallbackQuery, db_pool):
+    """إضافة قالب متابعين انستغرام"""
+    product_id = int(callback.data.split("_")[2])
+    
+    options = [
+        ('100 متابع', 100, 0.99),
+        ('500 متابع', 500, 4.99),
+        ('1000 متابع', 1000, 9.99),
+        ('2500 متابع', 2500, 24.99),
+        ('5000 متابع', 5000, 49.99),
+    ]
+    
+    async with db_pool.acquire() as conn:
+        # حذف القديم إذا وجد
+        await conn.execute(
+            "DELETE FROM product_options WHERE product_id = $1",
+            product_id
+        )
+        
+        # إضافة الجديد
+        for i, (name, qty, price) in enumerate(options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
+                VALUES ($1, $2, $3, $4, $5, TRUE)
+            ''', product_id, name, qty, price, i)
+    
+    await callback.message.edit_text(
+        f"✅ **تم إضافة خيارات متابعين انستغرام بنجاح!**\n\n"
+        f"• 100 متابع - $0.99\n"
+        f"• 500 متابع - $4.99\n"
+        f"• 1000 متابع - $9.99\n"
+        f"• 2500 متابع - $24.99\n"
+        f"• 5000 متابع - $49.99"
+    )
+
+@router.callback_query(F.data.startswith("template_tiktok_"))
+async def add_tiktok_template(callback: types.CallbackQuery, db_pool):
+    """إضافة قالب متابعين تيك توك"""
+    product_id = int(callback.data.split("_")[2])
+    
+    options = [
+        ('100 متابع', 100, 0.99),
+        ('500 متابع', 500, 4.99),
+        ('1000 متابع', 1000, 9.99),
+        ('2500 متابع', 2500, 24.99),
+        ('5000 متابع', 5000, 49.99),
+    ]
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM product_options WHERE product_id = $1",
+            product_id
+        )
+        
+        for i, (name, qty, price) in enumerate(options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
+                VALUES ($1, $2, $3, $4, $5, TRUE)
+            ''', product_id, name, qty, price, i)
+    
+    await callback.message.edit_text(
+        f"✅ **تم إضافة خيارات متابعين تيك توك بنجاح!**\n\n"
+        f"• 100 متابع - $0.99\n"
+        f"• 500 متابع - $4.99\n"
+        f"• 1000 متابع - $9.99\n"
+        f"• 2500 متابع - $24.99\n"
+        f"• 5000 متابع - $49.99"
+    )
+
+@router.callback_query(F.data.startswith("template_stars_"))
+async def add_telegram_stars_template(callback: types.CallbackQuery, db_pool):
+    """إضافة قالب نجوم تليجرام"""
+    product_id = int(callback.data.split("_")[2])
+    
+    options = [
+        ('50 نجمة', 50, 0.99),
+        ('100 نجمة', 100, 1.99),
+        ('250 نجمة', 250, 4.99),
+        ('500 نجمة', 500, 9.99),
+        ('1000 نجمة', 1000, 19.99),
+    ]
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM product_options WHERE product_id = $1",
+            product_id
+        )
+        
+        for i, (name, qty, price) in enumerate(options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
+                VALUES ($1, $2, $3, $4, $5, TRUE)
+            ''', product_id, name, qty, price, i)
+    
+    await callback.message.edit_text(
+        f"✅ **تم إضافة خيارات نجوم تليجرام بنجاح!**\n\n"
+        f"• 50 نجمة - $0.99\n"
+        f"• 100 نجمة - $1.99\n"
+        f"• 250 نجمة - $4.99\n"
+        f"• 500 نجمة - $9.99\n"
+        f"• 1000 نجمة - $19.99"
+    )
+
+@router.callback_query(F.data.startswith("template_monthly_"))
+async def add_monthly_subscription_template(callback: types.CallbackQuery, db_pool):
+    """إضافة قالب اشتراكات شهرية"""
+    product_id = int(callback.data.split("_")[2])
+    
+    options = [
+        ('شهر واحد', 30, 4.99),
+        ('3 أشهر', 90, 12.99),
+        ('6 أشهر', 180, 24.99),
+        ('12 شهر', 365, 49.99),
+    ]
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM product_options WHERE product_id = $1",
+            product_id
+        )
+        
+        for i, (name, days, price) in enumerate(options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
+                VALUES ($1, $2, $3, $4, $5, TRUE)
+            ''', product_id, name, days, price, i)
+    
+    await callback.message.edit_text(
+        f"✅ **تم إضافة خيارات الاشتراكات الشهرية بنجاح!**\n\n"
+        f"• شهر واحد - $4.99\n"
+        f"• 3 أشهر - $12.99\n"
+        f"• 6 أشهر - $24.99\n"
+        f"• 12 شهر - $49.99"
+    )
+
+@router.callback_query(F.data.startswith("template_yearly_"))
+async def add_yearly_subscription_template(callback: types.CallbackQuery, db_pool):
+    """إضافة قالب اشتراكات سنوية"""
+    product_id = int(callback.data.split("_")[2])
+    
+    options = [
+        ('سنة واحدة', 365, 49.99),
+        ('سنتين', 730, 89.99),
+        ('3 سنوات', 1095, 129.99),
+    ]
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM product_options WHERE product_id = $1",
+            product_id
+        )
+        
+        for i, (name, days, price) in enumerate(options):
+            await conn.execute('''
+                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
+                VALUES ($1, $2, $3, $4, $5, TRUE)
+            ''', product_id, name, days, price, i)
+    
+    await callback.message.edit_text(
+        f"✅ **تم إضافة خيارات الاشتراكات السنوية بنجاح!**\n\n"
+        f"• سنة واحدة - $49.99\n"
+        f"• سنتين - $89.99\n"
+        f"• 3 سنوات - $129.99"
+    )
 
 # ============= إضافة خيار جديد =============
 
