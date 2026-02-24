@@ -3,7 +3,7 @@ import asyncpg
 import logging
 import pytz
 from datetime import datetime
-from config import DB_CONFIG
+from config import DB_CONFIG, DATABASE_URL
 
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 def format_local_time(dt):
@@ -463,9 +463,13 @@ async def init_db():
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
     except Exception as e:
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
+
 async def get_pool():
     """إنشاء مجمع اتصالات ذكي يدعم الرابط أو المصفوفة مع قيود الخطة المجانية"""
     try:
+        # استيراد DATABASE_URL من config
+        from config import DATABASE_URL, DB_CONFIG
+        
         # تحديد مصدر البيانات (الرابط له الأولوية)
         dsn_link = DATABASE_URL if DATABASE_URL else DB_CONFIG.get("dsn")
         
@@ -485,9 +489,11 @@ async def get_pool():
 
         if dsn_link:
             # إذا توفر رابط كامل (DSN)
+            logging.info(f"🔌 محاولة الاتصال باستخدام DSN: {dsn_link[:50]}...")
             pool = await asyncpg.create_pool(dsn=dsn_link, **pool_settings)
         else:
             # إذا توفرت مصفوفة إعدادات فقط
+            logging.info(f"🔌 محاولة الاتصال باستخدام الإعدادات: {DB_CONFIG.get('host')}")
             pool = await asyncpg.create_pool(**DB_CONFIG, **pool_settings)
             
         logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح (الحد الأقصى: 5)")
@@ -495,20 +501,6 @@ async def get_pool():
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
         return None
-async def test_connection():
-    """اختبار الاتصال السريع"""
-    try:
-        if DATABASE_URL:
-            conn = await asyncpg.connect(dsn=DATABASE_URL, timeout=10)
-        else:
-            conn = await asyncpg.connect(**DB_CONFIG, timeout=10)
-        await conn.close()
-        logging.info("✅ تم اختبار الاتصال بنجاح")
-        return True
-    except Exception as e:
-        logging.error(f"❌ فشل اختبار الاتصال: {e}")
-        return False
-
 # ============= دوال ضبط المنطقة الزمنية =============
 
 async def set_database_timezone(pool):
