@@ -8,7 +8,7 @@ from config import USD_TO_SYP, ADMIN_ID
 from datetime import datetime
 import logging
 from handlers.keyboards import get_back_inline_keyboard, get_main_menu_keyboard
-from database import get_user_full_stats, get_user_points, get_exchange_rate, get_redemption_rate, is_admin_user
+from database import get_user_profile, get_user_points, get_exchange_rate, get_redemption_rate, is_admin_user, get_next_vip_level
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -20,7 +20,7 @@ class ProfileStates(StatesGroup):
 
 @router.message(F.text == "👤 حسابي")
 async def show_profile(message: types.Message, db_pool):
-    """عرض الملف الشخصي للمستخدم"""
+    """عرض الملف الشخصي للمستخدم مع تفاصيل VIP والتنافس"""
     user_id = message.from_user.id
     
     # استخدم get_user_profile بدلاً من get_user_full_stats
@@ -31,17 +31,25 @@ async def show_profile(message: types.Message, db_pool):
         # إذا لم توجد إحصائيات، نعرض بيانات بسيطة
         points = await get_user_points(db_pool, user_id)
         balance = 0
+        vip_level = 0
+        vip_discount = 0
+        total_spent = 0
         
         async with db_pool.acquire() as conn:
             try:
-                balance = await conn.fetchval(
-                    "SELECT balance FROM users WHERE user_id = $1",
+                user_data = await conn.fetchrow(
+                    "SELECT balance, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
                     user_id
-                ) or 0
+                )
+                if user_data:
+                    balance = user_data['balance'] or 0
+                    vip_level = user_data['vip_level'] or 0
+                    vip_discount = user_data['discount_percent'] or 0
+                    total_spent = user_data['total_spent'] or 0
             except:
                 pass
         
-        await show_simple_profile(message, user_id, balance, points, db_pool)
+        await show_simple_profile(message, user_id, balance, points, vip_level, vip_discount, total_spent, db_pool)
         return
     
     user = profile['user']
@@ -51,7 +59,7 @@ async def show_profile(message: types.Message, db_pool):
     exchange_rate = await get_exchange_rate(db_pool)
     
     # حساب قيمة النقاط
-    points_value_usd = (user.get('total_points', 0) / redemption_rate) * 5
+    points_value_usd = (user.get('total_points', 0) / redemption_rate)
     points_value_syp = points_value_usd * exchange_rate
     
     # تنسيق تاريخ التسجيل
@@ -62,7 +70,25 @@ async def show_profile(message: types.Message, db_pool):
         else:
             join_date = str(user['created_at'])
     
-    # بناء رسالة الملف الشخصي
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+    vip_level = user.get('vip_level', 0)
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    vip_discount = user.get('discount_percent', 0)
+    total_spent = user.get('total_spent', 0)
+    manual_status = " (يدوي)" if user.get('manual_vip') else ""
+    
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى!"
+    
+    # بناء رسالة الملف الشخصي مع تفاصيل التنافس
     profile_text = (
         f"👤 **الملف الشخصي**\n\n"
         f"🆔 **الآيدي:** `{user['user_id']}`\n"
@@ -73,24 +99,28 @@ async def show_profile(message: types.Message, db_pool):
         
         f"💰 **المحفظة:**\n"
         f"• الرصيد: {user.get('balance', 0):,.0f} ل.س\n"
-        f"• إجمالي الإيداعات: {profile['deposits'].get('total_amount', 0):,.0f} ل.س\n"
-        f"• عدد الإيداعات: {profile['deposits'].get('approved_count', 0)}\n"
-        f"• عدد الطلبات: {profile['orders'].get('completed_count', 0)}\n\n"
+        f"• إجمالي الإيداعات: {profile['deposits'].get('approved_amount', 0):,.0f} ل.س\n"
+        f"• عدد الإيداعات: {profile['deposits'].get('approved_count', 0)}\n\n"
+        
+        f"👑 **نظام VIP{manual_status}:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي الإنفاق: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
         
         f"⭐ **نظام النقاط:**\n"
         f"• رصيد النقاط: {user.get('total_points', 0)}\n"
         f"• قيمة النقاط: {points_value_syp:,.0f} ل.س\n"
-        f"• كل {redemption_rate} نقطة = 5$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n\n"
+        f"• كل {redemption_rate} نقطة = 1$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n"
+        f"• نقاط مكتسبة من الطلبات: {profile['orders'].get('total_points_earned', 0)}\n"
+        f"• النقاط المستردة: {user.get('total_points_redeemed', 0)}\n\n"
         
         f"🔗 **الإحالة:**\n"
         f"• كود الإحالة: `{user.get('referral_code', 'غير متوفر')}`\n"
         f"• عدد المحالين: {user.get('referral_count', 0)}\n"
-        f"• نقاط من الإحالات: {user.get('referral_earnings', 0)}\n\n"
-        
-        f"📊 **إحصائيات إضافية:**\n"
-        f"• نقاط مكتسبة من الطلبات: {profile['orders'].get('total_points_earned', 0)}\n"
-        f"• إجمالي النقاط المكتسبة: {user.get('total_points_earned', 0)}\n"
-        f"• النقاط المستردة: {user.get('total_points_redeemed', 0)}"
+        f"• نقاط من الإحالات: {user.get('referral_earnings', 0)}\n"
+        f"• إيداعات المحالين: {profile['referrals'].get('referrals_deposits', 0):,.0f} ل.س\n"
+        f"• طلبات المحالين: {profile['referrals'].get('referrals_orders', 0)}"
     )
     
     # أزرار التفاعل
@@ -104,7 +134,8 @@ async def show_profile(message: types.Message, db_pool):
         types.InlineKeyboardButton(text="📊 إحصائياتي", callback_data="my_stats")
     )
     builder.row(
-        types.InlineKeyboardButton(text="📋 آخر 5 طلبات", callback_data="recent_orders")
+        types.InlineKeyboardButton(text="📋 آخر 5 طلبات", callback_data="recent_orders"),
+        types.InlineKeyboardButton(text="🏆 المتصدرين", callback_data="leaderboard_menu")
     )
     
     await message.answer(
@@ -113,24 +144,75 @@ async def show_profile(message: types.Message, db_pool):
         parse_mode="Markdown"
     )
 
-async def show_simple_profile(message: types.Message, user_id, balance, points, db_pool):
-    """نسخة مبسطة من الملف الشخصي"""
+async def show_simple_profile(message: types.Message, user_id, balance, points, vip_level, vip_discount, total_spent, db_pool):
+    """نسخة مبسطة من الملف الشخصي مع تفاصيل VIP"""
     async with db_pool.acquire() as conn:
         try:
             referral_code = await conn.fetchval(
                 "SELECT referral_code FROM users WHERE user_id = $1",
                 user_id
             ) or "غير متوفر"
+            
+            # جلب إحصائيات إضافية
+            deposits_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
+                user_id
+            ) or 0
+            
+            orders_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
+                user_id
+            ) or 0
+            
+            referrals_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE referred_by = $1",
+                user_id
+            ) or 0
         except:
             referral_code = "غير متوفر"
+            deposits_count = 0
+            orders_count = 0
+            referrals_count = 0
+    
+    # جلب الإعدادات
+    exchange_rate = await get_exchange_rate(db_pool)
+    redemption_rate = await get_redemption_rate(db_pool)
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى!"
     
     profile_text = (
         f"👤 **الملف الشخصي**\n\n"
         f"🆔 **الآيدي:** `{user_id}`\n"
         f"👤 **الاسم:** {message.from_user.full_name}\n"
         f"📅 **اليوزر:** @{message.from_user.username or 'غير متوفر'}\n"
-        f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
-        f"⭐ **النقاط:** {points}\n\n"
+        f"💰 **الرصيد:** {balance:,.0f} ل.س\n\n"
+        
+        f"👑 **نظام VIP:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي الإنفاق: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
+        
+        f"⭐ **النقاط:** {points}\n"
+        f"💵 قيمة النقاط: {(points / redemption_rate) * exchange_rate:,.0f} ل.س\n\n"
+        
+        f"📊 **إحصائيات سريعة:**\n"
+        f"• إيداعات ناجحة: {deposits_count}\n"
+        f"• طلبات مكتملة: {orders_count}\n"
+        f"• إحالات ناجحة: {referrals_count}\n\n"
+        
         f"🔗 **كود الإحالة:**\n"
         f"`{referral_code}`"
     )
@@ -139,6 +221,9 @@ async def show_simple_profile(message: types.Message, user_id, balance, points, 
     builder.row(
         types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link"),
         types.InlineKeyboardButton(text="📋 سجل النقاط", callback_data="points_history")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🏆 المتصدرين", callback_data="leaderboard_menu")
     )
     
     await message.answer(
@@ -205,7 +290,8 @@ async def show_points_history(callback: types.CallbackQuery, db_pool):
                 'referral': 'إحالة',
                 'admin_add': 'إضافة من الأدمن',
                 'redemption': 'استرداد نقاط',
-                'points_spent': 'خصم نقاط'
+                'points_spent': 'خصم نقاط',
+                'deposit': 'نقاط شحن'
             }
             
             action_text = action_names.get(item['action'], item['action'])
@@ -263,19 +349,28 @@ async def show_referral_link(callback: types.CallbackQuery, db_pool):
             "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'referral'",
             callback.from_user.id
         ) or 0
+        
+        # إيداعات المحالين
+        referrals_deposits = await conn.fetchval('''
+            SELECT COALESCE(SUM(u.total_deposits), 0)
+            FROM users u
+            WHERE u.referred_by = $1
+        ''', callback.from_user.id) or 0
     
     exchange_rate = await get_exchange_rate(db_pool)
+    redemption_rate = await get_redemption_rate(db_pool)
     
     text = (
         f"🔗 **رابط الإحالة الخاص بك**\n\n"
         f"`{link}`\n\n"
         f"**📊 إحصائيات الإحالة:**\n"
         f"• عدد المحالين: {referrals_count}\n"
-        f"• النقاط المكتسبة: {points_from_referrals}\n\n"
+        f"• النقاط المكتسبة: {points_from_referrals}\n"
+        f"• إيداعات المحالين: {referrals_deposits:,.0f} ل.س\n\n"
         f"**🎁 مميزات الإحالة:**\n"
-        f"• 5 نقاط لكل مشترك جديد\n"
-        f"• النقاط قابلة للاستبدال برصيد\n"
-        f"• كل 500 نقطة = 5$ ({500 * exchange_rate:,.0f} ل.س)\n\n"
+        f"• {await get_points_per_referral(db_pool)} نقاط لكل مشترك جديد\n"
+        f"• كل {redemption_rate} نقطة = 1$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n"
+        f"• المحالون يساهمون في رفع مستواك VIP!\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
@@ -284,6 +379,17 @@ async def show_referral_link(callback: types.CallbackQuery, db_pool):
         reply_markup=get_back_inline_keyboard("back_to_profile"),
         parse_mode="Markdown"
     )
+
+async def get_points_per_referral(db_pool):
+    """دالة مساعدة لجلب نقاط الإحالة"""
+    try:
+        async with db_pool.acquire() as conn:
+            points = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'points_per_referral'"
+            )
+            return int(points) if points else 1
+    except:
+        return 1
 
 # ============= استرداد النقاط =============
 
@@ -308,11 +414,11 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
     
     # حساب المبالغ الممكنة
     possible_redemptions = []
-    max_redemptions = min(points // redemption_rate, 5)  # حد أقصى 5 عمليات
+    max_redemptions = min(points // redemption_rate, 10)  # حد أقصى 10 عمليات
     
     for i in range(1, max_redemptions + 1):
         points_needed = i * redemption_rate
-        usd_amount = i * 5
+        usd_amount = i * 1
         syp_amount = usd_amount * exchange_rate
         possible_redemptions.append((points_needed, usd_amount, syp_amount))
     
@@ -331,7 +437,7 @@ async def start_redeem_points(callback: types.CallbackQuery, db_pool):
     text = (
         f"🎁 **استرداد النقاط**\n\n"
         f"لديك {points} نقطة\n"
-        f"كل {redemption_rate} نقطة = 5$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n"
+        f"كل {redemption_rate} نقطة = 1$ ({redemption_rate * exchange_rate:,.0f} ل.س)\n"
         f"💰 **سعر الصرف الحالي:** {exchange_rate:,.0f} ل.س = 1$\n\n"
         f"اختر المبلغ الذي تريد استرداده:"
     )
@@ -355,7 +461,7 @@ async def process_redeem(callback: types.CallbackQuery, db_pool):
         amount_syp = float(parts[2])
         exchange_rate = float(parts[3]) if len(parts) > 3 else None
         
-        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 500 * 5
+        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 100
         
         from database import create_redemption_request
         
@@ -422,8 +528,18 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
         await callback.answer("لا توجد إحصائيات كافية بعد", show_alert=True)
         return
     
+    user = profile['user']
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+    vip_level = user.get('vip_level', 0)
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    
     text = (
-        "📊 **إحصائياتك التفصيلية**\n\n"
+        f"📊 **إحصائياتك التفصيلية**\n\n"
+        f"👑 **مستوى VIP:** {vip_icon} VIP {vip_level}\n"
+        f"💰 **نسبة الخصم:** {user.get('discount_percent', 0)}%\n"
+        f"💵 **إجمالي الإنفاق:** {user.get('total_spent', 0):,.0f} ل.س\n\n"
         
         "💰 **الإيداعات:**\n"
         f"• إجمالي الإيداعات: {profile['deposits'].get('total_count', 0)} عملية\n"
@@ -449,6 +565,7 @@ async def show_detailed_stats(callback: types.CallbackQuery, db_pool):
         reply_markup=get_back_inline_keyboard("back_to_profile"),
         parse_mode="Markdown"
     )
+
 # ============= آخر الطلبات =============
 
 @router.callback_query(F.data == "recent_orders")
@@ -494,6 +611,176 @@ async def show_recent_orders(callback: types.CallbackQuery, db_pool):
         parse_mode="Markdown"
     )
 
+# ============= قائمة المتصدرين =============
+
+@router.callback_query(F.data == "leaderboard_menu")
+async def leaderboard_menu(callback: types.CallbackQuery, db_pool):
+    """عرض قائمة المتصدرين"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="💰 الأكثر إيداعاً", callback_data="top_deposits_simple"),
+        types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders_simple")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals_simple"),
+        types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points_simple")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="👑 الأكثر إنفاق (VIP)", callback_data="top_spenders")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_profile")
+    )
+    
+    text = (
+        "🏆 **لوحة المتصدرين**\n\n"
+        "اختر الفئة التي تريد عرض المتصدرين فيها:\n\n"
+        "• 💰 الأكثر إيداعاً\n"
+        "• 🛒 الأكثر طلبات\n"
+        "• 🔗 الأكثر إحالة\n"
+        "• ⭐ الأكثر نقاط\n"
+        "• 👑 الأكثر إنفاق (VIP)"
+    )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "top_deposits_simple")
+async def show_top_deposits_simple(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين إيداعاً"""
+    from database import get_top_users_by_deposits
+    
+    users = await get_top_users_by_deposits(db_pool, 10)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "💰 **أكثر المستخدمين إيداعاً**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"مستخدم {user['user_id']}"
+        vip_icons = ["🟢", "🔵", "🟣", "🟡"]
+        vip_icon = vip_icons[user['vip_level']] if user['vip_level'] < len(vip_icons) else "🟢"
+        
+        text += f"{i}. {username} {vip_icon}\n   💰 {user['total_deposits']:,.0f} ل.س\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("leaderboard_menu"),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "top_orders_simple")
+async def show_top_orders_simple(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين طلبات"""
+    from database import get_top_users_by_orders
+    
+    users = await get_top_users_by_orders(db_pool, 10)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "🛒 **أكثر المستخدمين طلبات**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"مستخدم {user['user_id']}"
+        vip_icons = ["🟢", "🔵", "🟣", "🟡"]
+        vip_icon = vip_icons[user['vip_level']] if user['vip_level'] < len(vip_icons) else "🟢"
+        
+        text += f"{i}. {username} {vip_icon}\n   📦 {user['total_orders']} طلب\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("leaderboard_menu"),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "top_referrals_simple")
+async def show_top_referrals_simple(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين إحالة"""
+    from database import get_top_users_by_referrals
+    
+    users = await get_top_users_by_referrals(db_pool, 10)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "🔗 **أكثر المستخدمين إحالة**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"مستخدم {user['user_id']}"
+        vip_icons = ["🟢", "🔵", "🟣", "🟡"]
+        vip_icon = vip_icons[user['vip_level']] if user['vip_level'] < len(vip_icons) else "🟢"
+        
+        text += f"{i}. {username} {vip_icon}\n   👥 {user['referral_count']} إحالة\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("leaderboard_menu"),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "top_points_simple")
+async def show_top_points_simple(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين نقاط"""
+    from database import get_top_users_by_points
+    
+    users = await get_top_users_by_points(db_pool, 10)
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    text = "⭐ **أكثر المستخدمين نقاط**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"مستخدم {user['user_id']}"
+        vip_icons = ["🟢", "🔵", "🟣", "🟡"]
+        vip_icon = vip_icons[user['vip_level']] if user['vip_level'] < len(vip_icons) else "🟢"
+        
+        text += f"{i}. {username} {vip_icon}\n   ⭐ {user['total_points']} نقطة\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("leaderboard_menu"),
+        parse_mode="Markdown"
+    )
+
+@router.callback_query(F.data == "top_spenders")
+async def show_top_spenders(callback: types.CallbackQuery, db_pool):
+    """عرض أكثر المستخدمين إنفاقاً (لنظام VIP)"""
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch('''
+            SELECT user_id, username, total_spent, vip_level 
+            FROM users 
+            WHERE total_spent > 0
+            ORDER BY total_spent DESC 
+            LIMIT 10
+        ''')
+    
+    if not users:
+        await callback.answer("لا توجد بيانات كافية", show_alert=True)
+        return
+    
+    vip_names = ["VIP 0", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡", "VIP 4 🔴", "VIP 5 💎", "VIP 6 👑"]
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+    
+    text = "👑 **الأكثر إنفاقاً (متصدرين VIP)**\n\n"
+    for i, user in enumerate(users, 1):
+        username = f"@{user['username']}" if user['username'] else f"مستخدم {user['user_id']}"
+        vip_icon = vip_icons[user['vip_level']] if user['vip_level'] < len(vip_icons) else "🟢"
+        vip_name = vip_names[user['vip_level']] if user['vip_level'] < len(vip_names) else "VIP"
+        
+        text += f"{i}. {username} {vip_icon}\n   💵 {user['total_spent']:,.0f} ل.س ({vip_name})\n"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_inline_keyboard("leaderboard_menu"),
+        parse_mode="Markdown"
+    )
+
 # ============= العودة للملف الشخصي =============
 
 @router.callback_query(F.data == "back_to_profile")
@@ -525,4 +812,3 @@ async def profile_back_handler(message: types.Message, state: FSMContext, db_poo
         "👋 أهلاً بك في القائمة الرئيسية",
         reply_markup=get_main_menu_keyboard(is_admin)
     )
-
