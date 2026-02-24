@@ -703,7 +703,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
 
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم وزيادة total_spent للمنافسة"""
+    """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
     data = await state.get_data()
     
     if not data:
@@ -717,7 +717,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     total_syp = float(data['total_syp'])
     
     async with db_pool.acquire() as conn:
-        # ====== استخدام المعاملات لضمان الأمان المالي ======
         async with conn.transaction():
             current_balance = await conn.fetchval(
                 "SELECT balance FROM users WHERE user_id = $1",
@@ -729,13 +728,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 await state.clear()
                 return
             
-            # ====== خصم الرصيد مع تحديث total_spent للمنافسة ======
             await conn.execute(
-                """UPDATE users 
-                   SET balance = balance - $1, 
-                       total_orders = total_orders + 1,
-                       total_spent = total_spent + $1
-                   WHERE user_id = $2""",
+                "UPDATE users SET balance = balance - $1, total_orders = total_orders + 1 WHERE user_id = $2",
                 total_syp, callback.from_user.id
             )
             
