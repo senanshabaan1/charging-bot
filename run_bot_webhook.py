@@ -121,23 +121,22 @@ async def main():
     
     logger.info("🚀 بدأ تشغيل البوت...")
     
-    try:
-        # إنشاء مجمع الاتصالات
+        try:
+        # 1. إنشاء مجمع الاتصالات (الآن يضبط الوقت تلقائياً ويحمي سوبابيز)
         db_pool = await get_pool()
+        
         if not db_pool:
-            logger.error("❌ فشل الاتصال بقاعدة البيانات")
+            logger.error("❌ فشل بدء البوت: تعذر الاتصال بقاعدة البيانات")
             return
+
+        # 2. تهيئة قاعدة البيانات والتأكد من الجداول
+        # ملاحظة: تأكد أن دالة init_db في ملفك الأصلي تأخذ db_pool كبارامتر
+        await init_db(db_pool) 
         
-        # تهيئة قاعدة البيانات
-        await init_db()
+        # 3. إصلاح الجداول إذا لزم الأمر
         await fix_points_history_table(db_pool)
-        logger.info("✅ تم تهيئة قاعدة البيانات")
         
-        # ضبط المنطقة الزمنية
-        async with db_pool.acquire() as conn:
-            await set_timezone_for_connection(conn)
-        
-        await set_database_timezone(db_pool)
+        logger.info("✅ تم تهيئة قاعدة البيانات وضبط المنطقة الزمنية بنجاح")
         
         # تحديث السجلات القديمة
         try:
@@ -245,7 +244,8 @@ async def main():
             await runner.cleanup()
             if db_pool:
                 await db_pool.close()
-            if scheduler and scheduler.running:
+                logger.info("✅ تم إغلاق مجمع اتصالات قاعدة البيانات بنجاح")
+            if 'scheduler' in locals() and scheduler and scheduler.running:
                 scheduler.shutdown()
     
     except Exception as e:
