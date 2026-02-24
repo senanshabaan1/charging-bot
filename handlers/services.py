@@ -247,6 +247,8 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
 
 # ============= بدء الطلب =============
 
+# handlers/services.py - تعديل دالة start_order
+
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء طلب شراء مع تطبيق الخصم"""
@@ -280,7 +282,59 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         'vip_level': vip_level
     })
     
-    if app_type == 'service':
+    # ========== التعديل هنا: جلب الخيارات لجميع أنواع المنتجات ==========
+    # جلب الخيارات من product_options
+    options = await get_product_options(db_pool, app_id)
+    
+    # إذا كان هناك خيارات محددة مسبقاً، اعرضها
+    if options and len(options) > 0:
+        builder = InlineKeyboardBuilder()
+        for opt in options:
+            opt_price = float(opt['price_usd']) if opt['price_usd'] is not None else 0.0
+            
+            price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
+            discounted_price_usd = price_with_profit * (1 - discount/100)
+            price_syp = discounted_price_usd * current_rate
+            
+            # أيقونة مناسبة حسب نوع التطبيق
+            if app_type == 'game':
+                icon = "🎮"
+            elif app_type == 'subscription':
+                icon = "📅"
+            else:  # service
+                icon = "📱"
+            
+            button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
+            
+            if discount > 0:
+                button_text += f" (خصم {discount}%)"
+            
+            builder.row(types.InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"var_{opt['id']}"
+            ))
+        
+        builder.row(types.InlineKeyboardButton(
+            text="🔙 رجوع",
+            callback_data=f"cat_{app_dict['category_id']}"
+        ))
+        
+        # رسالة مناسبة حسب نوع التطبيق
+        type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "خدمة"
+        
+        await callback.message.edit_text(
+            f"**{app_dict['name']}**\n\n"
+            f"📱 **النوع:** {type_name}\n"
+            f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
+            f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
+            "🔸 **اختر الخيار المناسب:**",
+            reply_markup=builder.as_markup()
+        )
+        await state.set_state(OrderStates.choosing_variant)
+    
+    else:
+        # إذا لم توجد خيارات، استخدم الطريقة القديمة (إدخال الكمية يدوياً)
+        # هذا للتوافق مع الخدمات القديمة
         profit_percentage = app_dict['profit_percentage']
         final_unit_price_usd = app_dict['unit_price_usd'] * (1 + (profit_percentage / 100))
         discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
@@ -309,48 +363,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
-    
-    elif app_type in ['game', 'subscription']:
-        variants = await get_product_options(db_pool, app_id)
-        
-        if not variants:
-            await callback.answer("لا توجد فئات متاحة لهذا التطبيق حالياً", show_alert=True)
-            return
-        
-        builder = InlineKeyboardBuilder()
-        for opt in variants:
-            opt_price = float(opt['price_usd']) if opt['price_usd'] is not None else 0.0
-            
-            price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
-            discounted_price_usd = price_with_profit * (1 - discount/100)
-            price_syp = discounted_price_usd * current_rate
-            
-            if app_type == 'game':
-                button_text = f"📦 {opt['name']}\n{price_syp:,.0f} ل.س"
-            else:
-                button_text = f"⏱️ {opt['name']}\n{price_syp:,.0f} ل.س"
-            
-            if discount > 0:
-                button_text += f" (خصم {discount}%)"
-            
-            builder.row(types.InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"var_{opt['id']}"
-            ))
-        
-        builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data=f"cat_{app_dict['category_id']}"
-        ))
-        
-        await callback.message.edit_text(
-            f"**{app_dict['name']}**\n\n"
-            f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
-            f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
-            "🔸 **اختر الفئة المناسبة:**",
-            reply_markup=builder.as_markup()
-        )
-        await state.set_state(OrderStates.choosing_variant)
 
 # ============= استلام الكمية =============
 
@@ -496,13 +508,13 @@ async def handle_confirm_state(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("var_"))
 async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """اختيار فئة فرعية (للألعاب والاشتراكات) مع عرض الوصف"""
+    """اختيار خيار (لجميع أنواع المنتجات) مع عرض الوصف"""
     variant_id = int(callback.data.split("_")[1])
     
     option = await get_product_option(db_pool, variant_id)
     
     if not option:
-        await callback.answer("هذه الفئة غير متوفرة", show_alert=True)
+        await callback.answer("هذا الخيار غير متوفر", show_alert=True)
         return
     
     data = await state.get_data()
@@ -515,6 +527,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     current_rate = data['current_rate']
     discount = data['discount']
     vip_level = data['vip_level']
+    app_type = data.get('app_type', 'service')
     
     app_profit = float(app.get('profit_percentage', 0) or 0)
     opt_price = float(option['price_usd']) if option['price_usd'] is not None else 0.0
@@ -536,7 +549,11 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
         'qty': quantity
     })
     
-    details = f"📋 **{app['name']}**\n\n"
+    # تحديد نوع المنتج للعرض
+    type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
+    type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "خدمة"
+    
+    details = f"{type_icon} **{app['name']}**\n\n"
     details += f"📦 **الخيار:** {option['name']}\n"
     details += f"🔢 **الكمية:** {quantity}\n"
     
@@ -550,11 +567,14 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     else:
         details += f"💰 **السعر:** {total_syp:,.0f} ل.س\n\n"
     
+    # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
     if 'pubg' in app_name or 'free fire' in app_name:
         instructions = "🎮 **يرجى إرسال ID اللاعب الخاص بك:**"
     elif 'clash' in app_name:
         instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**"
+    elif 'instagram' in app_name or 'tiktok' in app_name:
+        instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
         instructions = "🎯 **يرجى إرسال الحساب المستهدف:**"
     
@@ -750,6 +770,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'target_id': data['target_id'],
                 }
             else:
+                # للتوافق مع الخدمات القديمة
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, quantity, unit_price_usd, 
@@ -762,7 +783,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data['app']['id'],
                 data['app']['name'],
                 data['qty'],
-                data['discounted_unit_price_usd'],
+                data.get('discounted_unit_price_usd', 0),
                 total_syp,
                 data['target_id'],
                 points
