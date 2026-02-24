@@ -2355,6 +2355,8 @@ async def reject_redemption(callback: types.CallbackQuery, state: FSMContext, db
 
 # ============= تصفير البوت =============
 
+# ============= تصفير البوت =============
+
 @router.callback_query(F.data == "reset_bot")
 async def reset_bot_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء عملية تصفير البوت"""
@@ -2393,7 +2395,7 @@ async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_reset_rate)
 async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
-    """تنفيذ تصفير البوت"""
+    """تنفيذ تصفير البوت - مع نظام VIP الجديد"""
     if not is_admin(message.from_user.id):
         return
     
@@ -2437,11 +2439,14 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         await conn.execute("UPDATE bot_settings SET value = '1' WHERE key IN ('points_per_order', 'points_per_referral')")
         await conn.execute("UPDATE bot_settings SET value = '100' WHERE key = 'redemption_rate'")
         
+        # ========== نظام VIP الجديد بعد التصفير ==========
         await conn.execute('''
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
-            VALUES (0, 'VIP 0', 0, 0, '🟢'), (1, 'VIP 1', 1000, 1, '🔵'),
-                   (2, 'VIP 2', 2000, 2, '🟣'), (3, 'VIP 3', 4000, 3, '🟡'),
-                   (4, 'VIP 4', 8000, 5, '🔴')
+            VALUES 
+                (0, 'VIP 0', 0, 0, '⚪'),
+                (1, 'VIP 1', 2000, 1, '🔵'),
+                (2, 'VIP 2', 4000, 2, '🟣'),
+                (3, 'VIP 3', 8000, 4, '🟡')
             ON CONFLICT (level) DO UPDATE SET 
                 min_spent = EXCLUDED.min_spent,
                 discount_percent = EXCLUDED.discount_percent,
@@ -2454,11 +2459,13 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         f"⭐ نقاط لكل طلب: 1\n"
         f"🔗 نقاط لكل إحالة: 1\n"
         f"🎁 100 نقطة = 1 دولار\n"
-        f"👑 تم إعادة ضبط جميع مستويات VIP\n\n"
+        f"👑 **نظام VIP الجديد:**\n"
+        f"• VIP 1: 2000 ل.س - خصم 1%\n"
+        f"• VIP 2: 4000 ل.س - خصم 2%\n"
+        f"• VIP 3: 8000 ل.س - خصم 4%\n\n"
         f"البوت الآن جاهز للبدء من جديد!"
     )
     await state.clear()
-
 @router.callback_query(F.data == "cancel_del")
 async def cancel_action(callback: types.CallbackQuery):
     """إلغاء أي عملية"""
