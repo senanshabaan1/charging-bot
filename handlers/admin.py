@@ -145,9 +145,8 @@ async def admin_panel(message: types.Message, db_pool):
         
         [types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
          types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")],
-        
-        
-         types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
+                
+        [types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
         
         [types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
          types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")],
