@@ -9,7 +9,7 @@ import logging
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from datetime import datetime
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
-from database import is_admin_user, get_exchange_rate, get_syriatel_numbers
+from database import is_admin_user
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -80,6 +80,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     method = callback.data
     
     # جلب سعر الصرف الحالي من قاعدة البيانات
+    from database import get_exchange_rate, get_syriatel_numbers
     current_rate = await get_exchange_rate(db_pool)
     logger.info(f"💰 سعر الصرف الحالي للشحن: {current_rate}")
     
@@ -129,11 +130,12 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
 # ============= استلام المبلغ =============
 
 @router.message(DepStates.waiting_amount)
-async def get_amount(message: types.Message, state: FSMContext, db_pool):
+async def get_amount(message: types.Message, state: FSMContext):
     """استلام المبلغ والتحقق من صحته"""
     if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
         await state.clear()
-        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        from database import is_admin_user
+        is_admin = await is_admin_user(None, message.from_user.id)
         await message.answer(
             "✅ تم إلغاء عملية الشحن.",
             reply_markup=get_main_menu_keyboard(is_admin)
@@ -401,10 +403,19 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
 
 @router.message(DepStates.waiting_photo, F.photo)
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_pool):
-    """معالجة لقطة الشاشة - بدون تحميل الصورة محلياً"""
+    """معالجة لقطة الشاشة"""
+    if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
+        await state.clear()
+        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        await message.answer(
+            "✅ تم إلغاء عملية الشحن.",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
+        return
+    
     data = await state.get_data()
     
-    # استخدام أعلى جودة للصورة - فقط نأخذ file_id بدون تحميل
+    # استخدام أعلى جودة للصورة
     photo_file_id = message.photo[-1].file_id
     
     async with db_pool.acquire() as conn:
@@ -474,17 +485,8 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
 # ============= معالج الصور غير الصالحة =============
 
 @router.message(DepStates.waiting_photo)
-async def invalid_photo(message: types.Message, db_pool):
+async def invalid_photo(message: types.Message):
     """معالج إذا أرسل المستخدم نص بدل صورة"""
-    if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
-        await state.clear()
-        is_admin = await is_admin_user(db_pool, message.from_user.id)
-        await message.answer(
-            "✅ تم إلغاء عملية الشحن.",
-            reply_markup=get_main_menu_keyboard(is_admin)
-        )
-        return
-    
     await message.answer(
         "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n"
         "📸 أرسل الصورة الآن، أو اضغط على زر الإلغاء.",
