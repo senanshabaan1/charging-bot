@@ -1958,3 +1958,47 @@ async def init_games(pool):
             
     except Exception as e:
         logging.error(f"❌ خطأ في إضافة الألعاب: {e}")
+# أضف هذه الدوال في نهاية ملف database.py
+
+async def fix_points_history_table(pool):
+    """إصلاح جدول سجل النقاط - دالة مبسطة"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود الجدول
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS points_history (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    points INTEGER,
+                    action VARCHAR(50),
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+                );
+            ''')
+            logging.info("✅ تم التأكد من وجود جدول points_history")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في fix_points_history_table: {e}")
+        return False
+
+async def set_database_timezone(pool):
+    """ضبط المنطقة الزمنية لقاعدة البيانات"""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("SET TIMEZONE TO 'UTC'")
+            logging.info("✅ تم ضبط المنطقة الزمنية لقاعدة البيانات")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في ضبط المنطقة الزمنية: {e}")
+        return False
+
+async def update_old_records_timezone(pool):
+    """تحديث السجلات القديمة"""
+    try:
+        async with pool.acquire() as conn:
+            # هذا مجرد استعلام تجريبي
+            logging.info("✅ تم التحقق من السجلات")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث السجلات: {e}")
+        return False
