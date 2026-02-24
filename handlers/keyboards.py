@@ -5,7 +5,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 # ============= دوال الكيبورد العادية (Reply Keyboard) =============
 
 def get_main_menu_keyboard(is_admin_user: bool = False):
-    """القائمة الرئيسية للمستخدمين"""
+    """القائمة الرئيسية للمستخدمين مع زر المشرفين إذا كانوا مشرفين"""
     builder = ReplyKeyboardBuilder()
     
     builder.row(types.KeyboardButton(text="📱 خدمات الشحن"))
@@ -120,7 +120,39 @@ def get_profile_keyboard():
         types.InlineKeyboardButton(text="📊 إحصائياتي", callback_data="my_stats")
     )
     builder.row(
-        types.InlineKeyboardButton(text="📋 آخر 5 طلبات", callback_data="recent_orders")
+        types.InlineKeyboardButton(text="📋 آخر 5 طلبات", callback_data="recent_orders"),
+        types.InlineKeyboardButton(text="🏆 المتصدرين", callback_data="leaderboard_menu")
+    )
+    return builder.as_markup()
+
+def get_vip_keyboard():
+    """كيبورد إنلاين خاص بنظام VIP"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="👑 مستوى VIP الحالي", callback_data="vip_current"),
+        types.InlineKeyboardButton(text="📊 تقدم VIP", callback_data="vip_progress")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🏆 المتصدرين", callback_data="leaderboard_menu")
+    )
+    return builder.as_markup()
+
+def get_leaderboard_keyboard():
+    """كيبورد إنلاين لقوائم المتصدرين"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="💰 الأكثر إيداعاً", callback_data="top_deposits_simple"),
+        types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders_simple")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals_simple"),
+        types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points_simple")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="👑 الأكثر إنفاق (VIP)", callback_data="top_spenders")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_profile")
     )
     return builder.as_markup()
 
