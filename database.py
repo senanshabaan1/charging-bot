@@ -1146,14 +1146,14 @@ async def update_user_vip(pool, user_id):
                 'level': level,
                 'discount': discount,
                 'total_spent': total_spent,
-                'next_level': get_next_vip_level_custom(total_spent),
+                'next_level': get_next_vip_level(total_spent),
                 'manual': False
             }
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
         return None
 
-def get_next_vip_level_custom(total_spent):
+def get_next_vip_level(total_spent):
     """حساب المستوى التالي حسب النظام المطلوب"""
     vip_levels = [
         (2000, 1, "VIP 1 🔵 (خصم 1%)", 1),
