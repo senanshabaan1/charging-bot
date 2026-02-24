@@ -146,7 +146,7 @@ async def admin_panel(message: types.Message, db_pool):
         [types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
          types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")],
         
-        [types.InlineKeyboardButton(text="💰 إضافة رصيد", callback_data="add_balance"),
+        
          types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
         
         [types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
@@ -1923,7 +1923,12 @@ async def show_top_deposits(callback: types.CallbackQuery, db_pool):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
         text += f"{i}. {username}\n   💰 {user['total_deposits']:,.0f} ل.س\n"
     
-    await callback.message.answer(text, parse_mode="Markdown")
+    try:
+        await callback.message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"خطأ في تنسيق Markdown: {e}")
+        plain_text = text.replace('**', '').replace('*', '').replace('`', '')
+        await callback.message.answer(plain_text)
 
 @router.callback_query(F.data == "top_orders")
 async def show_top_orders(callback: types.CallbackQuery, db_pool):
@@ -1943,7 +1948,12 @@ async def show_top_orders(callback: types.CallbackQuery, db_pool):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
         text += f"{i}. {username}\n   📦 {user['total_orders']} طلب\n"
     
-    await callback.message.answer(text, parse_mode="Markdown")
+    try:
+        await callback.message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"خطأ في تنسيق Markdown: {e}")
+        plain_text = text.replace('**', '').replace('*', '').replace('`', '')
+        await callback.message.answer(plain_text)
 
 @router.callback_query(F.data == "top_referrals")
 async def show_top_referrals(callback: types.CallbackQuery, db_pool):
@@ -1963,11 +1973,16 @@ async def show_top_referrals(callback: types.CallbackQuery, db_pool):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
         text += f"{i}. {username}\n   👥 {user['referral_count']} إحالة | 💰 {user['referral_earnings']:,.0f} ل.س\n"
     
-    await callback.message.answer(text, parse_mode="Markdown")
+    try:
+        await callback.message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"خطأ في تنسيق Markdown: {e}")
+        plain_text = text.replace('**', '').replace('*', '').replace('`', '')
+        await callback.message.answer(plain_text)
 
 @router.callback_query(F.data == "top_points")
 async def show_top_points(callback: types.CallbackQuery, db_pool):
-    """أكثر المستخدمين نقاط"""
+    """أكثر المستخدمين نقاط - مع تجنب أخطاء Markdown"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -1979,11 +1994,26 @@ async def show_top_points(callback: types.CallbackQuery, db_pool):
         return
     
     text = "⭐ **أكثر المستخدمين نقاط**\n\n"
+    
     for i, user in enumerate(users, 1):
         username = f"@{user['username']}" if user['username'] else f"ID: {user['user_id']}"
-        text += f"{i}. {username}\n   ⭐ {user['total_points']} نقطة\n"
+        
+        # إصلاح: استخدام علامات Markdown بشكل صحيح
+        # نضيف كل سطر بشكل منفصل لتجنب الأخطاء
+        line = f"{i}. {username}\n   ⭐ {user['total_points']} نقطة\n"
+        
+        # التأكد من عدم وجود علامات غير مغلقة
+        text += line
     
-    await callback.message.answer(text, parse_mode="Markdown")
+    # محاولة الإرسال مع Markdown، إذا فشل نرسل بدون تنسيق
+    try:
+        await callback.message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        # إذا فشل Markdown، نرسل نص عادي
+        logger.error(f"خطأ في تنسيق Markdown: {e}")
+        # إزالة علامات Markdown
+        plain_text = text.replace('**', '').replace('*', '').replace('`', '')
+        await callback.message.answer(plain_text)
 
 @router.callback_query(F.data == "vip_stats")
 async def show_vip_stats(callback: types.CallbackQuery, db_pool):
