@@ -247,8 +247,6 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
 
 # ============= بدء الطلب =============
 
-# handlers/services.py - تعديل دالة start_order
-
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء طلب شراء مع تطبيق الخصم"""
@@ -282,7 +280,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         'vip_level': vip_level
     })
     
-    # ========== التعديل هنا: جلب الخيارات لجميع أنواع المنتجات ==========
     # جلب الخيارات من product_options
     options = await get_product_options(db_pool, app_id)
     
@@ -334,7 +331,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     
     else:
         # إذا لم توجد خيارات، استخدم الطريقة القديمة (إدخال الكمية يدوياً)
-        # هذا للتوافق مع الخدمات القديمة
         profit_percentage = app_dict['profit_percentage']
         final_unit_price_usd = app_dict['unit_price_usd'] * (1 + (profit_percentage / 100))
         discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
@@ -557,6 +553,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     details += f"📦 **الخيار:** {option['name']}\n"
     details += f"🔢 **الكمية:** {quantity}\n"
     
+    # ========== إضافة الوصف هنا ==========
     if option.get('description'):
         details += f"📝 **الوصف:**\n{option['description']}\n\n"
     
