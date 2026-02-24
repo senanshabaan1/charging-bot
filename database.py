@@ -47,11 +47,15 @@ async def set_database_timezone(pool):
         logging.error(f"❌ خطأ في ضبط توقيت قاعدة البيانات: {e}")
         return False
 
-async def init_db():
+async def init_db(pool=None):
     """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
     try:
-        conn = await asyncpg.connect(**DB_CONFIG)
-        
+        if pool:
+            conn = await pool.acquire()
+            need_release = True
+        else:
+            conn = await asyncpg.connect(**DB_CONFIG)
+            need_release = False
         # جدول المستخدمين
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -458,8 +462,10 @@ async def init_db():
             logging.info("✅ تم التأكد من وجود created_at في product_options")
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة created_at إلى product_options: {e}")
-
-        await conn.close()
+        if need_release:
+            await pool.release(conn)
+        else:
+            await conn.close()
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
     except Exception as e:
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
