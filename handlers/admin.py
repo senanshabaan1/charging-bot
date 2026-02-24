@@ -1744,12 +1744,21 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     final_price_syp = final_price_usd * exchange_rate
     
     async with db_pool.acquire() as conn:
+        # التحقق من نوع المنتج
+        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+        
         option_id = await conn.fetchval('''
             INSERT INTO product_options 
             (product_id, name, quantity, price_usd, description, sort_order, is_active)
             VALUES ($1, $2, $3, $4, $5, $6, TRUE)
             RETURNING id
         ''', product_id, option_name, quantity, supplier_price, description, 0)
+        
+        # جلب جميع الخيارات بعد الإضافة
+        options = await conn.fetch(
+            "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+            product_id
+        )
     
     confirm_text = (
         f"✅ **تم إضافة الخيار بنجاح!**\n\n"
@@ -1768,15 +1777,49 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     await message.answer(confirm_text, reply_markup=None)
     await state.clear()
     
-    # العودة لقائمة الخيارات
-    fake_callback = types.CallbackQuery(
-        id='0',
-        from_user=message.from_user,
-        message=types.Message(message_id=0, date=datetime.now(), chat=types.Chat(id=message.from_user.id, type='private'), text=''),
-        data=f"prod_options_{product_id}",
-        bot=message.bot
-    )
-    await show_product_options(fake_callback, db_pool)
+    # عرض الخيارات المحدثة مع تحديد نوع المنتج
+    type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
+    type_name = "لعبة" if product['type'] == 'game' else "اشتراك" if product['type'] == 'subscription' else "خدمة"
+    
+    text = f"{type_icon} **{product['name']}**\n"
+    text += f"📝 **النوع:** {type_name}\n"
+    if product.get('description'):
+        text += f"📄 {product['description']}\n"
+    text += "➖➖➖➖➖➖\n\n"
+    
+    if not options:
+        text += "⚠️ لا توجد خيارات لهذا المنتج."
+    else:
+        text += f"**الخيارات الحالية ({len(options)}):**\n\n"
+        for i, opt in enumerate(options, 1):
+            text += f"**{i}. {opt['name']}**\n"
+            text += f"   🆔 `{opt['id']}`\n"
+            text += f"   📦 الكمية: {opt['quantity']}\n"
+            text += f"   💰 سعر المورد: ${float(opt['price_usd']):.3f}\n"
+            if opt.get('description'):
+                text += f"   📝 {opt['description']}\n"
+            text += "   ➖➖➖➖\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
+    
+    for opt in options:
+        builder.row(
+            types.InlineKeyboardButton(text=f"✏️ تعديل {opt['name']}", callback_data=f"edit_option_{opt['id']}"),
+            types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
+        )
+    
+    # أزرار إضافية حسب نوع المنتج
+    if product['type'] == 'game':
+        builder.row(types.InlineKeyboardButton(text="🎮 قوالب ألعاب", callback_data=f"templates_menu_{product_id}"))
+    elif product['type'] == 'subscription':
+        builder.row(types.InlineKeyboardButton(text="📅 قوالب اشتراكات", callback_data=f"templates_menu_{product_id}"))
+    else:  # service
+        builder.row(types.InlineKeyboardButton(text="📱 قوالب خدمات", callback_data=f"templates_menu_{product_id}"))
+    
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
+    
+    await message.answer(text, reply_markup=builder.as_markup())
 
 # ============= تعديل خيار =============
 
