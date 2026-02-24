@@ -172,16 +172,14 @@ async def main():
         except Exception as e:
             logger.error(f"❌ خطأ في تحميل سعر الصرف: {e}")
         
-        # إنشاء Dispatcher
+        # إنشاء Dispatcher وتمرير db_pool
         dp = Dispatcher()
-        
-        # تمرير db_pool إلى جميع الهاندلرز من خلال الـ context
         dp["db_pool"] = db_pool
         
         # إنشاء البوت
         bot = Bot(token=TOKEN)
         
-        # ✅ إضافة ميدل وير باستخدام الكلاس من ملف middleware.py مع تمرير db_pool
+        # ✅ إضافة ميدل وير باستخدام الكلاس من ملف middleware.py
         dp.message.middleware(BotStatusMiddleware(db_pool))
         dp.callback_query.middleware(BotStatusMiddleware(db_pool))
         
@@ -205,14 +203,15 @@ async def main():
         # إنشاء تطبيق aiohttp
         app = web.Application()
         
-        # إضافة مسار webhook مع تمرير db_pool بشكل صحيح
+        # إضافة مسار webhook
         webhook_requests_handler = SimpleRequestHandler(
             dispatcher=dp,
-            bot=bot
+            bot=bot,
+            **{"db_pool": db_pool}
         )
         webhook_requests_handler.register(app, path="/webhook")
         
-        # إعداد التطبيق مع dp و bot
+        # إعداد التطبيق
         setup_application(app, dp, bot=bot)
         
         # مسار للتحقق من الصحة
@@ -238,37 +237,16 @@ async def main():
         try:
             await site.start()
             logger.info(f"✅ الخادم يعمل على المنفذ {PORT}")
-            
-            # تسجيل نجاح التشغيل في قاعدة البيانات
-            async with db_pool.acquire() as conn:
-                await conn.execute('''
-                    INSERT INTO bot_settings (key, value, description) 
-                    VALUES ('last_startup', $1, 'آخر تشغيل للبوت')
-                    ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP
-                ''', datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S'))
-            
-            # الانتظار إلى الأبد مع معالجة أفضل للإيقاف
-            await asyncio.Event().wait()
-            
+            await asyncio.Event().wait()  # الانتظار إلى الأبد
         except KeyboardInterrupt:
-            logger.info("⏹️ تم إيقاف البوت بواسطة المستخدم")
-        except Exception as e:
-            logger.error(f"❌ خطأ أثناء تشغيل الخادم: {e}")
+            logger.info("⏹️ تم إيقاف البوت")
         finally:
-            # تنظيف الموارد عند الإيقاف
             await on_shutdown(bot)
             await runner.cleanup()
-            
-            # إغلاق مجمع الاتصالات
             if db_pool:
-                logger.info("🔌 جاري إغلاق اتصالات قاعدة البيانات...")
                 await db_pool.close()
-                logger.info("✅ تم إغلاق اتصالات قاعدة البيانات")
-            
-            # إيقاف الجدولة
             if scheduler and scheduler.running:
                 scheduler.shutdown()
-                logger.info("✅ تم إيقاف الجدولة")
     
     except Exception as e:
         logger.error(f"❌ خطأ عام: {e}")
@@ -282,5 +260,3 @@ if __name__ == "__main__":
         logger.info("⏹️ تم إيقاف البوت بواسطة المستخدم")
     except Exception as e:
         logger.error(f"❌ خطأ غير متوقع: {e}")
-        import traceback
-        traceback.print_exc()
