@@ -7,7 +7,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 from config import TOKEN, ADMIN_ID
 from database import (
-    init_db, get_pool, fix_points_history_table, 
+    init_db, get_pool, points_history, 
     set_database_timezone, update_old_records_timezone, 
     get_report_settings, DAMASCUS_TZ
 )
