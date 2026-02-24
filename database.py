@@ -463,53 +463,50 @@ async def init_db():
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
     except Exception as e:
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
-
 async def get_pool():
-    """إنشاء مجمع اتصالات (Pool) مع ضبط المنطقة الزمنية"""
+    """إنشاء مجمع اتصالات ذكي يدعم الرابط أو المصفوفة مع قيود الخطة المجانية"""
     try:
-        # تعريف دالة التهيئة لكل اتصال جديد
+        # تحديد مصدر البيانات (الرابط له الأولوية)
+        dsn_link = DATABASE_URL if DATABASE_URL else DB_CONFIG.get("dsn")
+        
+        # دالة تهيئة الاتصال لضبط التوقيت
         async def init_connection(conn):
             await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
-        
-        # التحقق من وجود dsn في الإعدادات
-        if "dsn" in DB_CONFIG:
-            pool = await asyncpg.create_pool(
-                dsn=DB_CONFIG["dsn"],
-                command_timeout=60,
-                server_settings={
-                    'timezone': 'Asia/Damascus'
-                },
-                init=init_connection,
-                statement_cache_size=0,
-                max_cached_statement_lifetime=0
-            )
-            logging.info("✅ تم إنشاء مجمع الاتصالات مع تعطيل prepared statements")
+
+        pool_settings = {
+            "min_size": 1,
+            "max_size": 5,        # حماية سوبابيز من الانهيار
+            "command_timeout": 60,
+            "init": init_connection,
+            "statement_cache_size": 0, # ضروري جداً لـ Supabase
+            "max_cached_statement_lifetime": 0,
+            "server_settings": {'timezone': 'Asia/Damascus'}
+        }
+
+        if dsn_link:
+            # إذا توفر رابط كامل (DSN)
+            pool = await asyncpg.create_pool(dsn=dsn_link, **pool_settings)
         else:
-            pool = await asyncpg.create_pool(
-                **DB_CONFIG,
-                command_timeout=60,
-                server_settings={
-                    'timezone': 'Asia/Damascus'
-                },
-                init=init_connection,
-                statement_cache_size=0,
-                max_cached_statement_lifetime=0
-            )
-            logging.info("✅ تم إنشاء مجمع الاتصالات مع تعطيل prepared statements")
+            # إذا توفرت مصفوفة إعدادات فقط
+            pool = await asyncpg.create_pool(**DB_CONFIG, **pool_settings)
+            
+        logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح (الحد الأقصى: 5)")
         return pool
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
         return None
-
 async def test_connection():
-    """اختبار الاتصال بقاعدة البيانات"""
+    """اختبار الاتصال السريع"""
     try:
-        conn = await asyncpg.connect(**DB_CONFIG)
+        if DATABASE_URL:
+            conn = await asyncpg.connect(dsn=DATABASE_URL, timeout=10)
+        else:
+            conn = await asyncpg.connect(**DB_CONFIG, timeout=10)
         await conn.close()
-        logging.info("✅ تم الاتصال بقاعدة البيانات بنجاح")
+        logging.info("✅ تم اختبار الاتصال بنجاح")
         return True
     except Exception as e:
-        logging.error(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
+        logging.error(f"❌ فشل اختبار الاتصال: {e}")
         return False
 
 # ============= دوال ضبط المنطقة الزمنية =============
