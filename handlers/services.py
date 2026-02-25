@@ -583,6 +583,8 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
 
 # ============= استلام الهدف والتأكيد =============
 
+# في handlers/services.py - عدل دالة confirm_order
+
 @router.message(OrderStates.target_id)
 async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     """استقبال ID الهدف وتأكيد الطلب"""
@@ -601,7 +603,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     if not target_id:
         await message.answer(
             "⚠️ يرجى إدخال ID الحساب.",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=get_cancel_keyboard()  # هنا لسه بنستخدم كيبورد الإلغاء
         )
         return
     
@@ -647,6 +649,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     
     await state.update_data(original_total_syp=original_total_syp)
     
+    # أزرار إنلاين فقط - بدون كيبورد سفلي
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="✅ تأكيد ودفع", callback_data="execute_buy"),
@@ -691,9 +694,10 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
     )
     
+    # إرسال رسالة التأكيد بدون كيبورد سفلي (reply_markup=None)
     await message.answer(
         msg,
-        reply_markup=builder.as_markup(),
+        reply_markup=builder.as_markup(),  # فقط أزرار إنلاين
         parse_mode="Markdown"
     )
     await state.set_state(OrderStates.confirm)
@@ -820,21 +824,24 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
         parse_mode="Markdown"
     )
     
+    # إرسال رسالة منفصلة مع القائمة الرئيسية (اختياري)
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    await callback.message.answer(
+        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+    
     await state.clear()
 
 @router.callback_query(F.data == "cancel_order")
-async def cancel_order(callback: types.CallbackQuery, state: FSMContext):
+async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """إلغاء الطلب"""
     await state.clear()
-    await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
-
-@router.callback_query(F.data == "back_to_main")
-async def back_to_main(callback: types.CallbackQuery, db_pool):
-    """العودة للقائمة الرئيسية"""
-    is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    await callback.message.delete()
+    # إرسال رسالة إلغاء مع القائمة الرئيسية
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
     await callback.message.answer(
-        "👋 أهلاً بك في القائمة الرئيسية",
+        "👋 تم العودة للقائمة الرئيسية",
         reply_markup=get_main_menu_keyboard(is_admin)
     )
