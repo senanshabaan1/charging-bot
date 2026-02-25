@@ -2730,7 +2730,7 @@ async def show_vip_stats(callback: types.CallbackQuery, db_pool):
         vip_counts = await conn.fetch("SELECT vip_level, COUNT(*) as count FROM users GROUP BY vip_level ORDER BY vip_level")
         vip_spent = await conn.fetch("SELECT vip_level, SUM(total_spent) as total FROM users WHERE vip_level > 0 GROUP BY vip_level ORDER BY vip_level")
     
-    vip_names = ["VIP 0 🟢", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡", "VIP 4 🔴", "VIP 5 💎"]
+    vip_names = ["VIP 0 🟢", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡"]
     text = "👥 **إحصائيات VIP**\n\n**عدد المستخدمين:**\n"
     
     for row in vip_counts:
@@ -3571,8 +3571,7 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     builder = InlineKeyboardBuilder()
     levels = [
         ("🟢 VIP 0 (0%)", 0, 0), ("🔵 VIP 1 (1%)", 1, 1), ("🟣 VIP 2 (2%)", 2, 2),
-        ("🟡 VIP 3 (3%)", 3, 3), ("🔴 VIP 4 (5%)", 4, 5), ("💎 VIP 5 (7%)", 5, 7),
-        ("👑 VIP 6 (10%)", 6, 10),
+        ("🟡 VIP 3 (3%)", 3, 4),
     ]
     
     for btn_text, level, discount in levels:
@@ -3613,7 +3612,7 @@ async def set_vip_level(callback: types.CallbackQuery, db_pool):
     )
     
     try:
-        vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴", "💎", "👑"]
+        vip_icons = ["🟢", "🔵", "🟣", "🟡"]
         icon = vip_icons[level] if level < len(vip_icons) else "⭐"
         await callback.bot.send_message(
             user_id,
@@ -3734,14 +3733,7 @@ async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, 
         elif level == 2:
             discount = 2; btn_text = f"🟣 VIP 2 (2%)"
         elif level == 3:
-            discount = 3; btn_text = f"🟡 VIP 3 (3%)"
-        elif level == 4:
-            discount = 5; btn_text = f"🔴 VIP 4 (5%)"
-        elif level == 5:
-            discount = 7; btn_text = f"💎 VIP 5 (7%)"
-        elif level == 6:
-            discount = 10; btn_text = f"👑 VIP 6 (10%)"
-        else:
+            discount = 3; btn_text = f"🟡 VIP 3 (4%)"
             continue
         
         builder.row(types.InlineKeyboardButton(text=btn_text, callback_data=f"downgrade_to_{user_id}_{level}_{discount}"))
