@@ -508,7 +508,7 @@ async def my_account(message: types.Message, db_pool):
     base_syp = 1 * exchange_rate
 
     # تحديد أيقونة VIP
-    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icons = ["⚪", "🔵", "🟣", "🟡"]
     vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
 
     # حساب التقدم للمستوى التالي
@@ -519,7 +519,7 @@ async def my_account(message: types.Message, db_pool):
         next_level_name = next_level_info['next_level_name']
         progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
     else:
-        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 3)"
 
     # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
@@ -928,7 +928,7 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
     base_syp = 1 * exchange_rate
 
     # تحديد أيقونة VIP
-    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icons = ["⚪", "🔵", "🟣", "🟡"]
     vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
 
     # حساب التقدم للمستوى التالي
@@ -939,7 +939,7 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         next_level_name = next_level_info['next_level_name']
         progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
     else:
-        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 3)"
 
     builder = InlineKeyboardBuilder()
     builder.row(
