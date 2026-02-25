@@ -1,12 +1,9 @@
 # config.py
 import os
 from dotenv import load_dotenv
-import re
-from urllib.parse import quote_plus
 
 # تحميل المتغيرات من ملف .env (للتشغيل المحلي فقط)
-if os.path.exists('.env'):
-    load_dotenv()
+load_dotenv()  # ✅ بسيطة وبتشتغل دايماً
 
 # التوكن والإعدادات الأساسية
 TOKEN = os.getenv("BOT_TOKEN")
@@ -27,51 +24,27 @@ if moderators_str:
     except ValueError:
         print("⚠️ تحذير: MODERATORS تحتوي على قيم غير صالحة")
 
-# ====== قسم قاعدة البيانات المعدل لـ Supabase ======
+# ====== قسم قاعدة البيانات - آمن ومبسط ======
 # الأولوية لـ DATABASE_URL من متغيرات البيئة
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 print(f"🔍 DATABASE_URL found: {'Yes' if DATABASE_URL else 'No'}")
 
 if DATABASE_URL:
-    # تحليل رابط PostgreSQL
-    try:
-        # نقبل الرابط ببداية postgresql:// أو postgres://
-        match = re.match(r'postgres(?:ql)?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
-        if match:
-            user, password, host, port, database = match.groups()
-            DB_CONFIG = {
-                "host": host,
-                "port": int(port),
-                "database": database,
-                "user": user,
-                "password": password
-            }
-            print(f"✅ Using Supabase database: {host}/{database}")
-        else:
-            # إذا ما انطابق النمط، استخدم الرابط مباشرة
-            print("⚠️ DATABASE_URL format not recognized, using as dsn")
-            DB_CONFIG = {
-                "dsn": DATABASE_URL
-            }
-    except Exception as e:
-        print(f"⚠️ Error parsing DATABASE_URL: {e}, using fallback config")
-        # بيانات Supabase من متغيرات البيئة الفردية
-        DB_CONFIG = {
-            "host": os.getenv("DB_HOST", "aws-0-us-west-2.pooler.supabase.com"),
-            "port": int(os.getenv("DB_PORT", "6543")),
-            "database": os.getenv("DB_NAME", "postgres"),
-            "user": os.getenv("DB_USER", "postgres"),
-            "password": os.getenv("DB_PASSWORD", "3xQx4Ve3!123")
-        }
+    # ✅ استخدام الرابط مباشرة - الأفضل والأكثر أماناً
+    DB_CONFIG = {
+        "dsn": DATABASE_URL  # الرابط كامل مع كلمة المرور
+    }
+    print(f"✅ Using Supabase database via DATABASE_URL")
 else:
+    # للإستخدام المحلي فقط (تطوير)
     print("⚠️ No DATABASE_URL found, using local config")
     DB_CONFIG = {
-        "host": os.getenv("DB_HOST", "aws-0-us-west-2.pooler.supabase.com"),  # ✅ تم التصحيح هنا
-        "port": int(os.getenv("DB_PORT", "6543")),
-        "database": os.getenv("DB_NAME", "postgres"),
+        "host": os.getenv("DB_HOST", "localhost"),
+        "port": int(os.getenv("DB_PORT", "5432")),
+        "database": os.getenv("DB_NAME", "charging_bot"),
         "user": os.getenv("DB_USER", "postgres"),
-        "password": os.getenv("DB_PASSWORD", "3xQx4Ve3!123")
+        "password": os.getenv("DB_PASSWORD", "")
     }
 # =======================================
 
