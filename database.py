@@ -1581,6 +1581,154 @@ async def get_all_categories(pool):
         logging.error(f"❌ خطأ في جلب الأقسام: {e}")
         return []
 
+# ============= دوال إدارة الأقسام (للتعديل) =============
+
+async def update_category(db_pool, category_id, **kwargs):
+    """تحديث معلومات قسم معين"""
+    try:
+        async with db_pool.acquire() as conn:
+            # بناء جملة التحديث ديناميكياً
+            set_parts = []
+            values = []
+            
+            # الحقول المسموح بتحديثها
+            allowed_fields = ['name', 'display_name', 'icon', 'sort_order']
+            
+            i = 1
+            for key, value in kwargs.items():
+                if key in allowed_fields:
+                    set_parts.append(f"{key} = ${i}")
+                    values.append(value)
+                    i += 1
+            
+            if not set_parts:
+                return False, "لا توجد بيانات للتحديث"
+            
+            # إضافة id الشرط
+            values.append(category_id)
+            query = f"UPDATE categories SET {', '.join(set_parts)} WHERE id = ${i}"
+            
+            await conn.execute(query, *values)
+            
+            # جلب القسم المحدث للتأكيد
+            updated = await conn.fetchrow(
+                "SELECT * FROM categories WHERE id = $1",
+                category_id
+            )
+            
+            logging.info(f"✅ تم تحديث القسم {category_id}: {kwargs}")
+            return True, updated
+            
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث القسم {category_id}: {e}")
+        return False, str(e)
+
+async def get_category_by_id(db_pool, category_id):
+    """جلب معلومات قسم محدد"""
+    try:
+        async with db_pool.acquire() as conn:
+            category = await conn.fetchrow(
+                "SELECT * FROM categories WHERE id = $1",
+                category_id
+            )
+            return category
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب القسم {category_id}: {e}")
+        return None
+
+async def delete_category(db_pool, category_id):
+    """حذف قسم (مع نقل التطبيقات التابعة لقسم افتراضي أو حذفها)"""
+    try:
+        async with db_pool.acquire() as conn:
+            # التحقق من وجود تطبيقات تابعة
+            apps_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM applications WHERE category_id = $1",
+                category_id
+            )
+            
+            if apps_count > 0:
+                # البحث عن قسم افتراضي (chat_apps) لنقل التطبيقات إليه
+                default_cat = await conn.fetchval(
+                    "SELECT id FROM categories WHERE name = 'chat_apps' LIMIT 1"
+                )
+                
+                if default_cat:
+                    # نقل التطبيقات للقسم الافتراضي
+                    await conn.execute(
+                        "UPDATE applications SET category_id = $1 WHERE category_id = $2",
+                        default_cat, category_id
+                    )
+                    logging.info(f"📦 تم نقل {apps_count} تطبيق من القسم {category_id} إلى {default_cat}")
+                else:
+                    # إذا ما في قسم افتراضي، نحذف التطبيقات
+                    await conn.execute(
+                        "DELETE FROM applications WHERE category_id = $1",
+                        category_id
+                    )
+                    logging.warning(f"⚠️ تم حذف {apps_count} تطبيق تابع للقسم {category_id}")
+            
+            # حذف القسم
+            result = await conn.execute(
+                "DELETE FROM categories WHERE id = $1",
+                category_id
+            )
+            
+            # التحقق من الحذف
+            if result == "DELETE 1":
+                logging.info(f"✅ تم حذف القسم {category_id}")
+                return True, f"تم حذف القسم بنجاح"
+            else:
+                return False, "القسم غير موجود"
+                
+    except Exception as e:
+        logging.error(f"❌ خطأ في حذف القسم {category_id}: {e}")
+        return False, str(e)
+
+async def reorder_categories(db_pool, category_orders):
+    """إعادة ترتيب الأقسام (استقبال قائمة تحتوي على (id, sort_order))"""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                for cat_id, sort_order in category_orders:
+                    await conn.execute(
+                        "UPDATE categories SET sort_order = $1 WHERE id = $2",
+                        sort_order, cat_id
+                    )
+            
+            logging.info(f"✅ تم إعادة ترتيب {len(category_orders)} قسم")
+            return True, None
+            
+    except Exception as e:
+        logging.error(f"❌ خطأ في إعادة ترتيب الأقسام: {e}")
+        return False, str(e)
+
+async def add_category(db_pool, name, display_name, icon="📁", sort_order=0):
+    """إضافة قسم جديد"""
+    try:
+        async with db_pool.acquire() as conn:
+            # التحقق من عدم وجود اسم مكرر
+            existing = await conn.fetchval(
+                "SELECT id FROM categories WHERE name = $1",
+                name
+            )
+            
+            if existing:
+                return False, f"يوجد قسم بنفس الاسم الداخلي: {name}"
+            
+            # إضافة القسم
+            cat_id = await conn.fetchval('''
+                INSERT INTO categories (name, display_name, icon, sort_order, created_at)
+                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                RETURNING id
+            ''', name, display_name, icon, sort_order)
+            
+            logging.info(f"✅ تم إضافة قسم جديد: {display_name} (ID: {cat_id})")
+            return True, cat_id
+            
+    except Exception as e:
+        logging.error(f"❌ خطأ في إضافة قسم: {e}")
+        return False, str(e)
+
 # ============= دوال إنشاء الطلبات =============
 
 async def create_deposit_request(pool, user_id, username, method, amount, amount_syp, tx_info, photo_file_id=None):
@@ -2220,97 +2368,7 @@ async def update_report_setting(pool, key, value):
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث إعداد التقرير {key}: {e}")
         return False  # 👈 هذا السطر يجب أن يكون داخل الـ except
-     # أضف الألعاب الأساسية
-# ============= دوال تهيئة الألعاب =============
-
-async def init_games(pool):
-    """إضافة الألعاب الأساسية مع خياراتها (تشغل مرة واحدة)"""
-    try:
-        async with pool.acquire() as conn:
-            # التحقق إذا كانت الألعاب موجودة مسبقاً
-            existing_games = await conn.fetchval("SELECT COUNT(*) FROM applications WHERE type = 'game'")
-            if existing_games > 0:
-                logging.info("🎮 الألعاب موجودة مسبقاً، تخطي الإضافة")
-                return
-            
-            # جلب قسم الألعاب
-            games_cat = await conn.fetchval("SELECT id FROM categories WHERE name = 'games'")
-            
-            if not games_cat:
-                games_cat = await conn.fetchval('''
-                    INSERT INTO categories (name, display_name, icon, sort_order)
-                    VALUES ('games', '🎮 ألعاب', '🎮', 2)
-                    RETURNING id
-                ''')
-                logging.info("✅ تم إضافة قسم الألعاب")
-            
-            # 1. ببجي موبايل - مع unit_price_usd (سعر رمزي)
-            pubg_id = await conn.fetchval('''
-                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
-                VALUES ($1, $2, $3, $4, $5, 'game', true)
-                RETURNING id
-            ''', 'PUBG Mobile', 0.01, 1, 10, games_cat)
-            
-            # خيارات ببجي
-            pubg_options = [
-                ('60 UC', 60, 0.99),
-                ('325 UC', 325, 4.9),
-                ('660 UC', 660, 9.9),
-                ('1800 UC', 1800, 18),
-                ('3850 UC', 3850, 48),
-            ]
-            
-            for i, (name, qty, price) in enumerate(pubg_options):
-                await conn.execute('''
-                    INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
-                    VALUES ($1, $2, $3, $4, $5)
-                ''', pubg_id, name, qty, price, i)
-            
-            # 2. فري فاير - مع unit_price_usd
-            ff_id = await conn.fetchval('''
-                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
-                VALUES ($1, $2, $3, $4, $5, 'game', true)
-                RETURNING id
-            ''', 'Free Fire', 0.01, 1, 10, games_cat)
-            
-            ff_options = [
-                ('110 ماسة', 110, 0.99),
-                ('570 ماسة + 50 هدية', 620, 4.99),
-                ('1220 ماسة + 150 هدية', 1370, 9.99),
-                ('2420 ماسة + 450 هدية', 2870, 24.99),
-            ]
-            
-            for i, (name, qty, price) in enumerate(ff_options):
-                await conn.execute('''
-                    INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
-                    VALUES ($1, $2, $3, $4, $5)
-                ''', ff_id, name, qty, price, i)
-            
-            # 3. كلاش أوف كلانس - مع unit_price_usd
-            coc_id = await conn.fetchval('''
-                INSERT INTO applications (name, unit_price_usd, min_units, profit_percentage, category_id, type, is_active)
-                VALUES ($1, $2, $3, $4, $5, 'game', true)
-                RETURNING id
-            ''', 'Clash of Clans', 0.01, 1, 10, games_cat)
-            
-            coc_options = [
-                ('80 جوهرة', 80, 0.99),
-                ('500 جوهرة', 500, 4.99),
-                ('1200 جوهرة', 1200, 9.99),
-                ('2500 جوهرة', 2500, 19.99),
-                ('التذكرة الذهبية (شهر)', 1, 4.99),
-            ]
-            
-            for i, (name, qty, price) in enumerate(coc_options):
-                await conn.execute('''
-                    INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order)
-                    VALUES ($1, $2, $3, $4, $5)
-                ''', coc_id, name, qty, price, i)
-            
-            logging.info("✅ تم إضافة الألعاب بنجاح")
-            
-    except Exception as e:
-        logging.error(f"❌ خطأ في إضافة الألعاب: {e}")
+   
 # ============= دوال خيارات المنتجات (product_options) =============
 
 async def update_product_option(db_pool, option_id, updates):
