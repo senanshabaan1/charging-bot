@@ -1317,7 +1317,7 @@ async def add_category_start(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    await state.set_state(AdminStates.waiting_new_category_name)
+    await state.set_state(AdminStates.waiting_category_name)
     await callback.message.answer(
         "📝 **إضافة قسم جديد**\n\n"
         "أدخل **الاسم الداخلي** للقسم (بالإنجليزية وبدون مسافات):\n"
@@ -1328,7 +1328,7 @@ async def add_category_start(callback: types.CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@router.message(AdminStates.waiting_new_category_name)
+@router.message(AdminStates.waiting_category_name)
 async def add_category_name(message: types.Message, state: FSMContext, db_pool):
     """استقبال الاسم الداخلي للقسم الجديد"""
     if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
@@ -1362,7 +1362,7 @@ async def add_category_name(message: types.Message, state: FSMContext, db_pool):
             return
     
     await state.update_data(category_name=name)
-    await state.set_state(AdminStates.waiting_new_category_display)
+    await state.set_state(AdminStates.waiting_category_display)
     
     await message.answer(
         "📝 **أدخل الاسم المعروض للقسم:**\n\n"
@@ -1372,7 +1372,7 @@ async def add_category_name(message: types.Message, state: FSMContext, db_pool):
         reply_markup=get_cancel_keyboard()
     )
 
-@router.message(AdminStates.waiting_new_category_display)
+@router.message(AdminStates.waiting_category_display)
 async def add_category_display(message: types.Message, state: FSMContext, db_pool):
     """استقبال الاسم المعروض وإضافة القسم"""
     if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
