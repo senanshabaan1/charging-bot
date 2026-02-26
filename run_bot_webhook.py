@@ -154,13 +154,6 @@ async def main():
             logger.info(f"🕒 وقت DB (بعد الضبط): {db_time_now}")
             logger.info(f"🕒 وقت DB (دمشق): {db_time_damascus}")
         
-        # إضافة الألعاب الأساسية
-        try:
-            from database import init_games
-            await init_games(db_pool)
-            logger.info("✅ تم التحقق من الألعاب")
-        except Exception as e:
-            logger.warning(f"⚠️ لم يتم إضافة الألعاب: {e}")
         
         # تحميل سعر الصرف
         try:
