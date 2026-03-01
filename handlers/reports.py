@@ -343,9 +343,10 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         logger.error(f"❌ خطأ في daily_report: {e}")
         await callback.message.edit_text(f"❌ خطأ: {str(e)}")
+
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح مع تفاصيل debug"""
+    """تقرير الأرباح المفصل لكل تطبيق مع إجماليات (كملف)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -354,43 +355,164 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
-        # أولاً: نجيب تفاصيل الطلب لنرى ماذا حدث
-        order_details = await conn.fetch('''
+        # نجيب كل الطلبات المكتملة
+        orders = await conn.fetch('''
             SELECT 
                 o.id,
                 o.quantity,
-                o.total_amount_syp,
-                o.total_amount_syp / $1 as total_amount_usd,
-                o.variant_id,
-                o.app_id,
+                o.total_amount_syp as final_price_syp,
+                o.total_amount_syp / $1 as final_price_usd,
+                -- سعر المورد حسب نوع الطلب
+                CASE 
+                    WHEN o.variant_id IS NOT NULL THEN 
+                        (SELECT price_usd FROM product_options WHERE id = o.variant_id)
+                    ELSE 
+                        a.unit_price_usd * o.quantity
+                END as supplier_total_usd,
+                a.profit_percentage as app_profit_percent,
                 a.name as app_name,
-                a.unit_price_usd as app_unit_price,
-                a.profit_percentage,
-                po.price_usd as option_price,
-                po.name as option_name,
-                po.quantity as option_quantity
+                u.vip_level,
+                u.discount_percent as user_discount
             FROM orders o
             JOIN applications a ON o.app_id = a.id
-            LEFT JOIN product_options po ON o.variant_id = po.id
+            JOIN users u ON o.user_id = u.user_id
             WHERE o.status = 'completed'
-            ORDER BY o.created_at DESC
-            LIMIT 1
+            ORDER BY a.name, o.created_at DESC
         ''', exchange_rate)
         
-        if order_details:
-            order = order_details[0]
-            debug_text = "🔍 **تفاصيل debug:**\n\n"
-            debug_text += f"• الطلب ID: {order['id']}\n"
-            debug_text += f"• التطبيق: {order['app_name']}\n"
-            debug_text += f"• الكمية: {order['quantity']}\n"
-            debug_text += f"• سعر التطبيق الأساسي: ${order['app_unit_price']}\n"
-            debug_text += f"• سعر التطبيق × الكمية: ${order['app_unit_price'] * order['quantity']}\n"
-            debug_text += f"• variant_id: {order['variant_id']}\n"
-            debug_text += f"• سعر الخيار: ${order['option_price']}\n"
-            debug_text += f"• كمية الخيار: {order['option_quantity']}\n"
-            debug_text += f"• المبلغ المدفوع: ${order['total_amount_usd']}\n"
+        if not orders:
+            await callback.message.edit_text("📊 لا توجد مبيعات مكتملة بعد.")
+            return
+        
+        # هيكل البيانات لكل تطبيق
+        apps_data = {}
+        
+        # متغيرات للإجماليات الكلية
+        total_all_revenue_usd = 0
+        total_all_supplier_usd = 0
+        total_all_profit_before_discount_usd = 0
+        total_all_profit_after_discount_usd = 0
+        total_all_discount_usd = 0
+        
+        for order in orders:
+            app_name = order['app_name']
+            final_price_usd = float(order['final_price_usd'] or 0)
+            supplier_total_usd = float(order['supplier_total_usd'] or 0)
+            app_profit_percent = float(order['app_profit_percent'] or 0)
+            user_discount = float(order['user_discount'] or 0)
             
-            await callback.message.answer(debug_text)
+            # السعر بعد الربح (قبل الخصم)
+            price_after_profit_usd = supplier_total_usd * (1 + app_profit_percent / 100)
+            
+            # الخصم
+            discount_usd = price_after_profit_usd * (user_discount / 100)
+            
+            # الربح قبل الخصم
+            profit_before_discount_usd = price_after_profit_usd - supplier_total_usd
+            
+            # الربح بعد الخصم
+            profit_after_discount_usd = (price_after_profit_usd - discount_usd) - supplier_total_usd
+            
+            # إذا التطبيق جديد في القاموس
+            if app_name not in apps_data:
+                apps_data[app_name] = {
+                    'orders_count': 0,
+                    'revenue_usd': 0,
+                    'supplier_usd': 0,
+                    'profit_before_usd': 0,
+                    'profit_after_usd': 0,
+                    'discount_usd': 0,
+                    'profit_percent': app_profit_percent
+                }
+            
+            # تحديث إحصائيات التطبيق
+            apps_data[app_name]['orders_count'] += 1
+            apps_data[app_name]['revenue_usd'] += final_price_usd
+            apps_data[app_name]['supplier_usd'] += supplier_total_usd
+            apps_data[app_name]['profit_before_usd'] += profit_before_discount_usd
+            apps_data[app_name]['profit_after_usd'] += profit_after_discount_usd
+            apps_data[app_name]['discount_usd'] += discount_usd
+            
+            # تحديث الإجماليات الكلية
+            total_all_revenue_usd += final_price_usd
+            total_all_supplier_usd += supplier_total_usd
+            total_all_profit_before_discount_usd += profit_before_discount_usd
+            total_all_profit_after_discount_usd += profit_after_discount_usd
+            total_all_discount_usd += discount_usd
+        
+        # بناء التقرير
+        report_lines = []
+        report_lines.append("=" * 60)
+        report_lines.append("📊 تقرير الأرباح التفصيلي")
+        report_lines.append(f"💵 سعر الصرف: {exchange_rate:,.0f} ل.س = 1$")
+        report_lines.append(f"📅 التاريخ: {get_damascus_time_now().strftime('%Y-%m-%d %H:%M')}")
+        report_lines.append("=" * 60)
+        report_lines.append("")
+        
+        # تفاصيل كل تطبيق
+        report_lines.append("📱 تفاصيل التطبيقات:")
+        report_lines.append("-" * 60)
+        
+        for app_name, data in apps_data.items():
+            revenue_syp = data['revenue_usd'] * exchange_rate
+            supplier_syp = data['supplier_usd'] * exchange_rate
+            profit_before_syp = data['profit_before_usd'] * exchange_rate
+            profit_after_syp = data['profit_after_usd'] * exchange_rate
+            discount_syp = data['discount_usd'] * exchange_rate
+            
+            profit_margin = (data['profit_after_usd'] / data['revenue_usd'] * 100) if data['revenue_usd'] > 0 else 0
+            
+            report_lines.append(f"🔸 {app_name}")
+            report_lines.append(f"   • عدد الطلبات: {data['orders_count']}")
+            report_lines.append(f"   • نسبة ربح التطبيق: {data['profit_percent']}%")
+            report_lines.append(f"   • الإيرادات: ${data['revenue_usd']:,.2f} ({revenue_syp:,.0f} ل.س)")
+            report_lines.append(f"   • سعر المورد: ${data['supplier_usd']:,.2f} ({supplier_syp:,.0f} ل.س)")
+            report_lines.append(f"   • الخصم الممنوح: ${data['discount_usd']:,.2f} ({discount_syp:,.0f} ل.س)")
+            report_lines.append(f"   • الربح قبل الخصم: ${data['profit_before_usd']:,.2f} ({profit_before_syp:,.0f} ل.س)")
+            report_lines.append(f"   • الربح بعد الخصم: ${data['profit_after_usd']:,.2f} ({profit_after_syp:,.0f} ل.س) (نسبة {profit_margin:.1f}%)")
+            report_lines.append("")
+        
+        # الإجماليات الكلية
+        report_lines.append("=" * 60)
+        report_lines.append("📈 الإجماليات الكلية:")
+        report_lines.append("-" * 60)
+        
+        total_revenue_syp = total_all_revenue_usd * exchange_rate
+        total_supplier_syp = total_all_supplier_usd * exchange_rate
+        total_profit_before_syp = total_all_profit_before_discount_usd * exchange_rate
+        total_profit_after_syp = total_all_profit_after_discount_usd * exchange_rate
+        total_discount_syp = total_all_discount_usd * exchange_rate
+        
+        total_profit_margin = (total_all_profit_after_discount_usd / total_all_revenue_usd * 100) if total_all_revenue_usd > 0 else 0
+        total_discount_percent = (total_all_discount_usd / (total_all_supplier_usd + total_all_profit_before_discount_usd) * 100) if (total_all_supplier_usd + total_all_profit_before_discount_usd) > 0 else 0
+        
+        report_lines.append(f"💰 إجمالي الإيرادات: ${total_all_revenue_usd:,.2f} ({total_revenue_syp:,.0f} ل.س)")
+        report_lines.append(f"📦 إجمالي سعر المورد: ${total_all_supplier_usd:,.2f} ({total_supplier_syp:,.0f} ل.س)")
+        report_lines.append(f"🎁 إجمالي الخصم: ${total_all_discount_usd:,.2f} ({total_discount_syp:,.0f} ل.س) (نسبة {total_discount_percent:.1f}%)")
+        report_lines.append(f"💎 إجمالي الربح قبل الخصم: ${total_all_profit_before_discount_usd:,.2f} ({total_profit_before_syp:,.0f} ل.س)")
+        report_lines.append(f"✅ إجمالي الربح بعد الخصم: ${total_all_profit_after_discount_usd:,.2f} ({total_profit_after_syp:,.0f} ل.س)")
+        report_lines.append(f"📊 هامش الربح الإجمالي: {total_profit_margin:.1f}%")
+        report_lines.append("=" * 60)
+        report_lines.append("")
+        report_lines.append("✨ التقرير من إعداد LINK BOT")
+        
+        # تحويل النص لملف
+        report_text = "\n".join(report_lines)
+        
+        from io import BytesIO
+        file = BytesIO()
+        file.write(report_text.encode('utf-8'))
+        file.seek(0)
+        
+        filename = f"profits_report_{get_damascus_time_now().strftime('%Y-%m-%d_%H-%M')}.txt"
+        
+        await callback.message.answer_document(
+            types.BufferedInputFile(
+                file=file.getvalue(),
+                filename=filename
+            ),
+            caption="✅ تم إنشاء تقرير الأرباح المفصل"
+        )
 
 @router.callback_query(F.data == "users_report")
 async def users_report(callback: types.CallbackQuery, db_pool):
