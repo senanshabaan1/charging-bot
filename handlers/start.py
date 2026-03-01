@@ -855,29 +855,31 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
 
 # ========== سجل العمليات ==========
 
+# ========== سجل العمليات ==========
+
 @router.callback_query(F.data == "transactions_history")
 async def transactions_history(callback: types.CallbackQuery, db_pool):
-    """عرض سجل العمليات (شحن + شراء)"""
+    """عرض سجل العمليات (آخر 3 شحن + آخر 3 شراء)"""
     user_id = callback.from_user.id
     
     async with db_pool.acquire() as conn:
-        # جلب آخر 10 عمليات شحن
+        # جلب آخر 3 عمليات شحن
         deposits = await conn.fetch('''
             SELECT amount_syp, status, created_at
             FROM deposit_requests 
             WHERE user_id = $1 
             ORDER BY created_at DESC 
-            LIMIT 5
+            LIMIT 3
         ''', user_id)
         
-        # جلب آخر 10 عمليات شراء
+        # جلب آخر 3 عمليات شراء
         orders = await conn.fetch('''
             SELECT o.total_amount_syp, a.name as app_name, o.status, o.created_at
             FROM orders o
             JOIN applications a ON o.app_id = a.id
             WHERE o.user_id = $1 
             ORDER BY o.created_at DESC 
-            LIMIT 5
+            LIMIT 3
         ''', user_id)
         
         # إحصائيات
@@ -908,23 +910,25 @@ async def transactions_history(callback: types.CallbackQuery, db_pool):
         f"🛒 إجمالي الشراء: {orders_count} عملية | {orders_total:,.0f} ل.س\n\n"
     )
     
-    if deposits or orders:
-        if deposits:
-            text += "**🟢 آخر عمليات الشحن:**\n"
-            for d in deposits:
-                status_icon = "✅" if d['status'] == 'approved' else "⏳" if d['status'] == 'pending' else "❌"
-                date = d['created_at'].strftime("%Y-%m-%d %H:%M") if d['created_at'] else "-"
-                text += f"{status_icon} {d['amount_syp']:,.0f} ل.س - {date}\n"
-            text += "\n"
-        
-        if orders:
-            text += "**🔵 آخر عمليات الشراء:**\n"
-            for o in orders:
-                status_icon = "✅" if o['status'] == 'completed' else "⏳" if o['status'] == 'pending' else "❌"
-                date = o['created_at'].strftime("%Y-%m-%d %H:%M") if o['created_at'] else "-"
-                text += f"{status_icon} {o['app_name']} - {o['total_amount_syp']:,.0f} ل.س - {date}\n"
+    if deposits:
+        text += "**🟢 آخر عمليات الشحن:**\n"
+        for d in deposits:
+            status_icon = "✅" if d['status'] == 'approved' else "⏳" if d['status'] == 'pending' else "❌"
+            date = d['created_at'].strftime("%Y-%m-%d %H:%M") if d['created_at'] else "-"
+            text += f"{status_icon} {d['amount_syp']:,.0f} ل.س - {date}\n"
     else:
-        text += "لا توجد عمليات حتى الآن."
+        text += "**🟢 آخر عمليات الشحن:**\nلا توجد عمليات شحن بعد.\n"
+    
+    text += "\n"
+    
+    if orders:
+        text += "**🔵 آخر عمليات الشراء:**\n"
+        for o in orders:
+            status_icon = "✅" if o['status'] == 'completed' else "⏳" if o['status'] == 'pending' else "❌"
+            date = o['created_at'].strftime("%Y-%m-%d %H:%M") if o['created_at'] else "-"
+            text += f"{status_icon} {o['app_name']} - {o['total_amount_syp']:,.0f} ل.س - {date}\n"
+    else:
+        text += "**🔵 آخر عمليات الشراء:**\nلا توجد عمليات شراء بعد.\n"
     
     await callback.message.edit_text(text, parse_mode="Markdown")
     
