@@ -346,7 +346,7 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح المفصل (بدون ضرب)"""
+    """تقرير الأرباح مع تفاصيل debug"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -355,134 +355,43 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
-        orders = await conn.fetch('''
+        # أولاً: نجيب تفاصيل الطلب لنرى ماذا حدث
+        order_details = await conn.fetch('''
             SELECT 
                 o.id,
                 o.quantity,
-                o.total_amount_syp as final_price_syp,
-                -- نحسب الدولار من الليرة
-                o.total_amount_syp / $1 as final_price_usd,
-                -- سعر المورد حسب نوع الطلب
-                CASE 
-                    -- إذا كان فيه خيار (option) - نأخذ سعر الخيار مباشرة (بدون ضرب)
-                    WHEN o.variant_id IS NOT NULL THEN 
-                        (SELECT price_usd FROM product_options WHERE id = o.variant_id)
-                    -- إذا كان بدون خيار - نضرب سعر التطبيق بالكمية
-                    ELSE 
-                        a.unit_price_usd * o.quantity
-                END as supplier_total_usd,  -- هذا هو الإجمالي وليس سعر الوحدة
-                a.profit_percentage as app_profit_percent,
-                u.vip_level,
-                u.discount_percent as user_discount,
-                o.app_id,
+                o.total_amount_syp,
+                o.total_amount_syp / $1 as total_amount_usd,
                 o.variant_id,
-                o.created_at
+                o.app_id,
+                a.name as app_name,
+                a.unit_price_usd as app_unit_price,
+                a.profit_percentage,
+                po.price_usd as option_price,
+                po.name as option_name,
+                po.quantity as option_quantity
             FROM orders o
             JOIN applications a ON o.app_id = a.id
-            JOIN users u ON o.user_id = u.user_id
+            LEFT JOIN product_options po ON o.variant_id = po.id
             WHERE o.status = 'completed'
+            ORDER BY o.created_at DESC
+            LIMIT 1
         ''', exchange_rate)
         
-        if not orders:
-            await callback.message.edit_text("📊 لا توجد مبيعات مكتملة بعد.")
-            return
-        
-        total_orders = len(orders)
-        
-        # للإجماليات
-        total_revenue_usd = 0
-        total_supplier_cost_usd = 0
-        total_price_after_profit_usd = 0
-        total_discount_usd = 0
-        total_profit_before_discount_usd = 0
-        total_profit_after_discount_usd = 0
-        
-        total_revenue_syp = 0
-        total_supplier_cost_syp = 0
-        total_price_after_profit_syp = 0
-        total_discount_syp = 0
-        total_profit_before_discount_syp = 0
-        total_profit_after_discount_syp = 0
-        
-        for order in orders:
-            # الأسعار
-            final_price_usd = float(order['final_price_usd'] or 0)
-            final_price_syp = float(order['final_price_syp'] or 0)
+        if order_details:
+            order = order_details[0]
+            debug_text = "🔍 **تفاصيل debug:**\n\n"
+            debug_text += f"• الطلب ID: {order['id']}\n"
+            debug_text += f"• التطبيق: {order['app_name']}\n"
+            debug_text += f"• الكمية: {order['quantity']}\n"
+            debug_text += f"• سعر التطبيق الأساسي: ${order['app_unit_price']}\n"
+            debug_text += f"• سعر التطبيق × الكمية: ${order['app_unit_price'] * order['quantity']}\n"
+            debug_text += f"• variant_id: {order['variant_id']}\n"
+            debug_text += f"• سعر الخيار: ${order['option_price']}\n"
+            debug_text += f"• كمية الخيار: {order['option_quantity']}\n"
+            debug_text += f"• المبلغ المدفوع: ${order['total_amount_usd']}\n"
             
-            # 👈 مهم: supplier_total_usd هو الإجمالي (سعر الخيار كامل)
-            supplier_total_usd = float(order['supplier_total_usd'] or 0)
-            supplier_total_syp = supplier_total_usd * exchange_rate
-            
-            app_profit_percent = float(order['app_profit_percent'] or 0)
-            vip_level = order['vip_level'] or 0
-            user_discount = float(order['user_discount'] or 0)
-            
-            # السعر بعد إضافة نسبة الربح (هذا هو السعر قبل الخصم)
-            price_after_profit_usd = supplier_total_usd * (1 + app_profit_percent / 100)
-            price_after_profit_syp = price_after_profit_usd * exchange_rate
-            
-            # الخصم حسب مستوى VIP
-            discount_usd = price_after_profit_usd * (user_discount / 100)
-            discount_syp = discount_usd * exchange_rate
-            
-            # الربح قبل الخصم
-            profit_before_discount_usd = price_after_profit_usd - supplier_total_usd
-            profit_before_discount_syp = profit_before_discount_usd * exchange_rate
-            
-            # الربح بعد الخصم
-            profit_after_discount_usd = (price_after_profit_usd - discount_usd) - supplier_total_usd
-            profit_after_discount_syp = profit_after_discount_usd * exchange_rate
-            
-            # إضافة للإجماليات
-            total_revenue_usd += final_price_usd
-            total_revenue_syp += final_price_syp
-            total_supplier_cost_usd += supplier_total_usd
-            total_supplier_cost_syp += supplier_total_syp
-            total_price_after_profit_usd += price_after_profit_usd
-            total_price_after_profit_syp += price_after_profit_syp
-            total_discount_usd += discount_usd
-            total_discount_syp += discount_syp
-            total_profit_before_discount_usd += profit_before_discount_usd
-            total_profit_before_discount_syp += profit_before_discount_syp
-            total_profit_after_discount_usd += profit_after_discount_usd
-            total_profit_after_discount_syp += profit_after_discount_syp
-        
-        # حساب النسب
-        profit_margin_before = (total_profit_before_discount_usd / total_price_after_profit_usd * 100) if total_price_after_profit_usd > 0 else 0
-        profit_margin_after = (total_profit_after_discount_usd / total_revenue_usd * 100) if total_revenue_usd > 0 else 0
-        discount_percent = (total_discount_usd / total_price_after_profit_usd * 100) if total_price_after_profit_usd > 0 else 0
-        
-        # بناء التقرير
-        text = (
-            "💰 **تقرير الأرباح**\n"
-            f"💵 **سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
-            "➖➖➖➖➖➖➖➖\n\n"
-            
-            f"📊 **إجمالي التطبيقات المباعة:** {total_orders}\n\n"
-            
-            "📈 **إجمالي المبيعات:**\n"
-            f"💰 المبيعات (بالدولار): **${total_revenue_usd:,.2f}**\n"
-            f"💰 المبيعات (بالليرة): **{total_revenue_syp:,.0f} ل.س**\n"
-            f"📦 سعر المورد الأصلي: **${total_supplier_cost_usd:,.2f}** ({total_supplier_cost_syp:,.0f} ل.س)\n"
-            f"📈 السعر بعد الربح: **${total_price_after_profit_usd:,.2f}** ({total_price_after_profit_syp:,.0f} ل.س)\n"
-            f"🎁 الخصم حسب المستوى: **${total_discount_usd:,.2f}** ({total_discount_syp:,.0f} ل.س)\n\n"
-            
-            "💎 **تحليل الأرباح:**\n"
-            f"• الربح قبل الخصم: **${total_profit_before_discount_usd:,.2f}** ({total_profit_before_discount_syp:,.0f} ل.س)\n"
-            f"  (نسبة {profit_margin_before:.1f}%)\n"
-            f"• الربح بعد الخصم: **${total_profit_after_discount_usd:,.2f}** ({total_profit_after_discount_syp:,.0f} ل.س)\n"
-            f"  (نسبة {profit_margin_after:.1f}%)\n"
-            f"• الفرق (الخصم): **${total_discount_usd:,.2f}** ({total_discount_syp:,.0f} ل.س)\n\n"
-        )
-        
-        text += (
-            f"📊 **نسبة الخصم الإجمالية:** {discount_percent:.1f}%\n\n"
-            f"✅ **صافي الربح النهائي:**\n"
-            f"**${total_profit_after_discount_usd:,.2f}**\n"
-            f"**{total_profit_after_discount_syp:,.0f} ل.س**"
-        )
-        
-        await callback.message.edit_text(text)
+            await callback.message.answer(debug_text)
 
 @router.callback_query(F.data == "users_report")
 async def users_report(callback: types.CallbackQuery, db_pool):
