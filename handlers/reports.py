@@ -346,7 +346,7 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
-    """تقرير الأرباح المفصل (نسخة مختصرة)"""
+    """تقرير الأرباح المفصل (بالدولار والليرة)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -360,17 +360,23 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
                 o.id,
                 o.quantity,
                 o.total_amount_syp as final_price_syp,
-                o.unit_price_usd as final_unit_price_usd,
-                COALESCE(po.price_usd, a.unit_price_usd) as supplier_price_usd,
+                o.total_amount_usd as final_price_usd,
+                -- سعر المورد: من الخيار إذا موجود أو من التطبيق
+                CASE 
+                    WHEN o.variant_id IS NOT NULL THEN 
+                        (SELECT price_usd FROM product_options WHERE id = o.variant_id)
+                    ELSE 
+                        a.unit_price_usd * o.quantity
+                END as supplier_price_usd,
                 a.profit_percentage as app_profit_percent,
                 u.vip_level,
                 u.discount_percent as user_discount,
+                o.app_id,
                 o.variant_id,
                 o.created_at
             FROM orders o
             JOIN applications a ON o.app_id = a.id
             JOIN users u ON o.user_id = u.user_id
-            LEFT JOIN product_options po ON o.variant_id = po.id
             WHERE o.status = 'completed'
         ''')
         
@@ -378,99 +384,127 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             await callback.message.edit_text("📊 لا توجد مبيعات مكتملة بعد.")
             return
         
-        # إحصائيات عامة
+        # متغيرات للإجماليات (بالدولار والليرة)
         total_orders = len(orders)
-        total_revenue = 0  # إجمالي المبيعات (اللي دفعه المستخدم)
-        total_supplier_cost_before_profit = 0  # إجمالي سعر المورد الأصلي قبل إضافة نسبة الربح
-        total_price_after_profit = 0  # إجمالي السعر بعد إضافة نسبة الربح (قبل الخصم)
-        total_discount_given = 0  # إجمالي الخصم حسب المستوى
-        total_profit_before_discount = 0  # إجمالي الربح قبل الخصم
-        total_profit_after_discount = 0  # إجمالي الربح بعد الخصم
+        
+        # بالدولار
+        total_revenue_usd = 0
+        total_supplier_cost_usd = 0
+        total_price_after_profit_usd = 0
+        total_discount_usd = 0
+        total_profit_before_discount_usd = 0
+        total_profit_after_discount_usd = 0
+        
+        # بالليرة (للحسابات)
+        total_revenue_syp = 0
+        total_supplier_cost_syp = 0
+        total_price_after_profit_syp = 0
+        total_discount_syp = 0
+        total_profit_before_discount_syp = 0
+        total_profit_after_discount_syp = 0
         
         # إحصائيات حسب مستوى VIP
         vip_stats = {}
         for level in range(0, 6):
             vip_stats[level] = {
                 'orders': 0,
-                'revenue': 0,
-                'supplier_cost_before_profit': 0,
-                'price_after_profit': 0,
-                'discount_given': 0,
-                'profit_before_discount': 0,
-                'profit_after_discount': 0
+                'revenue_usd': 0,
+                'revenue_syp': 0,
+                'discount_usd': 0,
+                'discount_syp': 0,
+                'profit_after_discount_usd': 0,
+                'profit_after_discount_syp': 0
             }
         
         for order in orders:
             quantity = order['quantity'] or 1
-            final_price_syp = float(order['final_price_syp'])  # اللي دفعه المستخدم
-            supplier_price_usd = float(order['supplier_price_usd'] or 0)  # سعر المورد الأصلي للوحدة
-            app_profit_percent = float(order['app_profit_percent'] or 0)  # نسبة ربح التطبيق
+            
+            # الأسعار بالدولار
+            final_price_usd = float(order['final_price_usd'] or 0)  # اللي دفعه المستخدم بالدولار
+            supplier_price_usd = float(order['supplier_price_usd'] or 0)  # سعر المورد بالدولار (سعر الوحدة)
+            
+            # إذا كان supplier_price_usd هو سعر الوحدة، نضربه بالكمية
+            supplier_total_usd = supplier_price_usd * quantity
+            
+            app_profit_percent = float(order['app_profit_percent'] or 0)
             vip_level = order['vip_level'] or 0
-            user_discount = float(order['user_discount'] or 0)  # نسبة خصم المستخدم
+            user_discount = float(order['user_discount'] or 0)
             
-            # حساب سعر المورد الإجمالي
-            supplier_cost_before_profit = supplier_price_usd * quantity * exchange_rate  # سعر المورد الأصلي بالليرة
+            # السعر بعد إضافة نسبة الربح (قبل الخصم)
+            price_after_profit_usd = supplier_total_usd * (1 + app_profit_percent / 100)
             
-            # حساب السعر بعد إضافة نسبة الربح (قبل الخصم)
-            price_after_profit = supplier_cost_before_profit * (1 + app_profit_percent / 100)
+            # الخصم الممنوح
+            discount_usd = price_after_profit_usd * (user_discount / 100)
             
-            # حساب الخصم الممنوح
-            discount_amount = price_after_profit * (user_discount / 100)
+            # الربح قبل الخصم
+            profit_before_discount_usd = price_after_profit_usd - supplier_total_usd
             
-            # الربح قبل الخصم (الفرق بين سعر المورد والسعر بعد الربح)
-            profit_before_discount = price_after_profit - supplier_cost_before_profit
+            # الربح بعد الخصم
+            profit_after_discount_usd = (price_after_profit_usd - discount_usd) - supplier_total_usd
             
-            # الربح بعد الخصم (الفرق بين السعر بعد الخصم وسعر المورد)
-            profit_after_discount = (price_after_profit - discount_amount) - supplier_cost_before_profit
+            # التحويل لليرة
+            final_price_syp = final_price_usd * exchange_rate
+            supplier_total_syp = supplier_total_usd * exchange_rate
+            price_after_profit_syp = price_after_profit_usd * exchange_rate
+            discount_syp = discount_usd * exchange_rate
+            profit_before_discount_syp = profit_before_discount_usd * exchange_rate
+            profit_after_discount_syp = profit_after_discount_usd * exchange_rate
             
-            # إضافة للإجماليات
-            total_revenue += final_price_syp
-            total_supplier_cost_before_profit += supplier_cost_before_profit
-            total_price_after_profit += price_after_profit
-            total_discount_given += discount_amount
-            total_profit_before_discount += profit_before_discount
-            total_profit_after_discount += profit_after_discount
+            # إضافة للإجماليات (بالدولار)
+            total_revenue_usd += final_price_usd
+            total_supplier_cost_usd += supplier_total_usd
+            total_price_after_profit_usd += price_after_profit_usd
+            total_discount_usd += discount_usd
+            total_profit_before_discount_usd += profit_before_discount_usd
+            total_profit_after_discount_usd += profit_after_discount_usd
+            
+            # إضافة للإجماليات (بالليرة)
+            total_revenue_syp += final_price_syp
+            total_supplier_cost_syp += supplier_total_syp
+            total_price_after_profit_syp += price_after_profit_syp
+            total_discount_syp += discount_syp
+            total_profit_before_discount_syp += profit_before_discount_syp
+            total_profit_after_discount_syp += profit_after_discount_syp
             
             # إحصائيات VIP
             vip_stats[vip_level]['orders'] += 1
-            vip_stats[vip_level]['revenue'] += final_price_syp
-            vip_stats[vip_level]['supplier_cost_before_profit'] += supplier_cost_before_profit
-            vip_stats[vip_level]['price_after_profit'] += price_after_profit
-            vip_stats[vip_level]['discount_given'] += discount_amount
-            vip_stats[vip_level]['profit_before_discount'] += profit_before_discount
-            vip_stats[vip_level]['profit_after_discount'] += profit_after_discount
-        
-        # حساب عدد التطبيقات المباعة (عدد الطلبات)
-        apps_sold = total_orders
+            vip_stats[vip_level]['revenue_usd'] += final_price_usd
+            vip_stats[vip_level]['revenue_syp'] += final_price_syp
+            vip_stats[vip_level]['discount_usd'] += discount_usd
+            vip_stats[vip_level]['discount_syp'] += discount_syp
+            vip_stats[vip_level]['profit_after_discount_usd'] += profit_after_discount_usd
+            vip_stats[vip_level]['profit_after_discount_syp'] += profit_after_discount_syp
         
         # حساب النسب المئوية
-        profit_margin_before_discount = (total_profit_before_discount / total_price_after_profit * 100) if total_price_after_profit > 0 else 0
-        profit_margin_after_discount = (total_profit_after_discount / total_revenue * 100) if total_revenue > 0 else 0
-        discount_percent_of_revenue = (total_discount_given / total_price_after_profit * 100) if total_price_after_profit > 0 else 0
+        profit_margin_before = (total_profit_before_discount_usd / total_price_after_profit_usd * 100) if total_price_after_profit_usd > 0 else 0
+        profit_margin_after = (total_profit_after_discount_usd / total_revenue_usd * 100) if total_revenue_usd > 0 else 0
+        discount_percent = (total_discount_usd / total_price_after_profit_usd * 100) if total_price_after_profit_usd > 0 else 0
         
-        # بناء التقرير المختصر
+        # بناء التقرير
         text = (
             "💰 **تقرير الأرباح**\n"
-            "➖➖➖➖➖➖➖➖\n\n"
-            
-            f"📊 **إجمالي التطبيقات المباعة:** {apps_sold}\n"
             f"💵 **سعر الصرف:** {exchange_rate:,.0f} ل.س = 1$\n"
             "➖➖➖➖➖➖➖➖\n\n"
             
+            f"📊 **إجمالي التطبيقات المباعة:** {total_orders}\n\n"
+            
             "📈 **إجمالي المبيعات:**\n"
-            f"💰 إجمالي المبيعات (اللي دفعه المستخدم): **{total_revenue:,.0f} ل.س**\n"
-            f"📦 إجمالي سعر المورد الأصلي: **{total_supplier_cost_before_profit:,.0f} ل.س**\n"
-            f"📈 إجمالي السعر بعد إضافة الربح: **{total_price_after_profit:,.0f} ل.س**\n"
-            f"🎁 إجمالي الخصم حسب المستوى: **{total_discount_given:,.0f} ل.س**\n\n"
+            f"💰 المبيعات (بالدولار): **${total_revenue_usd:,.2f}**\n"
+            f"💰 المبيعات (بالليرة): **{total_revenue_syp:,.0f} ل.س**\n"
+            f"📦 سعر المورد الأصلي: **${total_supplier_cost_usd:,.2f}** ({total_supplier_cost_syp:,.0f} ل.س)\n"
+            f"📈 السعر بعد الربح: **${total_price_after_profit_usd:,.2f}** ({total_price_after_profit_syp:,.0f} ل.س)\n"
+            f"🎁 الخصم حسب المستوى: **${total_discount_usd:,.2f}** ({total_discount_syp:,.0f} ل.س)\n\n"
             
             "💎 **تحليل الأرباح:**\n"
-            f"• الربح قبل الخصم: **{total_profit_before_discount:,.0f} ل.س** (نسبة {profit_margin_before_discount:.1f}%)\n"
-            f"• الربح بعد الخصم: **{total_profit_after_discount:,.0f} ل.س** (نسبة {profit_margin_after_discount:.1f}%)\n"
-            f"• الفرق (الخصم): **{total_profit_before_discount - total_profit_after_discount:,.0f} ل.س**\n\n"
+            f"• الربح قبل الخصم: **${total_profit_before_discount_usd:,.2f}** ({total_profit_before_discount_syp:,.0f} ل.س)\n"
+            f"  (نسبة {profit_margin_before:.1f}%)\n"
+            f"• الربح بعد الخصم: **${total_profit_after_discount_usd:,.2f}** ({total_profit_after_discount_syp:,.0f} ل.س)\n"
+            f"  (نسبة {profit_margin_after:.1f}%)\n"
+            f"• الفرق (الخصم): **${total_discount_usd:,.2f}** ({total_discount_syp:,.0f} ل.س)\n\n"
         )
         
         # تحليل VIP (إذا كان فيه خصومات)
-        if total_discount_given > 0:
+        if total_discount_usd > 0:
             text += "👑 **تحليل حسب مستوى VIP:**\n"
             vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
             
@@ -478,24 +512,41 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             for level in sorted(active_levels):
                 stats = vip_stats[level]
                 if stats['orders'] > 0:
-                    level_discount_percent = (stats['discount_given'] / stats['price_after_profit'] * 100) if stats['price_after_profit'] > 0 else 0
+                    level_discount_percent = (stats['discount_usd'] / stats['revenue_usd'] * 100) if stats['revenue_usd'] > 0 else 0
                     
                     icon = vip_icons[level] if level < len(vip_icons) else f"VIP {level}"
                     text += (
                         f"{icon}\n"
                         f"• طلبات: {stats['orders']}\n"
-                        f"• خصم ممنوح: {stats['discount_given']:,.0f} ل.س ({level_discount_percent:.1f}%)\n"
-                        f"• الربح بعد الخصم: {stats['profit_after_discount']:,.0f} ل.س\n\n"
+                        f"• خصم ممنوح: **${stats['discount_usd']:,.2f}** ({stats['discount_syp']:,.0f} ل.س)\n"
+                        f"  ({level_discount_percent:.1f}%)\n"
+                        f"• الربح بعد الخصم: **${stats['profit_after_discount_usd']:,.2f}** ({stats['profit_after_discount_syp']:,.0f} ل.س)\n\n"
                     )
         
-        # نسبة الخصم الإجمالية
         text += (
-            f"📊 **نسبة الخصم الإجمالية:** {discount_percent_of_revenue:.1f}%\n\n"
-            f"✅ **صافي الربح النهائي:** {total_profit_after_discount:,.0f} ل.س"
+            f"📊 **نسبة الخصم الإجمالية:** {discount_percent:.1f}%\n\n"
+            f"✅ **صافي الربح النهائي:**\n"
+            f"**${total_profit_after_discount_usd:,.2f}**\n"
+            f"**{total_profit_after_discount_syp:,.0f} ل.س**"
         )
         
         # إرسال التقرير
-        await callback.message.edit_text(text)
+        if len(text) > 4000:
+            # إذا كان طويلاً، أرسل كملف
+            from io import BytesIO
+            file = BytesIO()
+            file.write(text.encode('utf-8'))
+            file.seek(0)
+            
+            await callback.message.answer_document(
+                types.BufferedInputFile(
+                    file=file.getvalue(),
+                    filename=f"profits_report_{get_damascus_time_now().strftime('%Y-%m-%d')}.txt"
+                ),
+                caption="📊 تقرير الأرباح (نص طويل)"
+            )
+        else:
+            await callback.message.edit_text(text)
 
 @router.callback_query(F.data == "users_report")
 async def users_report(callback: types.CallbackQuery, db_pool):
