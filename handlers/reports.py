@@ -343,6 +343,7 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         logger.error(f"❌ خطأ في daily_report: {e}")
         await callback.message.edit_text(f"❌ خطأ: {str(e)}")
+
 @router.callback_query(F.data == "profits_report")
 async def profits_report(callback: types.CallbackQuery, db_pool):
     """تقرير الأرباح المفصل (نسخة مختصرة)"""
@@ -360,7 +361,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
                 o.quantity,
                 o.total_amount_syp as final_price_syp,
                 o.unit_price_usd as final_unit_price_usd,
-                a.unit_price_usd as supplier_price_usd,
+                COALESCE(po.price_usd, a.unit_price_usd) as supplier_price_usd,
                 a.profit_percentage as app_profit_percent,
                 u.vip_level,
                 u.discount_percent as user_discount,
@@ -369,6 +370,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
             FROM orders o
             JOIN applications a ON o.app_id = a.id
             JOIN users u ON o.user_id = u.user_id
+            LEFT JOIN product_options po ON o.variant_id = po.id
             WHERE o.status = 'completed'
         ''')
         
@@ -470,7 +472,7 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
         # تحليل VIP (إذا كان فيه خصومات)
         if total_discount_given > 0:
             text += "👑 **تحليل حسب مستوى VIP:**\n"
-            vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3"]
+            vip_icons = ["🟢 VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3", "🔴 VIP 4", "💎 VIP 5"]
             
             active_levels = [l for l in vip_stats if vip_stats[l]['orders'] > 0]
             for level in sorted(active_levels):
