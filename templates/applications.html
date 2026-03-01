@@ -2,630 +2,787 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>إدارة التطبيقات | لوحة التحكم</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
-        body { background: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .sidebar { background: #2c3e50; min-height: 100vh; color: white; padding: 20px; }
-        .sidebar a { color: white; text-decoration: none; padding: 10px; border-radius: 5px; }
-        .sidebar a:hover { background: #34495e; }
-        .sidebar a.active { background: #3498db; }
-        .calculator-info { background-color: #e7f3ff; border-right: 4px solid #0d6efd; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .price-badge { background-color: #20c997; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.9em; }
-        .table-responsive { max-height: 500px; overflow-y: auto; }
-        .form-control:readonly { background-color: #f8f9fa; }
-        .final-price-box { background-color: #d1e7dd; border: 1px solid #badbcc; border-radius: 5px; padding: 15px; margin-top: 15px; }
+        * {
+            font-family: 'Tajawal', sans-serif;
+        }
+        
+        body {
+            background: #f8f9fc;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1a1f2b 0%, #2c3e50 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+        }
+        
+        .sidebar .logo {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar .logo i {
+            font-size: 40px;
+            color: #3498db;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        .sidebar .nav-link.active {
+            background: #3498db;
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            margin-left: 10px;
+            width: 20px;
+        }
+        
+        .sidebar .rate-box {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .page-header h2 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .calculator-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+        
+        .calculator-card h5 {
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+        
+        .calculator-card .form-control, .calculator-card .form-select {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 15px;
+        }
+        
+        .apps-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: #fafbfc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .search-box {
+            width: 250px;
+        }
+        
+        .table {
+            margin: 0;
+        }
+        
+        .table thead th {
+            border-top: none;
+            font-weight: 600;
+            color: #7f8c8d;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        
+        .category-badge {
+            background: #e0e0e0;
+            color: #666;
+            padding: 3px 8px;
+            border-radius: 50px;
+            font-size: 11px;
+        }
+        
+        .price-badge {
+            background: #27ae60;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .type-badge {
+            padding: 3px 8px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .type-game {
+            background: #cfe2ff;
+            color: #084298;
+        }
+        
+        .type-subscription {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .type-service {
+            background: #d1e7dd;
+            color: #0a3622;
+        }
+        
+        .btn-group-sm .btn {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .modal-content {
+            border-radius: 15px;
+        }
+        
+        .modal-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            border-radius: 15px 15px 0 0;
+        }
+        
+        .final-price-box {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 12px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #27ae60;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .slider.round {
+            border-radius: 34px;
+        }
+        
+        .slider.round:before {
+            border-radius: 50%;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+                position: static;
+            }
+            
+            .card-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .search-box {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
-<div class="container-fluid">
-    <div class="row">
-        <!-- الشريط الجانبي -->
-        <div class="col-md-2 sidebar">
-            <h4 class="text-center mb-4">إدارة البوت</h4>
-            <hr>
-            <ul class="nav flex-column">
-                <li class="nav-item mb-2">
-                    <a href="/" class="nav-link text-white">
-                        <i class="fa fa-home me-2"></i> الرئيسية
-                    </a>
-                </li>
-                <li class="nav-item mb-2">
-                    <a href="/user_management" class="nav-link text-white">
-                        <i class="fa fa-users me-2"></i> إدارة المستخدمين
-                    </a>
-                </li>
-                <li class="nav-item mb-2">
-                    <a href="/applications" class="nav-link text-white active">
-                        <i class="fa fa-mobile me-2"></i> إدارة التطبيقات
-                    </a>
-                </li>
-                <li class="nav-item mb-2">
-                    <a href="/categories" class="nav-link text-white">
-                        <i class="fa fa-folder me-2"></i> إدارة الأقسام
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="/logout" class="nav-link text-danger">
-                        <i class="fa fa-sign-out-alt me-2"></i> خروج
-                    </a>
-                </li>
-            </ul>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي -->
+            <div class="col-md-2 sidebar">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h4>إدارة البوت</h4>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a href="/" class="nav-link">
+                            <i class="fas fa-home"></i> الرئيسية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link">
+                            <i class="fas fa-users"></i> إدارة المستخدمين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/applications" class="nav-link active">
+                            <i class="fas fa-mobile-alt"></i> إدارة التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/categories" class="nav-link">
+                            <i class="fas fa-folder"></i> إدارة الأقسام
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/points" class="nav-link">
+                            <i class="fas fa-star"></i> إدارة النقاط
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/vip" class="nav-link">
+                            <i class="fas fa-crown"></i> نظام VIP
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/statistics" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/broadcast" class="nav-link">
+                            <i class="fas fa-bullhorn"></i> رسالة جماعية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admins" class="nav-link">
+                            <i class="fas fa-shield-alt"></i> إدارة المشرفين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <div class="rate-box">
+                    <h6 class="text-white"><i class="fas fa-exchange-alt me-2"></i>سعر الصرف</h6>
+                    <form action="/update_rate" method="POST" class="mt-2">
+                        <div class="input-group">
+                            <input type="number" step="any" name="new_rate" class="form-control" value="{{ rate }}" required>
+                            <button type="submit" class="btn btn-sm btn-success">
+                                <i class="fas fa-check"></i>
+                            </button>
+                        </div>
+                    </form>
+                    <small class="text-white-50 mt-2 d-block">1$ = {{ "{:,.0f}".format(rate) }} ل.س</small>
+                </div>
+                
+                <hr>
+                
+                <a href="/logout" class="btn btn-danger w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                </a>
+            </div>
             
-            <hr class="my-4">
-            
-            <div class="mt-4">
-                <h6>تعديل سعر الصرف</h6>
-                <form action="/update_rate" method="POST" class="mt-3">
-                    <div class="input-group">
-                        <input type="number" step="any" name="new_rate" class="form-control" value="{{ rate }}" required>
-                        <button type="submit" class="btn btn-sm btn-success">تحديث</button>
+            <!-- المحتوى الرئيسي -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'danger' else 'check-circle' }} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <div class="page-header">
+                    <h2>
+                        <i class="fas fa-mobile-alt me-2"></i>
+                        إدارة التطبيقات
+                    </h2>
+                    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addAppModal">
+                        <i class="fas fa-plus me-2"></i>إضافة تطبيق جديد
+                    </button>
+                </div>
+                
+                <!-- قائمة التطبيقات -->
+                <div class="apps-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-list me-2"></i>
+                            قائمة التطبيقات
+                        </h5>
+                        <div class="search-box">
+                            <input type="text" id="searchInput" class="form-control" placeholder="بحث باسم التطبيق...">
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="appsTable">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>القسم</th>
+                                        <th>اسم التطبيق</th>
+                                        <th>النوع</th>
+                                        <th>سعر الوحدة</th>
+                                        <th>الحد الأدنى</th>
+                                        <th>الربح</th>
+                                        <th>السعر النهائي</th>
+                                        <th>الحالة</th>
+                                        <th>الإجراءات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for app in applications %}
+                                    <tr id="app-{{ app.id }}">
+                                        <td>{{ app.id }}</td>
+                                        <td>
+                                            <span class="category-badge">
+                                                {{ app.category_icon }} {{ app.category_name or 'بدون قسم' }}
+                                            </span>
+                                        </td>
+                                        <td class="fw-bold">{{ app.name }}</td>
+                                        <td>
+                                            {% if app.type == 'game' %}
+                                            <span class="type-badge type-game">🎮 لعبة</span>
+                                            {% elif app.type == 'subscription' %}
+                                            <span class="type-badge type-subscription">📅 اشتراك</span>
+                                            {% else %}
+                                            <span class="type-badge type-service">📱 خدمة</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="price-badge">
+                                                ${{ "%.6f"|format(app.unit_price_usd or 0) }}
+                                            </span>
+                                        </td>
+                                        <td>{{ app.min_units or 0 }}</td>
+                                        <td>{{ app.profit_percentage or 0 }}%</td>
+                                        <td>
+                                            {% set final_price = (app.unit_price_usd or 0) * (1 + (app.profit_percentage or 0)/100) %}
+                                            <span class="price-badge">${{ "%.6f"|format(final_price) }}</span>
+                                            <br>
+                                            <small class="text-muted">{{ (final_price * rate)|int }} ل.س</small>
+                                        </td>
+                                        <td>
+                                            <label class="switch">
+                                                <input type="checkbox" class="app-status" data-app-id="{{ app.id }}" {% if app.is_active %}checked{% endif %}>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="/product/{{ app.id }}/options" class="btn btn-info" title="إدارة الخيارات">
+                                                    <i class="fas fa-list-ul"></i>
+                                                </a>
+                                                <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#editAppModal{{ app.id }}" title="تعديل">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <form action="/delete_application/{{ app.id }}" method="POST" class="d-inline" onsubmit="return confirm('هل أنت متأكد من حذف التطبيق {{ app.name }}؟');">
+                                                    <button type="submit" class="btn btn-danger" title="حذف">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal إضافة تطبيق جديد -->
+    <div class="modal fade" id="addAppModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form action="/add_application" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-plus-circle text-success me-2"></i>
+                            إضافة تطبيق جديد
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <!-- الحاسبة الذكية -->
+                            <div class="col-md-6">
+                                <div class="calculator-card">
+                                    <h5><i class="fas fa-calculator me-2"></i>حاسبة الأسعار الذكية</h5>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">الكمية (عدد الوحدات)</label>
+                                        <input type="number" id="calc_quantity" class="form-control" value="1000" min="1">
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">عملة السعر المدخل</label>
+                                        <div>
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="radio" name="calc_currency" id="calc_currency_syp" value="SYP" checked>
+                                                <label class="form-check-label" for="calc_currency_syp">🇸🇾 ل.س</label>
+                                            </div>
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="radio" name="calc_currency" id="calc_currency_usd" value="USD">
+                                                <label class="form-check-label" for="calc_currency_usd">🇺🇸 $</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label" id="calc_price_label">السعر المدفوع (ل.س)</label>
+                                        <input type="number" id="calc_price" class="form-control" step="any">
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">نسبة الربح %</label>
+                                        <input type="number" id="calc_profit" class="form-control" value="10" min="0" max="100" step="any">
+                                    </div>
+                                    
+                                    <div class="final-price-box">
+                                        <h6 class="fw-bold">النتيجة:</h6>
+                                        <p class="mb-1">سعر الوحدة: <strong id="calc_unit_price">$0.000000</strong></p>
+                                        <p class="mb-0">بالليرة: <strong id="calc_unit_price_syp">0</strong> ل.س</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- بيانات التطبيق -->
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">اسم التطبيق <span class="text-danger">*</span></label>
+                                    <input type="text" name="name" class="form-control" placeholder="مثال: شدات ببجي" required>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">القسم <span class="text-danger">*</span></label>
+                                    <select name="category_id" class="form-control" required>
+                                        <option value="">-- اختر القسم --</option>
+                                        {% for cat in categories %}
+                                        <option value="{{ cat.id }}">{{ cat.icon }} {{ cat.display_name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">نوع التطبيق</label>
+                                    <select name="type" class="form-control">
+                                        <option value="service">📱 خدمة</option>
+                                        <option value="game">🎮 لعبة</option>
+                                        <option value="subscription">📅 اشتراك</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">سعر الوحدة ($) <span class="text-danger">*</span></label>
+                                    <input type="number" id="unit_price" name="unit_price" class="form-control" step="any" required readonly>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">الحد الأدنى للكمية</label>
+                                    <input type="number" id="min_units" name="min_units" class="form-control" value="1" min="1">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold">نسبة الربح %</label>
+                                    <input type="number" id="profit_percentage" name="profit_percentage" class="form-control" value="10" min="0" max="100" step="any">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                        <button type="submit" class="btn btn-success">إضافة التطبيق</button>
                     </div>
                 </form>
             </div>
-            
-            <div class="mt-4">
-                <a href="/categories" class="btn btn-primary w-100">
-                    <i class="fa fa-folder me-2"></i>إدارة الأقسام
-                </a>
-            </div>
-        </div>
-
-        <!-- المحتوى الرئيسي -->
-        <div class="col-md-10 p-4">
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-            
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2>📱 إدارة التطبيقات</h2>
-                <div>
-                    <a href="/categories" class="btn btn-primary me-2">
-                        <i class="fa fa-folder me-2"></i>إدارة الأقسام
-                    </a>
-                    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addAppModal">
-                        <i class="fa fa-plus me-2"></i>إضافة تطبيق جديد
-                    </button>
-                </div>
-            </div>
-
-            <!-- قائمة التطبيقات -->
-            {% if applications %}
-            <div class="card shadow-sm mb-4">
-                <div class="card-header bg-white">
-                    <h5>قائمة التطبيقات ({{ applications|length }})</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>القسم</th>
-                                    <th>اسم التطبيق</th>
-                                    <th>سعر الوحدة</th>
-                                    <th>الحد الأدنى</th>
-                                    <th>نسبة الربح</th>
-                                    <th>السعر النهائي</th>
-                                    <th>الإجراءات</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for app in applications %}
-                                <tr>
-                                    <td>{{ app[0] }}</td>
-                                    <td>
-                                        <span class="badge bg-info">{{ app[7] }} {{ app[6] or 'بدون قسم' }}</span>
-                                    </td>
-                                    <td>
-                                        <strong>{{ app[1] }}</strong>
-                                    </td>
-                                    <td>
-                                        <span class="price-badge">
-                                            ${{ "%.6f"|format(app[2] or 0) }}
-                                        </span>
-                                        <br>
-                                        <small class="text-muted">{{ ((app[2] or 0) * rate)|int }} ل.س</small>
-                                    </td>
-                                    <td>{{ app[3] or 0 }}</td>
-                                    <td>
-                                        <span class="badge bg-info">{{ app[4] or 0 }}%</span>
-                                    </td>
-                                    <td>
-                                        {% set base_price = app[2] or 0 %}
-                                        {% set profit_percent = app[4] or 0 %}
-                                        {% set final_price = base_price * (1 + profit_percent/100) %}
-                                        <span class="price-badge">${{ "%.6f"|format(final_price) }}</span>
-                                        <br>
-                                        <small class="text-muted">{{ (final_price * rate)|int }} ل.س</small>
-                                    </td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm">
-                                            <button class="btn btn-warning" 
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#editAppModal{{ app[0] }}">
-                                                <i class="fa fa-edit"></i> تعديل
-                                            </button>
-                                            <form action="/delete_application/{{ app[0] }}" 
-                                                  method="POST" 
-                                                  class="d-inline"
-                                                  onsubmit="return confirm('هل أنت متأكد من حذف التطبيق {{ app[1] }}؟')">
-                                                <button type="submit" class="btn btn-danger">
-                                                    <i class="fa fa-trash"></i> حذف
-                                                </button>
-                                            </form>
-                                        </div>
-                                    </td>
-                                </tr>
-
-                                <!-- Modal لتعديل التطبيق -->
-                                <div class="modal fade" id="editAppModal{{ app[0] }}" tabindex="-1">
-                                    <div class="modal-dialog">
-                                        <div class="modal-content">
-                                            <form action="/edit_application/{{ app[0] }}" method="POST">
-                                                <div class="modal-header">
-                                                    <h5>تعديل التطبيق: {{ app[1] }}</h5>
-                                                </div>
-                                                <div class="modal-body">
-                                                    <div class="mb-3">
-                                                        <label class="form-label">اسم التطبيق</label>
-                                                        <input type="text" name="name" class="form-control" value="{{ app[1] }}" required>
-                                                    </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label">القسم</label>
-                                                        <select name="category_id" class="form-control" required>
-                                                            {% for cat in categories %}
-                                                            <option value="{{ cat[0] }}" {% if cat[0] == app[5] %}selected{% endif %}>
-                                                                {{ cat[3] }} {{ cat[2] }}
-                                                            </option>
-                                                            {% endfor %}
-                                                        </select>
-                                                    </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label">سعر الوحدة ($)</label>
-                                                        <input type="number" step="0.000001" name="unit_price" class="form-control" value="{{ app[2] }}" required>
-                                                    </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label">الحد الأدنى للكمية</label>
-                                                        <input type="number" name="min_units" class="form-control" value="{{ app[3] }}" required>
-                                                    </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label">نسبة الربح %</label>
-                                                        <input type="number" step="any" name="profit_percentage" class="form-control" value="{{ app[4] }}" min="0" max="100" required>
-                                                    </div>
-                                                </div>
-                                                <div class="modal-footer">
-                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                                                    <button type="submit" class="btn btn-primary">حفظ التعديلات</button>
-                                                </div>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            {% else %}
-            <div class="alert alert-info text-center">
-                <i class="fa fa-info-circle me-2"></i>
-                لا توجد تطبيقات حالياً. قم بإضافة تطبيق جديد.
-            </div>
-            {% endif %}
         </div>
     </div>
-</div>
-    <div class="card shadow-sm mt-4">
-        <div class="card-header bg-white">
-            <h5>⚙️ خيارات المنتجات</h5>
-        </div>
-        <div class="card-body">
-            <ul class="nav nav-tabs" id="productTabs" role="tablist">
-                {% for app in applications %}
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link {{ 'active' if loop.first else '' }}" 
-                            id="tab-{{ app[0] }}" 
-                            data-bs-toggle="tab" 
-                            data-bs-target="#options-{{ app[0] }}" 
-                            type="button">
-                        {{ app[1] }}
-                    </button>
-                </li>
-                {% endfor %}
-            </ul>
-            
-            <div class="tab-content mt-3">
-                {% for app in applications %}
-                <div class="tab-pane fade {{ 'show active' if loop.first else '' }}" 
-                     id="options-{{ app[0] }}">
-                     
-                    <div class="d-flex justify-content-between mb-3">
-                        <h6>خيارات {{ app[1] }}</h6>
-                        <button class="btn btn-sm btn-success" 
-                                onclick="showAddOptionModal({{ app[0] }}, '{{ app[1] }}')">
-                            <i class="fa fa-plus"></i> إضافة خيار
-                        </button>
+    
+    <!-- Modal تعديل تطبيق -->
+    {% for app in applications %}
+    <div class="modal fade" id="editAppModal{{ app.id }}" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="/edit_application/{{ app.id }}" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-edit text-warning me-2"></i>
+                            تعديل التطبيق: {{ app.name }}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
-                    
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>الخيار</th>
-                                    <th>الكمية</th>
-                                    <th>السعر ($)</th>
-                                    <th>السعر (ل.س)</th>
-                                    <th>الحالة</th>
-                                    <th>الإجراءات</th>
-                                </tr>
-                            </thead>
-                            <tbody id="options-{{ app[0] }}-tbody">
-                                <!-- يتم التعبئة عبر AJAX -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-
-<!-- Modal لإضافة تطبيق جديد (معدل - كمية قابلة للتعديل) -->
-<div class="modal fade" id="addAppModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <form action="/add_application" method="POST">
-                <div class="modal-header">
-                    <h5>إضافة تطبيق جديد</h5>
-                </div>
-                <div class="modal-body">
-                    <div class="row">
-                        <!-- العمود الأيمن: الحاسبة الذكية -->
-                        <div class="col-md-6">
-                            <div class="calculator-info mb-3">
-                                <h6><i class="fa fa-calculator me-2"></i>حاسبة الأسعار الذكية</h6>
-                                <small class="text-muted">أدخل الكمية والسعر الذي تدفعه واختر العملة.</small>
-                            </div>
-
-                            <!-- الكمية (قابلة للتعديل) -->
-                            <div class="mb-3">
-                                <label class="form-label">الكمية (عدد الوحدات) <span class="text-danger">*</span></label>
-                                <input type="number" id="quantity" class="form-control" value="1000" min="1">
-                                <small class="text-muted">أدخل الكمية التي تشتريها من الموقع (مثال: 1000، 500، 100)</small>
-                            </div>
-
-                            <!-- حقل لاختيار عملة السعر المدخل -->
-                            <div class="mb-3">
-                                <label class="form-label">عملة السعر المدخل</label>
-                                <div>
-                                    <div class="form-check form-check-inline">
-                                        <input class="form-check-input" type="radio" name="inputCurrency" id="currencySYP" value="SYP" checked>
-                                        <label class="form-check-label" for="currencySYP">🇸🇾 ليرة سورية (ل.س)</label>
-                                    </div>
-                                    <div class="form-check form-check-inline">
-                                        <input class="form-check-input" type="radio" name="inputCurrency" id="currencyUSD" value="USD">
-                                        <label class="form-check-label" for="currencyUSD">🇺🇸 دولار أمريكي ($)</label>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- السعر المدخل -->
-                            <div class="mb-3">
-                                <label class="form-label" id="priceLabel">السعر المدفوع مقابل الكمية (ل.س)</label>
-                                <input type="number" id="inputPrice" class="form-control" step="any" placeholder="مثال: 130.29">
-                                <small class="text-muted">أدخل السعر الكلي الذي دفعته في الموقع.</small>
-                            </div>
-
-                            <!-- نسبة الربح -->
-                            <div class="mb-3">
-                                <label class="form-label">نسبة الربح %</label>
-                                <input type="number" id="profit_percentage" class="form-control" min="0" max="100" step="any" value="10">
-                                <small class="text-muted">النسبة المئوية التي تريد ربحها.</small>
-                            </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">اسم التطبيق</label>
+                            <input type="text" name="name" class="form-control" value="{{ app.name }}" required>
                         </div>
                         
-                        <!-- العمود الأيسر: النتائج وبيانات التطبيق -->
-                        <div class="col-md-6">
-                            <!-- صندوق النتائج النهائية (ما سيراه المستخدم) -->
-                            <div class="final-price-box mb-4">
-                                <h6 class="text-success"><i class="fa fa-eye me-2"></i>ما سيراه المستخدم في البوت:</h6>
-                                <hr>
-                                <p>💰 سعر الوحدة: 
-                                    <strong><span id="final_unit_price_display">$0.000000</span></strong>
-                                    <br>
-                                    <small class="text-muted">(<span id="final_unit_price_syp_display">0</span> ل.س)</small>
-                                </p>
-                                <p>📦 الحد الأدنى للطلب: <strong><span id="min_units_display">100</span></strong></p>
-                                <p>💵 أقل سعر للطلب: 
-                                    <strong><span id="min_order_price_display">$0.00</span></strong>
-                                    <br>
-                                    <small class="text-muted">(<span id="min_order_price_syp_display">0</span> ل.س)</small>
-                                </p>
-                            </div>
-
-                            <!-- بيانات التطبيق للإرسال -->
-                            <div class="mb-3">
-                                <label class="form-label">اسم التطبيق <span class="text-danger">*</span></label>
-                                <input type="text" name="name" class="form-control" placeholder="مثال: شدات ببجي" required>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label class="form-label">القسم <span class="text-danger">*</span></label>
-                                <select name="category_id" class="form-control" required>
-                                    <option value="">-- اختر القسم --</option>
-                                    {% for cat in categories %}
-                                    <option value="{{ cat[0] }}">{{ cat[3] }} {{ cat[2] }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label class="form-label">سعر الوحدة بالدولار <span class="text-danger">*</span></label>
-                                <input type="number" id="unit_price" name="unit_price" class="form-control" step="any" required readonly>
-                                <small class="text-muted">يتم حسابه تلقائياً (القيمة التي ستحفظ)</small>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label class="form-label">الحد الأدنى للكمية <span class="text-danger">*</span></label>
-                                <input type="number" name="min_units" id="min_units_input" class="form-control" value="100" required>
-                                <small class="text-muted">أقل كمية يمكن للمستخدم طلبها</small>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label class="form-label">نسبة الربح % <span class="text-danger">*</span></label>
-                                <input type="number" name="profit_percentage" id="profit_percentage_final" class="form-control" min="0" max="100" step="any" value="10" required>
-                                <small class="text-muted">النسبة المئوية التي تريد ربحها من كل عملية</small>
-                            </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">القسم</label>
+                            <select name="category_id" class="form-control" required>
+                                {% for cat in categories %}
+                                <option value="{{ cat.id }}" {% if cat.id == app.category_id %}selected{% endif %}>
+                                    {{ cat.icon }} {{ cat.display_name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">النوع</label>
+                            <select name="type" class="form-control">
+                                <option value="service" {% if app.type == 'service' %}selected{% endif %}>📱 خدمة</option>
+                                <option value="game" {% if app.type == 'game' %}selected{% endif %}>🎮 لعبة</option>
+                                <option value="subscription" {% if app.type == 'subscription' %}selected{% endif %}>📅 اشتراك</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">سعر الوحدة ($)</label>
+                            <input type="number" name="unit_price" class="form-control" step="any" value="{{ app.unit_price_usd }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الحد الأدنى</label>
+                            <input type="number" name="min_units" class="form-control" value="{{ app.min_units }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">نسبة الربح %</label>
+                            <input type="number" name="profit_percentage" class="form-control" step="any" value="{{ app.profit_percentage }}" min="0" max="100" required>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="is_active" value="true" id="isActive{{ app.id }}" {% if app.is_active %}checked{% endif %}>
+                            <label class="form-check-label" for="isActive{{ app.id }}">
+                                التطبيق نشط
+                            </label>
                         </div>
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                    <button type="submit" class="btn btn-success">إضافة التطبيق</button>
-                </div>
-            </form>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                        <button type="submit" class="btn btn-warning">حفظ التعديلات</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-    // حاسبة الأسعار الذكية مع كمية قابلة للتعديل
-    function calculatePrices() {
-        // الحصول على القيم من المدخلات
-        const quantity = parseFloat(document.getElementById('quantity').value) || 0;
-        const inputPrice = parseFloat(document.getElementById('inputPrice').value) || 0;
-        const profitPercentage = parseFloat(document.getElementById('profit_percentage').value) || 0;
-        const minUnits = parseFloat(document.getElementById('min_units_input').value) || 100;
-        
-        // تحديد العملة المختارة
-        const currencySYP = document.getElementById('currencySYP').checked;
-        
-        // الحقول التي سنقوم بتحديثها
-        const unitPriceField = document.getElementById('unit_price');
-        const finalUnitPriceSpan = document.getElementById('final_unit_price_display');
-        const finalUnitPriceSypSpan = document.getElementById('final_unit_price_syp_display');
-        const minOrderPriceSpan = document.getElementById('min_order_price_display');
-        const minOrderPriceSypSpan = document.getElementById('min_order_price_syp_display');
-        const minUnitsDisplay = document.getElementById('min_units_display');
-        const profitPercentageFinal = document.getElementById('profit_percentage_final');
-        
-        // سعر الصرف الحالي من الثابت
-        const rate = {{ rate }};
-        
-        // تحديث نص التسمية حسب العملة المختارة
-        const priceLabel = document.getElementById('priceLabel');
-        if (currencySYP) {
-            priceLabel.textContent = 'السعر المدفوع مقابل الكمية (ل.س)';
-        } else {
-            priceLabel.textContent = 'السعر المدفوع مقابل الكمية ($)';
-        }
-        
-        // تحديث عرض الحد الأدنى
-        if (minUnitsDisplay) {
-            minUnitsDisplay.textContent = minUnits;
-        }
-        
-        if (quantity > 0 && inputPrice > 0) {
-            // 1. تحويل السعر المدخل إلى دولار إذا كان بالليرة السورية
-            let priceInUsd;
-            if (currencySYP) {
-                // إذا كان المدخل بالليرة السورية، نقسمه على سعر الصرف
-                priceInUsd = inputPrice / rate;
-            } else {
-                // إذا كان المدخل بالدولار، نستخدمه كما هو
-                priceInUsd = inputPrice;
+    {% endfor %}
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // حاسبة الأسعار
+        function calculatePrice() {
+            const quantity = parseFloat(document.getElementById('calc_quantity').value) || 1;
+            const inputPrice = parseFloat(document.getElementById('calc_price').value) || 0;
+            const profitPercent = parseFloat(document.getElementById('calc_profit').value) || 0;
+            const isSyp = document.getElementById('calc_currency_syp').checked;
+            const rate = {{ rate }};
+            
+            if (quantity <= 0 || inputPrice <= 0) {
+                document.getElementById('calc_unit_price').textContent = '$0.000000';
+                document.getElementById('calc_unit_price_syp').textContent = '0';
+                document.getElementById('unit_price').value = '';
+                return;
             }
             
-            // 2. حساب سعر الوحدة الأصلي بالدولار
-            const originalUnitPriceInUsd = priceInUsd / quantity;
+            // تحويل السعر إلى دولار إذا كان بالليرة
+            let priceInUsd = isSyp ? inputPrice / rate : inputPrice;
             
-            // 3. إضافة نسبة الربح
-            const profitMultiplier = 1 + (profitPercentage / 100);
-            const finalUnitPriceInUsd = originalUnitPriceInUsd * profitMultiplier;
+            // سعر الوحدة قبل الربح
+            let unitPriceUsd = priceInUsd / quantity;
             
-            // 4. حساب أسعار الطلبات
-            const minOrderPriceInUsd = finalUnitPriceInUsd * minUnits;
+            // إضافة الربح
+            let finalUnitPriceUsd = unitPriceUsd * (1 + profitPercent / 100);
             
-            // 5. تحويل لليرة السورية للعرض
-            const finalUnitPriceInSyp = finalUnitPriceInUsd * rate;
-            const minOrderPriceInSyp = minOrderPriceInUsd * rate;
-            
-            // 6. تحديث الحقول
-            // حقل سعر الوحدة الذي سيتم إرساله مع الفورم
-            unitPriceField.value = finalUnitPriceInUsd.toFixed(6);
-            
-            // حقول العرض
-            finalUnitPriceSpan.textContent = '$' + finalUnitPriceInUsd.toFixed(6);
-            finalUnitPriceSypSpan.textContent = Math.round(finalUnitPriceInSyp).toLocaleString();
-            
-            minOrderPriceSpan.textContent = '$' + minOrderPriceInUsd.toFixed(2);
-            minOrderPriceSypSpan.textContent = Math.round(minOrderPriceInSyp).toLocaleString();
-            
-            // تحديث حقل نسبة الربح النهائي
-            profitPercentageFinal.value = profitPercentage;
-            
-        } else {
-            // إذا لم يتم إدخال بيانات كافية
-            unitPriceField.value = '';
-            finalUnitPriceSpan.textContent = '$0.000000';
-            finalUnitPriceSypSpan.textContent = '0';
-            minOrderPriceSpan.textContent = '$0.00';
-            minOrderPriceSypSpan.textContent = '0';
+            // تحديث الحقول
+            document.getElementById('calc_unit_price').textContent = '$' + finalUnitPriceUsd.toFixed(6);
+            document.getElementById('calc_unit_price_syp').textContent = Math.round(finalUnitPriceUsd * rate).toLocaleString();
+            document.getElementById('unit_price').value = finalUnitPriceUsd.toFixed(6);
         }
-    }
-    
-    // إضافة مستمعات الأحداث للحاسبة
-    document.addEventListener('DOMContentLoaded', function() {
-        // جميع المدخلات التي تؤثر على الحساب
-        const quantityInput = document.getElementById('quantity');
-        const inputPrice = document.getElementById('inputPrice');
-        const profitPercentageInput = document.getElementById('profit_percentage');
-        const currencySYP = document.getElementById('currencySYP');
-        const currencyUSD = document.getElementById('currencyUSD');
-        const minUnitsInput = document.getElementById('min_units_input');
-        const profitFinalInput = document.getElementById('profit_percentage_final');
         
-        // قائمة بكل العناصر التي يجب مراقبتها
-        const elements = [
-            quantityInput,
-            inputPrice,
-            profitPercentageInput,
-            currencySYP,
-            currencyUSD,
-            minUnitsInput
-        ];
+        // تحديث التسمية حسب العملة
+        function updatePriceLabel() {
+            const isSyp = document.getElementById('calc_currency_syp').checked;
+            document.getElementById('calc_price_label').textContent = isSyp ? 'السعر المدفوع (ل.س)' : 'السعر المدفوع ($)';
+            calculatePrice();
+        }
         
         // إضافة مستمعات الأحداث
-        elements.forEach(element => {
-            if (element) {
-                element.addEventListener('input', calculatePrices);
-                element.addEventListener('change', calculatePrices);
-            }
+        document.getElementById('calc_quantity')?.addEventListener('input', calculatePrice);
+        document.getElementById('calc_price')?.addEventListener('input', calculatePrice);
+        document.getElementById('calc_profit')?.addEventListener('input', calculatePrice);
+        document.getElementById('calc_currency_syp')?.addEventListener('change', updatePriceLabel);
+        document.getElementById('calc_currency_usd')?.addEventListener('change', updatePriceLabel);
+        document.getElementById('min_units')?.addEventListener('input', calculatePrice);
+        document.getElementById('profit_percentage')?.addEventListener('input', function() {
+            document.getElementById('calc_profit').value = this.value;
+            calculatePrice();
         });
-        
-        // معالجة خاصة لأزرار الراديو
-        if (currencySYP && currencyUSD) {
-            currencySYP.addEventListener('change', calculatePrices);
-            currencyUSD.addEventListener('change', calculatePrices);
-        }
         
         // تحديث الحاسبة عند فتح المودال
-        const addAppModal = document.getElementById('addAppModal');
-        if (addAppModal) {
-            addAppModal.addEventListener('shown.bs.modal', function() {
-                // إعادة تعيين القيم الافتراضية
-                document.getElementById('currencySYP').checked = true;
-                document.getElementById('quantity').value = 1000;
-                document.getElementById('inputPrice').value = '';
-                document.getElementById('profit_percentage').value = 10;
-                document.getElementById('min_units_input').value = 100;
-                calculatePrices();
-            });
-        }
+        $('#addAppModal').on('shown.bs.modal', function () {
+            document.getElementById('calc_quantity').value = 1000;
+            document.getElementById('calc_price').value = '';
+            document.getElementById('calc_profit').value = 10;
+            document.getElementById('calc_currency_syp').checked = true;
+            updatePriceLabel();
+        });
         
-        // تحديث الحاسبة عند تغيير نسبة الربح في الحقل النهائي
-        if (profitFinalInput) {
-            profitFinalInput.addEventListener('input', function() {
-                document.getElementById('profit_percentage').value = this.value;
-                calculatePrices();
-            });
-        }
-        
-        // تنفيذ الحساب مرة واحدة عند التحميل
-        calculatePrices();
-    });
-
-function loadOptions(appId) {
-    fetch(`/api/options/${appId}`)
-        .then(res => res.json())
-        .then(data => {
-            const tbody = document.getElementById(`options-${appId}-tbody`);
-            if (!tbody) return;
+        // البحث في الجدول
+        document.getElementById('searchInput').addEventListener('keyup', function() {
+            const filter = this.value.toLowerCase();
+            const rows = document.querySelectorAll('#appsTable tbody tr');
             
-            tbody.innerHTML = '';
-            
-            data.forEach(opt => {
-                const priceSyp = (opt.price_usd * {{ rate }}).toLocaleString();
-                const row = `
-                    <tr>
-                        <td>${opt.name}</td>
-                        <td>${opt.quantity}</td>
-                        <td>$${opt.price_usd.toFixed(2)}</td>
-                        <td>${priceSyp} ل.س</td>
-                        <td>
-                            <span class="badge bg-${opt.is_active ? 'success' : 'secondary'}">
-                                ${opt.is_active ? 'نشط' : 'معطل'}
-                            </span>
-                        </td>
-                        <td>
-                            <button class="btn btn-sm btn-warning" onclick="editOption(${opt.id})">
-                                <i class="fa fa-edit"></i>
-                            </button>
-                            <button class="btn btn-sm btn-${opt.is_active ? 'danger' : 'success'}" 
-                                    onclick="toggleOption(${opt.id})">
-                                <i class="fa fa-${opt.is_active ? 'ban' : 'check'}"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-                tbody.innerHTML += row;
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(filter) ? '' : 'none';
             });
         });
-}
-
-// تحميل الخيارات عند فتح التبويب
-document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
-    tab.addEventListener('shown.bs.tab', function (e) {
-        const appId = this.id.replace('tab-', '');
-        loadOptions(appId);
-    });
-});
-
-// تحميل أول تبويب تلقائياً
-window.addEventListener('load', function() {
-    const firstTab = document.querySelector('.nav-link.active');
-    if (firstTab) {
-        const appId = firstTab.id.replace('tab-', '');
-        loadOptions(appId);
-    }
-});
-
-// دوال مساعدة للخيارات (تحتاج تنفيذ)
-function showAddOptionModal(appId, appName) {
-    alert(`إضافة خيار لـ ${appName} - سيتم تنفيذها لاحقاً`);
-}
-
-function editOption(optionId) {
-    alert(`تعديل خيار ${optionId} - سيتم تنفيذها لاحقاً`);
-}
-
-function toggleOption(optionId) {
-    if (confirm('هل أنت متأكد من تغيير حالة هذا الخيار؟')) {
-        fetch(`/api/option/toggle/${optionId}`, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    // إعادة تحميل التبويب النشط
-                    const activeTab = document.querySelector('.nav-link.active');
-                    if (activeTab) {
-                        const appId = activeTab.id.replace('tab-', '');
-                        loadOptions(appId);
+        
+        // تفعيل/تعطيل التطبيق عبر AJAX
+        document.querySelectorAll('.app-status').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const appId = this.dataset.appId;
+                const isActive = this.checked;
+                
+                fetch(`/toggle_application/${appId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
                     }
-                }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // تحديث واجهة المستخدم
+                        const row = document.getElementById(`app-${appId}`);
+                        if (data.is_active) {
+                            row.classList.remove('bg-light');
+                        } else {
+                            row.classList.add('bg-light');
+                        }
+                        
+                        // إظهار رسالة نجاح
+                        const alert = document.createElement('div');
+                        alert.className = 'alert alert-success alert-dismissible fade show';
+                        alert.innerHTML = `
+                            <i class="fas fa-check-circle me-2"></i>
+                            تم ${data.is_active ? 'تفعيل' : 'تعطيل'} التطبيق بنجاح
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        `;
+                        document.querySelector('.main-content').insertBefore(alert, document.querySelector('.main-content').firstChild);
+                        
+                        setTimeout(() => alert.remove(), 3000);
+                    } else {
+                        // إعادة الحالة إذا فشل
+                        this.checked = !isActive;
+                        alert('❌ حدث خطأ: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    this.checked = !isActive;
+                    alert('❌ خطأ في الاتصال');
+                });
             });
-    }
-}
-</script>
+        });
+        
+        // تحديث تلقائي
+        setInterval(() => {
+            document.querySelectorAll('.text-muted small').forEach(el => {
+                // تحديث الأسعار المعروضة إذا لزم الأمر
+            });
+        }, 60000);
+    </script>
 </body>
 </html>

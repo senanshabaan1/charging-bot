@@ -2,320 +2,628 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>لوحة التحكم | الرئيسية</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الرئيسية | لوحة التحكم</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
-        body { background: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .sidebar { background: #2c3e50; min-height: 100vh; color: white; padding: 20px; }
-        .card-stat { border: none; border-radius: 10px; transition: 0.3s; }
-        .card-stat:hover { transform: translateY(-5px); }
-        .table-responsive { max-height: 400px; overflow-y: auto; }
-        .order-pending { background-color: #fff3cd !important; }
-        .order-completed { background-color: #d1e7dd !important; }
-        .order-failed { background-color: #f8d7da !important; }
+        * {
+            font-family: 'Tajawal', sans-serif;
+        }
+        
+        body {
+            background: #f8f9fc;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1a1f2b 0%, #2c3e50 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar .logo {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar .logo i {
+            font-size: 40px;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+        
+        .sidebar .logo h4 {
+            font-weight: 700;
+            margin: 0;
+            color: white;
+        }
+        
+        .sidebar .logo small {
+            color: rgba(255,255,255,0.6);
+            font-size: 12px;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            transform: translateX(-5px);
+        }
+        
+        .sidebar .nav-link.active {
+            background: #3498db;
+            color: white;
+            box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
+        }
+        
+        .sidebar .nav-link i {
+            margin-left: 10px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .sidebar hr {
+            border-color: rgba(255,255,255,0.1);
+            margin: 20px 0;
+        }
+        
+        .sidebar .rate-box {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        
+        .sidebar .rate-box h6 {
+            color: rgba(255,255,255,0.9);
+            margin-bottom: 10px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .page-header h2 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .page-header h2 i {
+            color: #3498db;
+            margin-left: 10px;
+        }
+        
+        .rate-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 50px;
+            font-weight: 600;
+        }
+        
+        .rate-badge i {
+            margin-left: 8px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+            height: 100%;
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .stat-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 15px;
+        }
+        
+        .stat-card .stat-label {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        
+        .stat-card .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin: 0;
+        }
+        
+        .stat-card .stat-desc {
+            color: #95a5a6;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+        
+        .section-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            padding: 20px 25px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fafbfc;
+        }
+        
+        .section-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .section-header h5 i {
+            margin-left: 10px;
+            color: #3498db;
+        }
+        
+        .section-body {
+            padding: 20px 25px;
+        }
+        
+        .table {
+            margin: 0;
+        }
+        
+        .table thead th {
+            border-top: none;
+            font-weight: 600;
+            color: #7f8c8d;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .table tbody tr {
+            transition: all 0.3s;
+        }
+        
+        .table tbody tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .badge-status {
+            padding: 5px 10px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .badge-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .badge-approved {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-rejected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #95a5a6;
+        }
+        
+        .empty-state i {
+            font-size: 60px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .btn-action {
+            padding: 5px 10px;
+            font-size: 12px;
+            border-radius: 8px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+                position: static;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+            
+            .page-header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-2 sidebar">
-            <h4 class="text-center mb-4">إدارة البوت</h4>
-            <hr>
-            <ul class="nav flex-column">
-                <li class="nav-item mb-2">
-                    <a href="/" class="nav-link text-white active">
-                        <i class="fa fa-home me-2"></i> الرئيسية
-                    </a>
-                </li>
-                <li class="nav-item mb-2">
-                    <a href="/user_management" class="nav-link text-white">
-                        <i class="fa fa-users me-2"></i> إدارة المستخدمين
-                    </a>
-                </li>
-                <li class="nav-item mb-2">
-                    <a href="/applications" class="nav-link text-white">
-                        <i class="fa fa-mobile me-2"></i> إدارة التطبيقات
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="/logout" class="nav-link text-danger">
-                        <i class="fa fa-sign-out-alt me-2"></i> خروج
-                    </a>
-                </li>
-            </ul>
-            
-            <hr class="my-4">
-            
-            <div class="mt-4">
-                <h6>تعديل سعر الصرف</h6>
-                <form action="/update_rate" method="POST" class="mt-3">
-                    <div class="input-group">
-                        <input type="number" step="any" name="new_rate" class="form-control" value="{{ rate }}" required>
-                        <button type="submit" class="btn btn-sm btn-success">تحديث</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div class="col-md-10 p-4">
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي -->
+            <div class="col-md-2 sidebar">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h4>إدارة البوت</h4>
+                    <small>نظام متكامل</small>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a href="/" class="nav-link active">
+                            <i class="fas fa-home"></i> الرئيسية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link">
+                            <i class="fas fa-users"></i> إدارة المستخدمين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/applications" class="nav-link">
+                            <i class="fas fa-mobile-alt"></i> إدارة التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/categories" class="nav-link">
+                            <i class="fas fa-folder"></i> إدارة الأقسام
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/points" class="nav-link">
+                            <i class="fas fa-star"></i> إدارة النقاط
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/vip" class="nav-link">
+                            <i class="fas fa-crown"></i> نظام VIP
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/statistics" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/broadcast" class="nav-link">
+                            <i class="fas fa-bullhorn"></i> رسالة جماعية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admins" class="nav-link">
+                            <i class="fas fa-shield-alt"></i> إدارة المشرفين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <div class="rate-box">
+                    <h6><i class="fas fa-exchange-alt me-2"></i>سعر الصرف</h6>
+                    <form action="/update_rate" method="POST" class="mt-2">
+                        <div class="input-group">
+                            <input type="number" step="any" name="new_rate" class="form-control" value="{{ rate }}" required>
+                            <button type="submit" class="btn btn-sm btn-success">
+                                <i class="fas fa-check"></i>
+                            </button>
                         </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
+                    </form>
+                    <small class="text-muted mt-2 d-block">1$ = {{ "{:,.0f}".format(rate) }} ل.س</small>
+                </div>
+                
+                <hr>
+                
+                <a href="/logout" class="btn btn-danger w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                </a>
+            </div>
             
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2>📊 الإحصائيات العامة</h2>
-                <div class="bg-white p-2 rounded shadow-sm">
-                    <strong>سعر الصرف الحالي: </strong> 
-                    <span class="badge bg-info text-dark">{{ rate }} ل.س</span>
-                </div>
-            </div>
-
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div class="card card-stat bg-primary text-white p-3">
-                        <h5>👥 المستخدمين</h5>
-                        <h3>{{ total_users }}</h3>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card card-stat bg-success text-white p-3">
-                        <h5>💰 إجمالي الأرصدة</h5>
-                        <h3>{{ "{:,}".format(total_balances) }} ل.س</h3>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card card-stat bg-warning text-dark p-3">
-                        <h5>⏳ طلبات معلقة</h5>
-                        <h3>{{ pending_deposits_count + pending_orders_count }}</h3>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="card card-stat bg-info text-white p-3">
-                        <h5>📈 حالة النظام</h5>
-                        <h3>✅ نشط</h3>
-                    </div>
-                </div>
-            </div>
-
-            <!-- طلبات الشحن المعلقة -->
-            <div class="card shadow-sm mb-4">
-                <div class="card-header bg-white">
-                    <h5>💰 طلبات شحن الرصيد المعلقة ({{ pending_deposits_count }})</h5>
-                </div>
-                <div class="card-body">
-                    {% if pending_deposits %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>المستخدم</th>
-                                    <th>الطريقة</th>
-                                    <th>المبلغ</th>
-                                    <th>التاريخ</th>
-                                    <th>الإجراءات</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for deposit in pending_deposits %}
-                                <tr>
-                                    <td>{{ deposit.id }}</td>
-                                    <td>
-                                        @{{ deposit.username }}
-                                        <br><small class="text-muted">ID: {{ deposit.user_id }}</small>
-                                    </td>
-                                    <td>
-                                        {% if deposit.method == 'm_syr' %}
-                                        <span class="badge bg-info">سيرياتل</span>
-                                        {% elif deposit.method == 'm_sham_syp' %}
-                                        <span class="badge bg-warning">شم كاش (ل.س)</span>
-                                        {% elif deposit.method == 'm_sham_usd' %}
-                                        <span class="badge bg-warning">شم كاش ($)</span>
-                                        {% elif deposit.method == 'm_usdt' %}
-                                        <span class="badge bg-success">USDT</span>
-                                        {% endif %}
-                                        {% if deposit.has_photo %}
-                                        <span class="badge bg-secondary">صورة</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ "{:,}".format(deposit.amount_syp) }} ل.س</td>
-                                    <td>{{ deposit.created_at.strftime('%Y-%m-%d %H:%M') if deposit.created_at else '-' }}</td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm">
-                                            <form action="/deposit_action/{{ deposit.id }}" method="POST" class="d-inline">
-                                                <input type="hidden" name="action" value="approve">
-                                                <button type="submit" class="btn btn-success">✅ قبول</button>
-                                            </form>
-                                            <button class="btn btn-danger" data-bs-toggle="modal" 
-                                                    data-bs-target="#rejectModal{{ deposit.id }}">
-                                                ❌ رفض
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-
-                                <!-- Modal للرفض -->
-                                <div class="modal fade" id="rejectModal{{ deposit.id }}">
-                                    <div class="modal-dialog">
-                                        <div class="modal-content">
-                                            <form action="/deposit_action/{{ deposit.id }}" method="POST">
-                                                <input type="hidden" name="action" value="reject">
-                                                <div class="modal-header">
-                                                    <h5>رفض طلب الشحن #{{ deposit.id }}</h5>
-                                                </div>
-                                                <div class="modal-body">
-                                                    <div class="mb-3">
-                                                        <label class="form-label">سبب الرفض (اختياري)</label>
-                                                        <textarea name="notes" class="form-control" rows="3"></textarea>
-                                                    </div>
-                                                </div>
-                                                <div class="modal-footer">
-                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                                                    <button type="submit" class="btn btn-danger">تأكيد الرفض</button>
-                                                </div>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="alert alert-info text-center">
-                        لا توجد طلبات شحن رصيد معلقة حالياً
-                    </div>
+            <!-- المحتوى الرئيسي -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'danger' else 'check-circle' }} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
                     {% endif %}
-                </div>
-            </div>
-
-            <!-- طلبات التطبيقات المعلقة -->
-            <div class="card shadow-sm mb-4">
-                <div class="card-header bg-white">
-                    <h5>🛒 طلبات التطبيقات المعلقة ({{ pending_orders_count }})</h5>
-                </div>
-                <div class="card-body">
-                    {% if pending_orders %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>المستخدم</th>
-                                    <th>التطبيق</th>
-                                    <th>الكمية</th>
-                                    <th>المبلغ</th>
-                                    <th>المستهدف</th>
-                                    <th>الإجراءات</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in pending_orders %}
-                                <tr class="order-pending">
-                                    <td>{{ order[0] }}</td>
-                                    <td>{{ order[1] or 'غير معروف' }}</td>
-                                    <td>{{ order[2] }}</td>
-                                    <td>{{ order[3] }}</td>
-                                    <td>{{ "{:,}".format(order[4]) }} ل.س</td>
-                                    <td><code>{{ order[8] }}</code></td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm">
-                                            <button class="btn btn-success" data-bs-toggle="modal" 
-                                                    data-bs-target="#approveOrderModal{{ order[0] }}">
-                                                ✅ موافقة
-                                            </button>
-                                            <button class="btn btn-danger" data-bs-toggle="modal" 
-                                                    data-bs-target="#rejectOrderModal{{ order[0] }}">
-                                                ❌ رفض
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-
-                                <!-- Modal للموافقة على الطلب -->
-                                <div class="modal fade" id="approveOrderModal{{ order[0] }}">
-                                    <div class="modal-dialog">
-                                        <div class="modal-content">
-                                            <form action="/order_action/{{ order[0] }}" method="POST">
-                                                <input type="hidden" name="action" value="approve">
-                                                <div class="modal-header">
-                                                    <h5>موافقة على الطلب #{{ order[0] }}</h5>
-                                                </div>
-                                                <div class="modal-body">
-                                                    <p>التطبيق: <strong>{{ order[2] }}</strong></p>
-                                                    <p>الكمية: <strong>{{ order[3] }}</strong></p>
-                                                    <p>المبلغ: <strong>{{ "{:,}".format(order[4]) }} ل.س</strong></p>
-                                                    <div class="mb-3">
-                                                        <label class="form-label">ملاحظات (اختياري)</label>
-                                                        <textarea name="notes" class="form-control" rows="3"></textarea>
-                                                    </div>
-                                                    <div class="alert alert-info">
-                                                        سيتم تنفيذ الطلب عبر API الخارجي
-                                                    </div>
-                                                </div>
-                                                <div class="modal-footer">
-                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                                                    <button type="submit" class="btn btn-success">تأكيد الموافقة</button>
-                                                </div>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Modal لرفض الطلب -->
-                                <div class="modal fade" id="rejectOrderModal{{ order[0] }}">
-                                    <div class="modal-dialog">
-                                        <div class="modal-content">
-                                            <form action="/order_action/{{ order[0] }}" method="POST">
-                                                <input type="hidden" name="action" value="failed">
-                                                <div class="modal-header">
-                                                    <h5>رفض الطلب #{{ order[0] }}</h5>
-                                                </div>
-                                                <div class="modal-body">
-                                                    <div class="mb-3">
-                                                        <label class="form-label">سبب الرفض</label>
-                                                        <textarea name="notes" class="form-control" rows="3" required></textarea>
-                                                    </div>
-                                                    <div class="alert alert-warning">
-                                                        ⚠️ سيتم إعادة الرصيد للمستخدم تلقائياً
-                                                    </div>
-                                                </div>
-                                                <div class="modal-footer">
-                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                                                    <button type="submit" class="btn btn-danger">تأكيد الرفض</button>
-                                                </div>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                {% endwith %}
+                
+                <div class="page-header">
+                    <h2>
+                        <i class="fas fa-chart-pie"></i>
+                        لوحة المعلومات
+                    </h2>
+                    <div class="rate-badge">
+                        <i class="fas fa-dollar-sign"></i>
+                        {{ "{:,.0f}".format(rate) }} ل.س
                     </div>
-                    {% else %}
-                    <div class="alert alert-info text-center">
-                        لا توجد طلبات تطبيقات معلقة حالياً
+                </div>
+                
+                <!-- بطاقات الإحصائيات -->
+                <div class="row g-4 mb-4">
+                    <div class="col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(52, 152, 219, 0.1); color: #3498db;">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-label">إجمالي المستخدمين</div>
+                            <h3 class="stat-value">{{ "{:,.0f}".format(total_users) }}</h3>
+                            <div class="stat-desc">
+                                <i class="fas fa-arrow-up text-success"></i> {{ new_users_today }} جديد اليوم
+                            </div>
+                        </div>
                     </div>
-                    {% endif %}
+                    
+                    <div class="col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(46, 204, 113, 0.1); color: #27ae60;">
+                                <i class="fas fa-wallet"></i>
+                            </div>
+                            <div class="stat-label">إجمالي الأرصدة</div>
+                            <h3 class="stat-value">{{ "{:,.0f}".format(total_balances) }}</h3>
+                            <div class="stat-desc">ليرة سورية</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(241, 196, 15, 0.1); color: #f1c40f;">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-label">طلبات معلقة</div>
+                            <h3 class="stat-value">{{ pending_deposits_count + pending_orders_count }}</h3>
+                            <div class="stat-desc">
+                                {{ pending_deposits_count }} شحن • {{ pending_orders_count }} طلب
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(155, 89, 182, 0.1); color: #9b59b6;">
+                                <i class="fas fa-star"></i>
+                            </div>
+                            <div class="stat-label">إجمالي النقاط</div>
+                            <h3 class="stat-value">{{ "{:,.0f}".format(total_points) }}</h3>
+                            <div class="stat-desc">
+                                <i class="fas fa-ban text-danger"></i> {{ banned_users }} محظور
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <!-- آخر المستخدمين -->
+                    <div class="col-md-6">
+                        <div class="section-card">
+                            <div class="section-header">
+                                <h5>
+                                    <i class="fas fa-user-plus"></i>
+                                    آخر المستخدمين
+                                </h5>
+                                <a href="/users" class="btn btn-sm btn-outline-primary">عرض الكل</a>
+                            </div>
+                            <div class="section-body">
+                                {% if recent_users %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>المستخدم</th>
+                                                <th>الرصيد</th>
+                                                <th>التاريخ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for user in recent_users %}
+                                            <tr>
+                                                <td>
+                                                    <div class="d-flex align-items-center">
+                                                        <div class="user-avatar me-2" style="width: 35px; height: 35px; background: #e0e0e0; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                                            {{ user.first_name[0] if user.first_name else 'U' }}
+                                                        </div>
+                                                        <div>
+                                                            <strong>{{ user.username or 'بدون اسم' }}</strong>
+                                                            <br>
+                                                            <small class="text-muted">ID: {{ user.user_id }}</small>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td>{{ "{:,.0f}".format(user.balance) }}</td>
+                                                <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="empty-state">
+                                    <i class="fas fa-users-slash"></i>
+                                    <p>لا يوجد مستخدمين حالياً</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- آخر طلبات الشحن -->
+                    <div class="col-md-6">
+                        <div class="section-card">
+                            <div class="section-header">
+                                <h5>
+                                    <i class="fas fa-coins"></i>
+                                    آخر طلبات الشحن
+                                </h5>
+                                <a href="/deposits" class="btn btn-sm btn-outline-primary">عرض الكل</a>
+                            </div>
+                            <div class="section-body">
+                                {% if recent_deposits %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>المستخدم</th>
+                                                <th>المبلغ</th>
+                                                <th>الحالة</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for deposit in recent_deposits %}
+                                            <tr>
+                                                <td>
+                                                    <strong>{{ deposit.username or deposit.user_id }}</strong>
+                                                </td>
+                                                <td>{{ "{:,.0f}".format(deposit.amount_syp) }} ل.س</td>
+                                                <td>
+                                                    <span class="badge-status badge-pending">
+                                                        <i class="fas fa-clock me-1"></i>معلق
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="empty-state">
+                                    <i class="fas fa-coins"></i>
+                                    <p>لا توجد طلبات شحن</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- آخر الطلبات -->
+                <div class="section-card mt-4">
+                    <div class="section-header">
+                        <h5>
+                            <i class="fas fa-shopping-cart"></i>
+                            آخر الطلبات
+                        </h5>
+                        <a href="/orders" class="btn btn-sm btn-outline-primary">عرض الكل</a>
+                    </div>
+                    <div class="section-body">
+                        {% if recent_orders %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>المستخدم</th>
+                                        <th>التطبيق</th>
+                                        <th>الكمية</th>
+                                        <th>المبلغ</th>
+                                        <th>الحالة</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for order in recent_orders %}
+                                    <tr>
+                                        <td>{{ order.id }}</td>
+                                        <td>{{ order.username or 'غير معروف' }}</td>
+                                        <td>{{ order.name }}</td>
+                                        <td>{{ order.quantity }}</td>
+                                        <td>{{ "{:,.0f}".format(order.total_amount_syp) }} ل.س</td>
+                                        <td>
+                                            <span class="badge-status badge-pending">
+                                                <i class="fas fa-clock me-1"></i>معلق
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="empty-state">
+                            <i class="fas fa-shopping-cart"></i>
+                            <p>لا توجد طلبات حالياً</p>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-    function refreshPage() {
-        location.reload();
-    }
-</script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // تحديث تلقائي كل 30 ثانية
+        setTimeout(function() {
+            location.reload();
+        }, 30000);
+        
+        // إخفاء التنبيهات بعد 5 ثواني
+        setTimeout(function() {
+            document.querySelectorAll('.alert').forEach(alert => {
+                alert.style.transition = 'opacity 0.5s';
+                alert.style.opacity = '0';
+                setTimeout(() => alert.remove(), 500);
+            });
+        }, 5000);
+    </script>
 </body>
 </html>
