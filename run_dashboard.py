@@ -9,7 +9,7 @@ from functools import wraps
 from datetime import datetime
 import urllib.parse
 
-# إنشاء تطبيق Flask
+# إنشاء تطبيق Flask أولاً
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "secret_key_for_session_management")
 
@@ -18,6 +18,21 @@ app.config['SESSION_COOKIE_SECURE'] = True      # مهم للـ HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['REMEMBER_COOKIE_SECURE'] = True
+
+# استيراد نظام الإشعارات بعد تعريف app
+from webhook_handler import notification_system
+
+# تهيئة نظام الإشعارات
+notification_system.start()
+
+def send_bot_notification(event_type: str, data: dict):
+    """إرسال إشعار إلى البوت"""
+    notification_system.send_notification(event_type, data)
+
+@app.teardown_appcontext
+def shutdown_notification_system(exception=None):
+    """إيقاف نظام الإشعارات عند إغلاق التطبيق"""
+    notification_system.stop()
 
 @app.route('/health')
 def health():
@@ -210,13 +225,19 @@ def update_rate():
         # تحديث المتغير العام في config
         config.USD_TO_SYP = new_rate_float
         
+        # إرسال إشعار للبوت
+        send_bot_notification('rate_updated', {
+            'new_rate': new_rate_float,
+            'updated_by': session.get('user_id'),
+            'timestamp': datetime.now().isoformat()
+        })
+        
         flash(f'✅ تم تحديث سعر الصرف إلى {new_rate_float}', 'success')
     except Exception as e:
         flash(f'❌ خطأ: {str(e)}', 'danger')
     
     return redirect(url_for('index'))
 
-# باقي الدوال (deposit_action, order_action, user_management, etc) كما هي...
 @app.route('/user_management')
 @login_required
 def user_management():
@@ -250,18 +271,45 @@ def user_action(user_id):
     action = request.form.get('action')
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    user_data = None
 
     try:
         if action == 'toggle_ban':
-            # تبديل حالة الحظر
-            cur.execute('UPDATE users SET is_banned = NOT is_banned WHERE user_id = %s', (user_id,))
-            flash(f'تم تغيير حالة حظر المستخدم {user_id}', 'info')
+            # جلب معلومات المستخدم قبل التغيير
+            cur.execute('SELECT username, is_banned FROM users WHERE user_id = %s', (user_id,))
+            user_data = cur.fetchone()
+            
+            if user_data:
+                # تبديل حالة الحظر
+                cur.execute('UPDATE users SET is_banned = NOT is_banned WHERE user_id = %s', (user_id,))
+                flash(f'تم تغيير حالة حظر المستخدم {user_id}', 'info')
+                
+                # إرسال إشعار للبوت
+                send_bot_notification('user_banned' if not user_data[1] else 'user_unbanned', {
+                    'user_id': user_id,
+                    'username': user_data[0],
+                    'action_by': session.get('user_id'),
+                    'timestamp': datetime.now().isoformat()
+                })
 
         elif action == 'set_balance':
             new_bal = request.form.get('balance')
             if new_bal:
+                cur.execute('SELECT username FROM users WHERE user_id = %s', (user_id,))
+                user_data = cur.fetchone()
+                
                 cur.execute('UPDATE users SET balance = %s WHERE user_id = %s', (float(new_bal), user_id))
                 flash(f'تم تحديث رصيد المستخدم {user_id} إلى {new_bal}', 'success')
+                
+                # إرسال إشعار للبوت
+                send_bot_notification('balance_updated', {
+                    'user_id': user_id,
+                    'username': user_data[0] if user_data else None,
+                    'new_balance': float(new_bal),
+                    'action_by': session.get('user_id'),
+                    'timestamp': datetime.now().isoformat()
+                })
 
         conn.commit()
     except Exception as e:
@@ -269,7 +317,7 @@ def user_action(user_id):
     finally:
         cur.close()
         conn.close()
-
+    
     return redirect(url_for('user_management'))
 
 @app.route('/applications')
@@ -544,10 +592,32 @@ def deposit_action(deposit_id):
                 # تحديث حالة الطلب
                 cur.execute("UPDATE deposit_requests SET status = 'approved', admin_notes = %s WHERE id = %s", (notes, deposit_id))
                 flash(f'تمت الموافقة على طلب الشحن #{deposit_id} وإضافة {amount_syp} ل.س للمستخدم {user_id}', 'success')
+                
+                # إرسال إشعار للبوت
+                send_bot_notification('deposit_approved', {
+                    'deposit_id': deposit_id,
+                    'user_id': user_id,
+                    'amount': amount_syp,
+                    'processed_by': session.get('user_id'),
+                    'timestamp': datetime.now().isoformat()
+                })
         
         elif action == 'reject':
+            cur.execute("SELECT user_id FROM deposit_requests WHERE id = %s", (deposit_id,))
+            deposit = cur.fetchone()
+            
             cur.execute("UPDATE deposit_requests SET status = 'rejected', admin_notes = %s WHERE id = %s", (notes, deposit_id))
             flash(f'تم رفض طلب الشحن #{deposit_id}', 'info')
+            
+            if deposit:
+                # إرسال إشعار للبوت
+                send_bot_notification('deposit_rejected', {
+                    'deposit_id': deposit_id,
+                    'user_id': deposit[0],
+                    'notes': notes,
+                    'processed_by': session.get('user_id'),
+                    'timestamp': datetime.now().isoformat()
+                })
 
         conn.commit()
     except Exception as e:
@@ -578,6 +648,15 @@ def order_action(order_id):
             cur.execute("UPDATE orders SET status = 'completed', admin_notes = %s WHERE id = %s", 
                        (notes, order_id))
             flash(f'تم تأكيد تنفيذ الطلب #{order_id}', 'success')
+            
+            # إرسال إشعار للبوت
+            send_bot_notification('order_completed', {
+                'order_id': order_id,
+                'user_id': user_id if 'user_id' in locals() else None,
+                'notes': notes,
+                'processed_by': session.get('user_id'),
+                'timestamp': datetime.now().isoformat()
+            })
         
         elif action == 'failed':
             # جلب معلومات الطلب لإعادة الرصيد
@@ -593,6 +672,15 @@ def order_action(order_id):
                 cur.execute("UPDATE orders SET status = 'failed', admin_notes = %s WHERE id = %s", 
                            (notes, order_id))
                 flash(f'تم إلغاء الطلب #{order_id} وإعادة الرصيد للمستخدم', 'info')
+                
+                # إرسال إشعار للبوت
+                send_bot_notification('order_failed', {
+                    'order_id': order_id,
+                    'user_id': user_id,
+                    'notes': notes,
+                    'processed_by': session.get('user_id'),
+                    'timestamp': datetime.now().isoformat()
+                })
 
         conn.commit()
     except Exception as e:
