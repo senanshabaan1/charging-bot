@@ -101,6 +101,7 @@ class AdminStates(StatesGroup):
     waiting_vip_level = State()
     waiting_vip_discount = State()
     waiting_vip_downgrade_reason = State()
+    waiting_points_multiplier = State()  # ✅ إضافة حالة تعديل مضاعف النقاط
     
     # الرسائل
     waiting_broadcast_msg = State()
@@ -2895,11 +2896,11 @@ async def user_info_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_user_info)
 async def user_info_show(message: types.Message, state: FSMContext, db_pool):
-    """عرض معلومات المستخدم"""
+    """عرض معلومات المستخدم مع تفاصيل VIP ومضاعف النقاط"""
     try:
         user_id = int(message.text)
         
-        from database import get_user_profile
+        from database import get_user_profile, get_user_vip
         profile = await get_user_profile(db_pool, user_id)
         
         if not profile:
@@ -2911,9 +2912,15 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         deposits = profile['deposits']
         orders = profile['orders']
         
+        # جلب معلومات VIP الكاملة
+        vip_info = await get_user_vip(db_pool, user_id)
+        vip_name = vip_info.get('name', 'عادي')
+        vip_icon = vip_info.get('icon', '⚪')
+        points_multiplier = vip_info.get('points_multiplier', 1.0)
+        manual_status = " (يدوي)" if user.get('manual_vip') else ""
+        
         join_date = user['created_at'].strftime("%Y-%m-%d %H:%M") if user.get('created_at') else "غير معروف"
         last_active = user['last_activity'].strftime("%Y-%m-%d %H:%M") if user.get('last_activity') else "غير معروف"
-        manual_status = " (يدوي)" if user.get('manual_vip') else ""
         
         info_text = (
             f"👤 **معلومات المستخدم**\n\n"
@@ -2922,7 +2929,8 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
             f"💰 **الرصيد:** {user.get('balance', 0):,.0f} ل.س\n"
             f"⭐ **النقاط:** {user.get('total_points', 0)}\n"
-            f"👑 **مستوى VIP:** {user.get('vip_level', 0)}{manual_status}\n"
+            f"👑 **مستوى VIP:** {vip_icon} {vip_name}{manual_status}\n"
+            f"💰 **مضاعف النقاط:** {points_multiplier}x\n"
             f"💰 **إجمالي الإنفاق:** {user.get('total_spent', 0):,.0f} ل.س\n"
             f"🔒 **الحالة:** {'🚫 محظور' if user.get('is_banned') else '✅ نشط'}\n"
             f"📅 **تاريخ التسجيل:** {join_date}\n"
@@ -2950,7 +2958,8 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
                     types.InlineKeyboardButton(text="💰 تعديل الرصيد", callback_data=f"edit_bal_{user['user_id']}"))
         builder.row(types.InlineKeyboardButton(text="⭐ إضافة نقاط", callback_data=f"add_points_{user['user_id']}"),
                     types.InlineKeyboardButton(text="👑 رفع مستوى VIP", callback_data=f"upgrade_vip_{user['user_id']}"))
-        builder.row(types.InlineKeyboardButton(text="⬇️ خفض مستوى VIP", callback_data=f"downgrade_vip_{user['user_id']}"))
+        builder.row(types.InlineKeyboardButton(text="⬇️ خفض مستوى VIP", callback_data=f"downgrade_vip_{user['user_id']}"),
+                    types.InlineKeyboardButton(text="🎯 تعديل مضاعف النقاط", callback_data=f"edit_multiplier_{user['user_id']}"))
         
         await message.answer(info_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
         await state.clear()
@@ -2961,6 +2970,111 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
     except Exception as e:
         logger.error(f"خطأ في معلومات المستخدم: {e}")
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
+        await state.clear()
+
+# ============= تعديل مضاعف النقاط =============
+
+@router.callback_query(F.data.startswith("edit_multiplier_"))
+async def edit_multiplier_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل مضاعف النقاط"""
+    try:
+        user_id = int(callback.data.split("_")[2])
+        await state.update_data(target_user=user_id)
+        
+        await callback.message.answer(
+            f"🎯 **تعديل مضاعف النقاط**\n\n"
+            f"أدخل مضاعف النقاط الجديد (مثال: 1.5, 2.0):\n"
+            f"• 1.0 = نقاط عادية\n"
+            f"• 1.5 = نقاط ×1.5\n"
+            f"• 2.0 = نقاط ×2\n\n"
+            f"يمكنك إدخال أي رقم عشري بين 0.5 و 5.0\n\n"
+            f"❌ للإلغاء أرسل /cancel",
+            reply_markup=get_cancel_keyboard()
+        )
+        await state.set_state(AdminStates.waiting_points_multiplier)
+        
+    except Exception as e:
+        logger.error(f"خطأ في بدء تعديل مضاعف النقاط: {e}")
+        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+
+@router.message(AdminStates.waiting_points_multiplier)
+async def save_points_multiplier(message: types.Message, state: FSMContext, db_pool):
+    """حفظ مضاعف النقاط الجديد"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
+    try:
+        multiplier = float(message.text.strip())
+        
+        # التحقق من صحة المدخلات
+        if multiplier < 0.5 or multiplier > 5.0:
+            return await message.answer(
+                "❌ مضاعف النقاط يجب أن يكون بين 0.5 و 5.0\n"
+                "الرجاء إدخال قيمة صحيحة:",
+                reply_markup=get_cancel_keyboard()
+            )
+        
+        data = await state.get_data()
+        user_id = data['target_user']
+        
+        async with db_pool.acquire() as conn:
+            # جلب معلومات المستخدم
+            user = await conn.fetchrow(
+                "SELECT username, first_name, vip_level FROM users WHERE user_id = $1",
+                user_id
+            )
+            
+            if not user:
+                await message.answer("❌ المستخدم غير موجود")
+                await state.clear()
+                return
+            
+            # تحديث مضاعف النقاط
+            await conn.execute(
+                "UPDATE users SET points_multiplier = $1, manual_vip = TRUE WHERE user_id = $2",
+                multiplier, user_id
+            )
+        
+        username = user['username'] or user['first_name'] or str(user_id)
+        vip_level = user['vip_level']
+        
+        await message.answer(
+            f"✅ **تم تحديث مضاعف النقاط بنجاح**\n\n"
+            f"👤 المستخدم: @{username}\n"
+            f"🆔 الآيدي: `{user_id}`\n"
+            f"👑 مستوى VIP: {vip_level}\n"
+            f"💰 مضاعف النقاط الجديد: {multiplier}x\n\n"
+            f"⚠️ هذا تعديل يدوي ولن يتغير تلقائياً."
+        )
+        
+        # إشعار المستخدم
+        try:
+            await message.bot.send_message(
+                user_id,
+                f"🎯 **تم تعديل مضاعف النقاط في حسابك!**\n\n"
+                f"💰 مضاعف النقاط الجديد: {multiplier}x\n"
+                f"👑 مستواك الحالي: VIP {vip_level}\n\n"
+                f"✨ هذا التعديل خاص ولن يتغير تلقائياً.\n"
+                f"شكراً لاستخدامك خدماتنا!"
+            )
+        except:
+            pass
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer(
+            "❌ يرجى إدخال رقم صحيح (مثال: 1.5 أو 2.0):",
+            reply_markup=get_cancel_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"خطأ في حفظ مضاعف النقاط: {e}")
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
 # ============= إدارة النقاط والرصيد =============
@@ -3570,21 +3684,27 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
                 return
             
             from database import get_points_per_order
-            points = await get_points_per_order(db_pool)
+            base_points = await get_points_per_order(db_pool)
+            
+            # جلب مضاعف النقاط للمستخدم
+            from database import get_user_vip
+            vip_info = await get_user_vip(db_pool, order['user_id'])
+            points_multiplier = vip_info.get('points_multiplier', 1.0)
+            final_points = int(base_points * points_multiplier)
             
             await conn.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1", order_id)
             
             await conn.execute(
                 "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
-                points, order['user_id']
+                final_points, order['user_id']
             )
             
-            await conn.execute("UPDATE orders SET points_earned = $1 WHERE id = $2", points, order_id)
+            await conn.execute("UPDATE orders SET points_earned = $1 WHERE id = $2", final_points, order_id)
             
             await conn.execute('''
                 INSERT INTO points_history (user_id, points, action, description, created_at)
                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-            ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
+            ''', order['user_id'], final_points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
             
             from database import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
@@ -3608,11 +3728,15 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             user_points = await conn.fetchval("SELECT total_points FROM users WHERE user_id = $1", order['user_id']) or 0
             
             try:
+                points_text = f"⭐ نقاط مكتسبة: +{base_points}"
+                if points_multiplier > 1:
+                    points_text += f" (×{points_multiplier} VIP) = {final_points}"
+                
                 await bot.send_message(
                     order['user_id'],
                     f"✅ **تم تنفيذ طلبك #{order_id} بنجاح!**\n\n"
                     f"📱 التطبيق: {order['app_name']}\n"
-                    f"⭐ نقاط مكتسبة: +{points}\n"
+                    f"{points_text}\n"
                     f"💰 رصيد النقاط الجديد: {user_points}\n"
                     f"👑 مستواك: {vip_icon} VIP {vip_level} (خصم {vip_discount}%)\n\n"
                     f"شكراً لاستخدامك خدماتنا"
@@ -3713,6 +3837,7 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
             builder.row(types.InlineKeyboardButton(text=btn_text, callback_data=f"set_vip_{user_id}_{level}_{discount}"))
     
     builder.row(types.InlineKeyboardButton(text="🎯 خصم مخصص", callback_data=f"custom_discount_{user_id}"))
+    builder.row(types.InlineKeyboardButton(text="🎯 تعديل مضاعف النقاط", callback_data=f"edit_multiplier_{user_id}"))
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"user_info_cancel"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
