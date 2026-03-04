@@ -2578,9 +2578,9 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
             VALUES 
                 (0, 'VIP 0', 0, 0, '⚪'),
-                (1, 'VIP 1', 2000, 1, '🔵'),
-                (2, 'VIP 2', 4000, 2, '🟣'),
-                (3, 'VIP 3', 8000, 4, '🟡')
+                (1, 'VIP 1', 3500, 1, '🔵'),
+                (2, 'VIP 2', 6500, 2, '🟣'),
+                (3, 'VIP 3', 12000, 3, '🟡')
             ON CONFLICT (level) DO UPDATE SET 
                 min_spent = EXCLUDED.min_spent,
                 discount_percent = EXCLUDED.discount_percent,
@@ -2594,9 +2594,9 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         f"🔗 نقاط لكل إحالة: 1\n"
         f"🎁 100 نقطة = 1 دولار\n"
         f"👑 **نظام VIP الجديد:**\n"
-        f"• VIP 1: 2000 ل.س - خصم 1%\n"
-        f"• VIP 2: 4000 ل.س - خصم 2%\n"
-        f"• VIP 3: 8000 ل.س - خصم 4%\n\n"
+        f"• VIP 1: 3500 ل.س - خصم 1%\n"
+        f"• VIP 2: 6500 ل.س - خصم 2%\n"
+        f"• VIP 3: 12000 ل.س - خصم 4%\n\n"
         f"البوت الآن جاهز للبدء من جديد!"
     )
     await state.clear()
@@ -2864,7 +2864,7 @@ async def show_vip_stats(callback: types.CallbackQuery, db_pool):
         vip_counts = await conn.fetch("SELECT vip_level, COUNT(*) as count FROM users GROUP BY vip_level ORDER BY vip_level")
         vip_spent = await conn.fetch("SELECT vip_level, SUM(total_spent) as total FROM users WHERE vip_level > 0 GROUP BY vip_level ORDER BY vip_level")
     
-    vip_names = ["VIP 0 🟢", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡"]
+    vip_names = ["VIP 0 ⚪", "VIP 1 🔵", "VIP 2 🟣", "VIP 3 🟡"]
     text = "👥 **إحصائيات VIP**\n\n**عدد المستخدمين:**\n"
     
     for row in vip_counts:
@@ -3602,8 +3602,8 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
                 vip_discount = 0
                 vip_level = 0
                 
-            vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
-            vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+            vip_icons = ["⚪", "🔵", "🟣", "🟡"]
+            vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
             
             user_points = await conn.fetchval("SELECT total_points FROM users WHERE user_id = $1", order['user_id']) or 0
             
@@ -3704,8 +3704,8 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     
     builder = InlineKeyboardBuilder()
     levels = [
-        ("🟢 VIP 0 (0%)", 0, 0), ("🔵 VIP 1 (1%)", 1, 1), ("🟣 VIP 2 (2%)", 2, 2),
-        ("🟡 VIP 3 (3%)", 3, 4),
+        ("⚪ VIP 0 (0%)", 0, 0), ("🔵 VIP 1 (1%)", 1, 1), ("🟣 VIP 2 (2%)", 2, 2),
+        ("🟡 VIP 3 (3%)", 3, 3),
     ]
     
     for btn_text, level, discount in levels:
@@ -3746,7 +3746,7 @@ async def set_vip_level(callback: types.CallbackQuery, db_pool):
     )
     
     try:
-        vip_icons = ["🟢", "🔵", "🟣", "🟡"]
+        vip_icons = ["⚪", "🔵", "🟣", "🟡"]
         icon = vip_icons[level] if level < len(vip_icons) else "⭐"
         await callback.bot.send_message(
             user_id,
@@ -3861,13 +3861,13 @@ async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, 
     builder = InlineKeyboardBuilder()
     for level in range(0, current_vip):
         if level == 0:
-            discount = 0; btn_text = f"🟢 VIP 0 (0%)"
+            discount = 0; btn_text = f"⚪ VIP 0 (0%)"
         elif level == 1:
             discount = 1; btn_text = f"🔵 VIP 1 (1%)"
         elif level == 2:
             discount = 2; btn_text = f"🟣 VIP 2 (2%)"
         elif level == 3:
-            discount = 3; btn_text = f"🟡 VIP 3 (4%)"
+            discount = 3; btn_text = f"🟡 VIP 3 (3%)"
             continue
         
         builder.row(types.InlineKeyboardButton(text=btn_text, callback_data=f"downgrade_to_{user_id}_{level}_{discount}"))
