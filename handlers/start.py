@@ -443,7 +443,7 @@ async def my_account(message: types.Message, db_pool):
         remaining = next_level_info['remaining']
         next_level_name = next_level_info['next_level_name']
         next_discount = next_level_info['next_discount']
-        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name} (خصم {next_discount}%)"
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
     else:
         progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
     
