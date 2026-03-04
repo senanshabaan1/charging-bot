@@ -267,9 +267,9 @@ async def init_db(pool=None):
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
                 VALUES 
                     (0, 'VIP 0', 0, 0, '⚪'),
-                    (1, 'VIP 1', 2000, 1, '🔵'),
-                    (2, 'VIP 2', 4000, 2, '🟣'),
-                    (3, 'VIP 3', 8000, 4, '🟡')
+                    (1, 'VIP 1', 3500, 1, '🔵'),
+                    (2, 'VIP 2', 6500, 2, '🟣'),
+                    (3, 'VIP 3', 12000, 3, '🟡')
                 ON CONFLICT (level) DO UPDATE SET
                     min_spent = EXCLUDED.min_spent,
                     discount_percent = EXCLUDED.discount_percent,
@@ -1113,9 +1113,9 @@ async def update_user_vip(pool, user_id):
             
             # المستويات بالضبط كما طلبت
             vip_levels = [
-                (2000, 1, 1),   # VIP 1: 2000 ل.س - خصم 1%
-                (4000, 2, 2),   # VIP 2: 4000 ل.س - خصم 2%
-                (8000, 3, 4),   # VIP 3: 8000 ل.س - خصم 4%
+                (3500, 1, 1),   # VIP 1: 3500 ل.س - خصم 1%
+                (6500, 2, 2),   # VIP 2: 6500 ل.س - خصم 2%
+                (12000, 3, 3),   # VIP 3: 12000 ل.س - خصم 3%
             ]
             
             # ترتيب تنازلي للبحث
@@ -1151,9 +1151,9 @@ async def update_user_vip(pool, user_id):
 def get_next_vip_level(total_spent):
     """حساب المستوى التالي حسب النظام المطلوب"""
     vip_levels = [
-        (2000, 1, "VIP 1 🔵 (خصم 1%)", 1),
-        (4000, 2, "VIP 2 🟣 (خصم 2%)", 2),
-        (8000, 3, "VIP 3 🟡 (خصم 4%)", 4),
+        (3500, 1, "VIP 1 🔵 (خصم 1%)", 1),
+        (6500, 2, "VIP 2 🟣 (خصم 2%)", 2),
+        (12000, 3, "VIP 3 🟡 (خصم 3%)", 3),
     ]
     
     for required, level, name, discount in vip_levels:
@@ -1171,7 +1171,7 @@ def get_next_vip_level(total_spent):
         'next_level': 3,
         'next_level_name': "VIP 3 🟡 (الأقصى)",
         'remaining': 0,
-        'next_discount': 4
+        'next_discount': 3
     }
 
 async def get_top_users_by_deposits(pool, limit=10):
