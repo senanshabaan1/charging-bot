@@ -2578,10 +2578,11 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         await conn.execute('''
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
             VALUES 
-                (0, 'VIP 0', 0, 0, '⚪'),
-                (1, 'VIP 1', 2000, 1, '🔵'),
-                (2, 'VIP 2', 4000, 2, '🟣'),
-                (3, 'VIP 3', 8000, 4, '🟡')
+                (0, 'عادي', 0, 0, '⚪'),
+                (1, 'برونزي', 2000, 1, '🥉'),
+                (2, 'فضي', 5000, 1.5, '🥈'),
+                (3, 'ذهبي', 15000, 2, '🥇'),
+                (4, 'بلاتيني', 40000, 2.5, '💎')
             ON CONFLICT (level) DO UPDATE SET 
                 min_spent = EXCLUDED.min_spent,
                 discount_percent = EXCLUDED.discount_percent,
@@ -3828,8 +3829,10 @@ async def upgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db
     
     builder = InlineKeyboardBuilder()
     levels = [
-        ("🟢 VIP 0 (0%)", 0, 0), ("🔵 VIP 1 (1%)", 1, 1), ("🟣 VIP 2 (2%)", 2, 2),
-        ("🟡 VIP 3 (3%)", 3, 4),
+        ("🥉 برونزي (1%)", 1, 1),
+        ("🥈 فضي (1.5%)", 2, 1.5),
+        ("🥇 ذهبي (2%)", 3, 2),
+        ("💎 بلاتيني (2.5%)", 4, 2.5),
     ]
     
     for btn_text, level, discount in levels:
