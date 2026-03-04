@@ -1161,7 +1161,7 @@ def get_next_vip_level(total_spent):
             remaining = required - total_spent
             return {
                 'next_level': level,
-                'next_level_name': name,
+                'next_level_name': data["name"],
                 'remaining': remaining,
                 'next_discount': discount
             }
