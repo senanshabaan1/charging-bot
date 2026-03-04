@@ -707,7 +707,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
 
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
+    """تنفيذ الطلب مع مضاعف النقاط حسب VIP"""
     data = await state.get_data()
     
     if not data:
@@ -715,7 +715,15 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
         await state.clear()
         return
     
-    points = await get_points_per_order(db_pool)
+    # جلب النقاط الأساسية
+    base_points = await get_points_per_order(db_pool)
+    
+    # جلب معلومات VIP للمستخدم ومعامل مضاعفة النقاط
+    from database import get_user_vip
+    user_vip = await get_user_vip(db_pool, callback.from_user.id)
+    points_multiplier = user_vip.get('points_multiplier', 1.0)
+    final_points = int(base_points * points_multiplier)
+    
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
     total_syp = float(data['total_syp'])
@@ -757,7 +765,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 float(data.get('final_price_usd', 0)),
                 total_syp,
                 data['target_id'],
-                points
+                final_points  # النقاط بعد الضرب
                 )
                 
                 order_data = {
@@ -787,7 +795,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data.get('discounted_unit_price_usd', 0),
                 total_syp,
                 data['target_id'],
-                points
+                final_points
                 )
                 
                 order_data = {
@@ -814,17 +822,25 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     else:
         discount_text = ""
     
+    # رسالة تأكيد مع تفاصيل النقاط
+    points_text = f"⭐ **نقاط مضافة:** +{base_points}"
+    if points_multiplier > 1:
+        points_text += f" (×{points_multiplier} VIP) = {final_points}"
+    
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
         f"📋 **سيتم التنفيذ خلال 24 ساعة.**\n"
-        f"⭐ **نقاط مضافة:** +{points}"
+        f"{points_text}"
         f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}",
         parse_mode="Markdown"
     )
     
-    # إرسال رسالة منفصلة مع القائمة الرئيسية (اختياري)
+    # تحديث VIP للمستخدم
+    await update_user_vip(db_pool, callback.from_user.id)
+    
+    # إرسال رسالة منفصلة مع القائمة الرئيسية
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     await callback.message.answer(
         "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
