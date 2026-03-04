@@ -2547,6 +2547,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         await conn.execute("DELETE FROM redemption_requests")
         await conn.execute("DELETE FROM deposit_requests")
         await conn.execute("DELETE FROM orders")
+        await conn.execute("ALTER SEQUENCE orders_id_seq RESTART WITH 1")
         
         if admin_ids_str:
             await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
