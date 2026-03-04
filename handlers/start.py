@@ -11,7 +11,6 @@ import random
 import string
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
 from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
-from database import VIP_LEVELS, get_user_vip  # ✅ إضافة استيراد VIP
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -421,12 +420,6 @@ async def my_account(message: types.Message, db_pool):
             deposits_count = 0
             orders_count = 0
     
-    # جلب معلومات VIP كاملة (مع مضاعف النقاط)
-    vip_info = await get_user_vip(db_pool, user_id)
-    points_multiplier = vip_info.get('points_multiplier', 1.0)
-    vip_name = vip_info.get('name', 'عادي')
-    vip_icon = vip_info.get('icon', '⚪')
-    
     # حساب قيمة النقاط بالسعر الحالي
     from database import get_redemption_rate, get_exchange_rate, get_next_vip_level
     redemption_rate = await get_redemption_rate(db_pool)
@@ -439,6 +432,10 @@ async def my_account(message: types.Message, db_pool):
     # قيمة 1 دولار بالليرة
     base_syp = 1 * exchange_rate
     
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    
     # حساب التقدم للمستوى التالي
     next_level_info = get_next_vip_level(total_spent)
     
@@ -446,8 +443,7 @@ async def my_account(message: types.Message, db_pool):
         remaining = next_level_info['remaining']
         next_level_name = next_level_info['next_level_name']
         next_discount = next_level_info['next_discount']
-        next_multiplier = next_level_info.get('next_multiplier', 1.0)
-        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name} (خصم {next_discount}%، مضاعف {next_multiplier}x)"
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name} (خصم {next_discount}%)"
     else:
         progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
     
@@ -462,7 +458,7 @@ async def my_account(message: types.Message, db_pool):
         types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
     )
     
-    # رسالة الملف الشخصي مع تفاصيل VIP الجديدة
+    # رسالة الملف الشخصي مع تفاصيل VIP
     profile_text = (
         f"👤 **الملف الشخصي**\n\n"
         f"🆔 **الآيدي:** `{user_id}`\n"
@@ -478,9 +474,8 @@ async def my_account(message: types.Message, db_pool):
         f"• عدد عمليات الشحن: {deposits_count}\n"
         f"• عدد عمليات الشراء: {orders_count}\n\n"
         f"👑 **نظام VIP:**\n"
-        f"• مستواك: {vip_icon} {vip_name}\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
-        f"• مضاعف النقاط: {points_multiplier}x\n"
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
@@ -742,16 +737,14 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
             deposits_count = 0
             orders_count = 0
     
-    # جلب معلومات VIP كاملة (مع مضاعف النقاط)
-    vip_info = await get_user_vip(db_pool, user_id)
-    points_multiplier = vip_info.get('points_multiplier', 1.0)
-    vip_name = vip_info.get('name', 'عادي')
-    vip_icon = vip_info.get('icon', '⚪')
-    
     # حساب قيمة النقاط بسعر الصرف الحالي
     points_value_usd = (points / redemption_rate) 
     points_value_syp = points_value_usd * exchange_rate
     base_syp = 1 * exchange_rate
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
     
     # حساب التقدم للمستوى التالي
     next_level_info = get_next_vip_level(total_spent)
@@ -759,8 +752,7 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
     if next_level_info and next_level_info.get('remaining', 0) > 0:
         remaining = next_level_info['remaining']
         next_level_name = next_level_info['next_level_name']
-        next_multiplier = next_level_info.get('next_multiplier', 1.0)
-        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name} (مضاعف {next_multiplier}x)"
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
     else:
         progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
     
@@ -789,9 +781,8 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"• عدد عمليات الشحن: {deposits_count}\n"
         f"• عدد عمليات الشراء: {orders_count}\n\n"
         f"👑 **نظام VIP:**\n"
-        f"• مستواك: {vip_icon} {vip_name}\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
-        f"• مضاعف النقاط: {points_multiplier}x\n"
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
         f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
@@ -861,6 +852,8 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+# ========== سجل العمليات ==========
 
 # ========== سجل العمليات ==========
 
@@ -979,7 +972,7 @@ async def admin_control_panel(message: types.Message, db_pool):
 
 @router.message(F.text == "❓ مساعدة")
 async def show_help(message: types.Message):
-    """عرض رسالة المساعدة مع نظام VIP الجديد"""
+    """عرض رسالة المساعدة"""
     help_text = (
         "📚 **دليل استخدام البوت**\n\n"
         "**📱 خدمات الشحن:**\n"
@@ -999,19 +992,19 @@ async def show_help(message: types.Message):
         "• رابط الإحالة الخاص بك\n"
         "• سجل النقاط\n"
         "• استرداد النقاط\n"
-        "• مستوى VIP والخصم ومضاعف النقاط\n\n"
+        "• مستوى VIP والخصم\n\n"
         
         "**⭐ نظام النقاط:**\n"
-        "• 1 نقطة لكل عملية شراء (قابلة للزيادة بمضاعف VIP)\n"
-        "• 1 نقطة لكل إحالة ناجحة\n"
+        "• 1 نقاط لكل عملية شراء\n"
+        "• 1 نقاط لكل إحالة ناجحة\n"
         "• استبدال 100 نقطة بـ 1$ رصيد\n\n"
         
-        "**👑 نظام VIP الجديد:**\n"
-        "• VIP 0 (⚪ عادي): 0% خصم - نقاط عادية\n"
-        "• VIP 1 (🥉 برونزي): 1% خصم - نقاط ×1.1 (2000 ل.س)\n"
-        "• VIP 2 (🥈 فضي): 1.5% خصم - نقاط ×1.2 (5000 ل.س)\n"
-        "• VIP 3 (🥇 ذهبي): 2% خصم - نقاط ×1.5 (15000 ل.س)\n"
-        "• VIP 4 (💎 بلاتيني): 2.5% خصم - نقاط ×2 (40000 ل.س)\n\n"
+        "**👑 نظام VIP:**\n"
+        "• VIP 0: 0% خصم\n"
+        "• VIP 1: 1% خصم (1000 ل.س)\n"
+        "• VIP 2: 2% خصم (2000 ل.س)\n"
+        "• VIP 3: 3% خصم (4000 ل.س)\n"
+        "• VIP 4: 5% خصم (8000 ل.س)\n\n"
         
         "**📞 للدعم:**\n"
         "• @support\n\n"
