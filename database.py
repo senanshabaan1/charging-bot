@@ -6,6 +6,16 @@ from datetime import datetime
 from config import DB_CONFIG, DATABASE_URL
 
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
+
+# ========== نظام VIP الجديد مع مضاعف النقاط ==========
+VIP_LEVELS = {
+    0: {"name": "عادي", "min_spent": 0, "discount": 0, "points_multiplier": 1.0, "icon": "⚪"},
+    1: {"name": "برونزي", "min_spent": 2000, "discount": 1, "points_multiplier": 1.1, "icon": "🥉"},
+    2: {"name": "فضي", "min_spent": 5000, "discount": 1.5, "points_multiplier": 1.2, "icon": "🥈"},
+    3: {"name": "ذهبي", "min_spent": 15000, "discount": 2, "points_multiplier": 1.5, "icon": "🥇"},
+    4: {"name": "بلاتيني", "min_spent": 40000, "discount": 2.5, "points_multiplier": 2.0, "icon": "💎"},
+}
+
 def format_local_time(dt):
     """تنسيق الوقت حسب توقيت دمشق للعرض"""
     if dt is None:
@@ -56,7 +66,8 @@ async def init_db(pool=None):
         else:
             conn = await asyncpg.connect(**DB_CONFIG)
             need_release = False
-        # جدول المستخدمين
+        
+        # جدول المستخدمين - مع إضافة points_multiplier
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
@@ -78,7 +89,9 @@ async def init_db(pool=None):
                 last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 vip_level INTEGER DEFAULT 0,
                 total_spent FLOAT DEFAULT 0,
-                discount_percent INTEGER DEFAULT 0
+                discount_percent INTEGER DEFAULT 0,
+                points_multiplier FLOAT DEFAULT 1.0,
+                manual_vip BOOLEAN DEFAULT FALSE
             );
         ''')
 
@@ -169,6 +182,7 @@ async def init_db(pool=None):
         logging.info("✅ تم إضافة أنواع الخدمات الأساسية")
         
         # ===== نهاية الجداول الجديدة =====
+        
         # جدول طلبات الشحن
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS deposit_requests (
@@ -258,22 +272,26 @@ async def init_db(pool=None):
                 name TEXT NOT NULL,
                 min_spent FLOAT NOT NULL,
                 discount_percent INTEGER NOT NULL,
+                points_multiplier FLOAT DEFAULT 1.0,
                 icon TEXT DEFAULT '⭐'
             );
         ''')
 
-        # إضافة المستويات الافتراضية
+        # إضافة المستويات الافتراضية للنظام الجديد
         await conn.execute('''
-            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
-                VALUES 
-                    (0, 'VIP 0', 0, 0, '⚪'),
-                    (1, 'VIP 1', 2000, 1, '🔵'),
-                    (2, 'VIP 2', 4000, 2, '🟣'),
-                    (3, 'VIP 3', 8000, 4, '🟡')
-                ON CONFLICT (level) DO UPDATE SET
-                    min_spent = EXCLUDED.min_spent,
-                    discount_percent = EXCLUDED.discount_percent,
-                    icon = EXCLUDED.icon;
+            INSERT INTO vip_levels (level, name, min_spent, discount_percent, points_multiplier, icon) 
+            VALUES 
+                (0, 'عادي', 0, 0, 1.0, '⚪'),
+                (1, 'برونزي', 2000, 1, 1.1, '🥉'),
+                (2, 'فضي', 5000, 1.5, 1.2, '🥈'),
+                (3, 'ذهبي', 15000, 2, 1.5, '🥇'),
+                (4, 'بلاتيني', 40000, 2.5, 2.0, '💎')
+            ON CONFLICT (level) DO UPDATE SET
+                name = EXCLUDED.name,
+                min_spent = EXCLUDED.min_spent,
+                discount_percent = EXCLUDED.discount_percent,
+                points_multiplier = EXCLUDED.points_multiplier,
+                icon = EXCLUDED.icon;
         ''')
 
         # جدول السجلات
@@ -374,7 +392,9 @@ async def init_db(pool=None):
                 ('last_name', 'TEXT'),
                 ('total_points_earned', 'INTEGER DEFAULT 0'),
                 ('total_points_redeemed', 'INTEGER DEFAULT 0'),
-                ('last_activity', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                ('last_activity', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+                ('points_multiplier', 'FLOAT DEFAULT 1.0'),
+                ('manual_vip', 'BOOLEAN DEFAULT FALSE')
             ]
         }
 
@@ -427,6 +447,12 @@ async def init_db(pool=None):
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
             
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS points_multiplier FLOAT DEFAULT 1.0')
+            logging.info("✅ تم إضافة عمود points_multiplier")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود points_multiplier: {e}")
+            
         # ===== إضافة عمود manual_vip =====
         try:
             await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
@@ -462,10 +488,31 @@ async def init_db(pool=None):
             logging.info("✅ تم التأكد من وجود created_at في product_options")
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة created_at إلى product_options: {e}")
+            
+        # تحديث مضاعف النقاط للمستخدمين الحاليين بناءً على مستواهم
+        try:
+            await conn.execute('''
+                UPDATE users 
+                SET points_multiplier = 
+                    CASE 
+                        WHEN vip_level = 0 THEN 1.0
+                        WHEN vip_level = 1 THEN 1.1
+                        WHEN vip_level = 2 THEN 1.2
+                        WHEN vip_level = 3 THEN 1.5
+                        WHEN vip_level = 4 THEN 2.0
+                        ELSE 1.0
+                    END
+                WHERE points_multiplier IS NULL OR points_multiplier = 1.0
+            ''')
+            logging.info("✅ تم تحديث مضاعف النقاط للمستخدمين الحاليين")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في تحديث مضاعف النقاط: {e}")
+            
         if need_release:
             await pool.release(conn)
         else:
             await conn.close()
+            
         logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
     except Exception as e:
         logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
@@ -507,6 +554,7 @@ async def get_pool():
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
         return None
+
 # ============= دوال ضبط المنطقة الزمنية =============
 
 async def set_database_timezone(pool):
@@ -529,26 +577,6 @@ async def set_database_timezone(pool):
     except Exception as e:
         logging.error(f"❌ خطأ في ضبط توقيت قاعدة البيانات: {e}")
         return False
-
-def format_local_time(dt):
-    """تنسيق الوقت حسب توقيت دمشق للعرض"""
-    if dt is None:
-        return "غير معروف"
-    
-    if isinstance(dt, str):
-        try:
-            # محاولة تحويل النص إلى datetime
-            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
-        except:
-            return dt
-    
-    # إذا كان الوقت بدون منطقة زمنية، نضيف UTC
-    if dt.tzinfo is None:
-        dt = pytz.UTC.localize(dt)
-    
-    # نحول إلى توقيت دمشق
-    local_dt = dt.astimezone(DAMASCUS_TZ)
-    return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
 async def update_old_records_timezone(pool):
     """تحديث السجلات القديمة إلى التوقيت الصحيح (مرة واحدة)"""
@@ -655,8 +683,6 @@ async def generate_referral_code(pool, user_id):
         )
         return code
 
-# في database.py - أضف في قسم الإحالة
-
 async def check_duplicate_referral(pool, referrer_id, referred_id):
     """التحقق من عدم تكرار الإحالة"""
     try:
@@ -721,7 +747,6 @@ async def get_referral_stats(pool, user_id):
     except Exception as e:
         logging.error(f"❌ خطأ في جلب إحصائيات الإحالة: {e}")
         return None
-# في database.py - كشف النشاط المشبوه
 
 async def detect_suspicious_referrals(pool, user_id, threshold=5):
     """كشف محاولات الإحالة المشبوهة (نفس المستخدم عدة مرات)"""
@@ -800,6 +825,7 @@ async def deduct_points(pool, user_id, points, action, description):
     except Exception as e:
         logging.error(f"❌ خطأ في خصم نقاط من المستخدم {user_id}: {e}")
         return False, str(e)
+
 async def add_points_history(db_pool, user_id, points, action, description):
     """إضافة سجل نقاط جديد مع توقيت دمشق"""
     try:
@@ -815,8 +841,6 @@ async def add_points_history(db_pool, user_id, points, action, description):
     except Exception as e:
         logging.error(f"❌ خطأ في إضافة سجل نقاط للمستخدم {user_id}: {e}")
         return False
-
-# في database.py - تحديث دالة process_referral
 
 async def process_referral(pool, referred_user_id, referrer_code):
     """معالجة الإحالة عند تسجيل مستخدم جديد - مع منع التكرار"""
@@ -890,7 +914,7 @@ async def process_referral(pool, referred_user_id, referrer_code):
             }, None
             
     except Exception as e:
-        logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
+        logging.error(f"❌ خطأ في معالجة الإحالة: {e}")
         return None, str(e)
 
 async def get_user_points(pool, user_id):
@@ -1067,38 +1091,58 @@ async def get_vip_levels(pool):
         return []
 
 async def get_user_vip(pool, user_id):
-    """جلب مستوى VIP للمستخدم"""
+    """جلب مستوى VIP للمستخدم مع جميع التفاصيل"""
     try:
         async with pool.acquire() as conn:
             user = await conn.fetchrow('''
-                SELECT vip_level, total_spent, discount_percent 
+                SELECT vip_level, total_spent, discount_percent, points_multiplier,
+                       CASE WHEN manual_vip THEN 1 ELSE 0 END as is_manual
                 FROM users WHERE user_id = $1
             ''', user_id)
-            return user or {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
+            
+            if user:
+                level = user['vip_level'] or 0
+                multiplier = user['points_multiplier'] or 1.0
+                
+                # إذا كان المستوى موجود في القاموس، استخدم بياناته
+                if level in VIP_LEVELS:
+                    vip_data = VIP_LEVELS[level].copy()
+                    vip_data['level'] = level
+                    vip_data['total_spent'] = user['total_spent'] or 0
+                    vip_data['is_manual'] = user['is_manual']
+                    # استخدم القيم من قاعدة البيانات (قد تكون مختلفة عن الافتراضي)
+                    vip_data['discount'] = user['discount_percent'] or vip_data['discount']
+                    vip_data['points_multiplier'] = multiplier
+                    return vip_data
+                else:
+                    # مستوى غير معروف - أرجع المستوى 0
+                    vip_data = VIP_LEVELS[0].copy()
+                    vip_data['level'] = 0
+                    vip_data['total_spent'] = user['total_spent'] or 0
+                    vip_data['is_manual'] = user['is_manual']
+                    vip_data['discount'] = user['discount_percent'] or 0
+                    vip_data['points_multiplier'] = multiplier
+                    return vip_data
+            
+            return VIP_LEVELS[0].copy() | {'level': 0, 'total_spent': 0, 'is_manual': False}
     except Exception as e:
         logging.error(f"❌ خطأ في جلب مستوى VIP للمستخدم {user_id}: {e}")
-        return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
+        return VIP_LEVELS[0].copy() | {'level': 0, 'total_spent': 0, 'is_manual': False}
 
 async def update_user_vip(pool, user_id):
-    """تحديث مستوى VIP للمستخدم - حسب طلبك"""
+    """تحديث مستوى VIP للمستخدم حسب النظام الجديد"""
     try:
         async with pool.acquire() as conn:
             # التحقق أولاً إذا كان المستخدم يدوياً
             user = await conn.fetchrow(
-                "SELECT manual_vip, vip_level, discount_percent FROM users WHERE user_id = $1",
+                "SELECT manual_vip, vip_level, discount_percent, points_multiplier FROM users WHERE user_id = $1",
                 user_id
             )
             
             # إذا كان المستخدم يدوياً، لا تغير مستواه
             if user and user['manual_vip']:
                 logging.info(f"👑 المستخدم {user_id} لديه مستوى يدوي VIP {user['vip_level']}")
-                return {
-                    'level': user['vip_level'],
-                    'discount': user['discount_percent'],
-                    'total_spent': 0,
-                    'next_level': None,
-                    'manual': True
-                }
+                return VIP_LEVELS.get(user['vip_level'], VIP_LEVELS[0])
             
             # حساب إجمالي مشتريات المستخدم
             total_spent = await conn.fetchval('''
@@ -1107,71 +1151,54 @@ async def update_user_vip(pool, user_id):
                 WHERE user_id = $1 AND status = 'completed'
             ''', user_id) or 0
             
-            # ===== نظام VIP حسب طلبك =====
+            # تحديد المستوى حسب الإنفاق
             level = 0
-            discount = 0
-            
-            # المستويات بالضبط كما طلبت
-            vip_levels = [
-                (2000, 1, 1),   # VIP 1: 2000 ل.س - خصم 1%
-                (4000, 2, 2),   # VIP 2: 4000 ل.س - خصم 2%
-                (8000, 3, 4),   # VIP 3: 8000 ل.س - خصم 4%
-            ]
-            
-            # ترتيب تنازلي للبحث
-            for spent, lvl, disc in reversed(vip_levels):
-                if total_spent >= spent:
+            for lvl, data in reversed(VIP_LEVELS.items()):
+                if total_spent >= data["min_spent"]:
                     level = lvl
-                    discount = disc
                     break
+            
+            data = VIP_LEVELS[level]
             
             # تحديث المستخدم
             await conn.execute('''
                 UPDATE users 
                 SET vip_level = $1, 
-                    total_spent = $2, 
-                    discount_percent = $3,
+                    discount_percent = $2,
+                    points_multiplier = $3,
+                    total_spent = $4,
                     manual_vip = FALSE
-                WHERE user_id = $4 AND (manual_vip IS NULL OR manual_vip = FALSE)
-            ''', level, total_spent, discount, user_id)
+                WHERE user_id = $5
+            ''', level, data["discount"], data["points_multiplier"], total_spent, user_id)
             
-            logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (خصم {discount}%) - إنفاق: {total_spent:,.0f} ل.س")
+            logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (خصم {data['discount']}%, مضاعف نقاط {data['points_multiplier']}x)")
             
-            return {
-                'level': level,
-                'discount': discount,
-                'total_spent': total_spent,
-                'next_level': get_next_vip_level(total_spent),
-                'manual': False
-            }
+            return data
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
-        return None
+        return VIP_LEVELS[0]
 
 def get_next_vip_level(total_spent):
-    """حساب المستوى التالي حسب النظام المطلوب"""
-    vip_levels = [
-        (2000, 1, "VIP 1 🔵 (خصم 1%)", 1),
-        (4000, 2, "VIP 2 🟣 (خصم 2%)", 2),
-        (8000, 3, "VIP 3 🟡 (خصم 4%)", 4),
-    ]
-    
-    for required, level, name, discount in vip_levels:
-        if total_spent < required:
-            remaining = required - total_spent
+    """حساب المستوى التالي حسب النظام الجديد"""
+    for level, data in VIP_LEVELS.items():
+        if level > 0 and total_spent < data["min_spent"]:
+            remaining = data["min_spent"] - total_spent
             return {
                 'next_level': level,
-                'next_level_name': name,
+                'next_level_name': data["name"],
                 'remaining': remaining,
-                'next_discount': discount
+                'next_discount': data["discount"],
+                'next_multiplier': data["points_multiplier"]
             }
     
     # وصل لأعلى مستوى
+    max_level = max(VIP_LEVELS.keys())
     return {
-        'next_level': 3,
-        'next_level_name': "VIP 3 🟡 (الأقصى)",
+        'next_level': max_level,
+        'next_level_name': VIP_LEVELS[max_level]["name"],
         'remaining': 0,
-        'next_discount': 4
+        'next_discount': VIP_LEVELS[max_level]["discount"],
+        'next_multiplier': VIP_LEVELS[max_level]["points_multiplier"]
     }
 
 async def get_top_users_by_deposits(pool, limit=10):
@@ -1235,7 +1262,7 @@ async def get_top_users_by_points(pool, limit=10):
         return []
 
 # ============= دوال الفئات الفرعية =============
-# في database.py - دوال app_variants
+
 async def get_app_variants(db_pool, app_id):
     """جلب فئات منتج معين"""
     async with db_pool.acquire() as conn:
@@ -1260,6 +1287,7 @@ async def delete_app_variant(db_pool, variant_id):
             variant_id
         )
         return True
+
 # ============= دوال خيارات المنتجات (product_options) =============
 
 async def get_product_options(db_pool, product_id):
@@ -1351,7 +1379,7 @@ async def get_user_profile(pool, user_id):
                     referral_code, referred_by, referral_count, referral_earnings,
                     total_points_earned, total_points_redeemed, 
                     last_activity AT TIME ZONE 'Asia/Damascus' as last_activity,
-                    vip_level, total_spent, discount_percent
+                    vip_level, total_spent, discount_percent, points_multiplier
                 FROM users 
                 WHERE user_id = $1
             ''', user_id)
@@ -2127,6 +2155,8 @@ async def fix_points_history_table(pool):
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في إصلاح جدول النقاط: {e}")
+        return False
+
 # ============= دوال إدارة المشرفين =============
 
 async def get_all_admins(pool):
@@ -2313,6 +2343,8 @@ async def is_admin_user(pool, user_id):
         return user_id == ADMIN_ID or user_id in MODERATORS
     except Exception as e:
         logging.error(f"❌ خطأ في التحقق من المشرف: {e}")
+        return False
+
 async def fix_manual_vip_for_existing_users(pool):
     """تحديث المستخدمين اليدويين القدامى - يشغل مرة واحدة"""
     try:
@@ -2367,7 +2399,7 @@ async def update_report_setting(pool, key, value):
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث إعداد التقرير {key}: {e}")
-        return False  # 👈 هذا السطر يجب أن يكون داخل الـ except
+        return False
    
 # ============= دوال خيارات المنتجات (product_options) =============
 
@@ -2403,4 +2435,3 @@ async def add_product_option(db_pool, product_id, name, quantity, price_usd, des
             RETURNING id
         ''', product_id, name, quantity, price_usd, description, sort_order)
         return option_id
-        return False
