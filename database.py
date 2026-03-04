@@ -1130,7 +1130,7 @@ async def get_user_vip(pool, user_id):
         return VIP_LEVELS[0].copy() | {'level': 0, 'total_spent': 0, 'is_manual': False}
 
 async def update_user_vip(pool, user_id):
-    """تحديث مستوى VIP للمستخدم حسب النظام الجديد"""
+    """تحديث مستوى VIP للمستخدم حسب النظام الموحد"""
     try:
         async with pool.acquire() as conn:
             # التحقق أولاً إذا كان المستخدم يدوياً
@@ -1179,7 +1179,7 @@ async def update_user_vip(pool, user_id):
         return VIP_LEVELS[0]
 
 def get_next_vip_level(total_spent):
-    """حساب المستوى التالي حسب النظام الجديد"""
+    """حساب المستوى التالي حسب النظام الموحد"""
     for level, data in VIP_LEVELS.items():
         if level > 0 and total_spent < data["min_spent"]:
             remaining = data["min_spent"] - total_spent
