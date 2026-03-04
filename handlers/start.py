@@ -433,9 +433,9 @@ async def my_account(message: types.Message, db_pool):
     base_syp = 1 * exchange_rate
     
     # تحديد أيقونة VIP
-    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
-    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
-    
+    vip_icons = ["⚪", "🔵", "🟣", "🟡"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
+
     # حساب التقدم للمستوى التالي
     next_level_info = get_next_vip_level(total_spent)
     
@@ -743,8 +743,8 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
     base_syp = 1 * exchange_rate
     
     # تحديد أيقونة VIP
-    vip_icons = ["🟢", "🔵", "🟣", "🟡", "🔴"]
-    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "🟢"
+    vip_icons = ["⚪", "🔵", "🟣", "🟡"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
     
     # حساب التقدم للمستوى التالي
     next_level_info = get_next_vip_level(total_spent)
