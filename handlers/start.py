@@ -445,7 +445,7 @@ async def my_account(message: types.Message, db_pool):
         next_discount = next_level_info['next_discount']
         progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
     else:
-        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 3)"
     
     # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
@@ -1001,13 +1001,12 @@ async def show_help(message: types.Message):
         
         "**👑 نظام VIP:**\n"
         "• VIP 0: 0% خصم\n"
-        "• VIP 1: 1% خصم (1000 ل.س)\n"
-        "• VIP 2: 2% خصم (2000 ل.س)\n"
-        "• VIP 3: 3% خصم (4000 ل.س)\n"
-        "• VIP 4: 5% خصم (8000 ل.س)\n\n"
-        
+        "• VIP 1: 1% خصم (3500 ل.س)\n"
+        "• VIP 2: 2% خصم (6500 ل.س)\n"
+        "• VIP 3: 3% خصم (12000 ل.س)\n"
+            
         "**📞 للدعم:**\n"
-        "• @support\n\n"
+        "• @Charger444\n\n"
         
         "🔹 **لتحديث القائمة: أرسل /start**"
     )
