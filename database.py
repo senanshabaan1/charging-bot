@@ -1142,6 +1142,8 @@ async def update_user_vip(pool, user_id):
             # إذا كان المستخدم يدوياً، لا تغير مستواه
             if user and user['manual_vip']:
                 logging.info(f"👑 المستخدم {user_id} لديه مستوى يدوي VIP {user['vip_level']}")
+                # استيراد VIP_LEVELS داخل الدالة
+                from database import VIP_LEVELS
                 return VIP_LEVELS.get(user['vip_level'], VIP_LEVELS[0])
             
             # حساب إجمالي مشتريات المستخدم
@@ -1150,6 +1152,9 @@ async def update_user_vip(pool, user_id):
                 FROM orders 
                 WHERE user_id = $1 AND status = 'completed'
             ''', user_id) or 0
+            
+            # استيراد VIP_LEVELS داخل الدالة
+            from database import VIP_LEVELS
             
             # تحديد المستوى حسب الإنفاق
             level = 0
@@ -1176,6 +1181,7 @@ async def update_user_vip(pool, user_id):
             return data
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث VIP للمستخدم {user_id}: {e}")
+        from database import VIP_LEVELS
         return VIP_LEVELS[0]
 
 def get_next_vip_level(total_spent):
