@@ -15,7 +15,15 @@ import random
 import string
 
 from handlers.time_utils import get_damascus_time_now
-from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard, get_cancel_keyboard
+from handlers.keyboards import (
+    get_main_menu_keyboard,  # إنلاين
+    get_admin_main_keyboard,  # إنلاين للإدارة
+    get_back_inline_keyboard,
+    get_confirmation_keyboard,
+    get_yes_no_keyboard,
+    get_categories_keyboard,
+    get_back_to_admin_inline_keyboard
+)
 
 # إعداد logging
 logging.basicConfig(level=logging.INFO)
@@ -131,7 +139,8 @@ async def global_cancel_handler(message: types.Message, state: FSMContext, db_po
     
     await message.answer(
         "✅ تم إلغاء العملية",
-        reply_markup=get_main_menu_keyboard(is_admin_user_flag)
+        reply_markup=get_main_menu_keyboard(is_admin_user_flag),  # إنلاين
+        parse_mode="Markdown"
     )
 
 # ============= لوحة التحكم الرئيسية =============
@@ -189,7 +198,7 @@ async def admin_panel(message: types.Message, db_pool):
         f"🛠 **لوحة تحكم الإدارة**\n\n"
         f"حالة البوت: {status_text}\n\n"
         f"🔸 **اختر الإجراء المطلوب:**",
-        reply_markup=builder.as_markup(),
+        reply_markup=get_admin_main_keyboard(),
         parse_mode="Markdown"
     )
 
@@ -245,7 +254,7 @@ async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
         f"🛠 **لوحة تحكم الإدارة**\n\n"
         f"حالة البوت: {status_text}\n\n"
         f"🔸 **اختر الإجراء المطلوب:**",
-        reply_markup=builder.as_markup(),
+        reply_markup=get_admin_main_keyboard(),
         parse_mode="Markdown"
     )
 
@@ -300,7 +309,7 @@ async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContex
         "📝 أرسل رسالة الصيانة الجديدة:\n\n"
         "(هذه الرسالة ستظهر للمستخدمين عند إيقاف البوت)\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_maintenance_msg)
 
@@ -341,7 +350,7 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext):
         f"أو أرسل /cancel للإلغاء"
     )
     
-    await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_cancel_keyboard())
+    await callback.message.answer(text, parse_mode="Markdown", reply_markup=None())
     await state.set_state(AdminStates.waiting_new_syriatel_numbers)
 
 @router.message(AdminStates.waiting_new_syriatel_numbers)
@@ -381,7 +390,7 @@ async def send_custom_message_start(callback: types.CallbackQuery, state: FSMCon
         "أدخل آيدي المستخدم (ID) أو اليوزر نيم:\n"
         "مثال: `123456789` أو `@username`\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_custom_message_user)
 
@@ -417,7 +426,7 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
             "❌ **المستخدم غير موجود**\n\n"
             "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         return
     
@@ -435,7 +444,7 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
         f"• *نص مائل*\n"
         f"• `كود`\n\n"
         f"أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_custom_message_text)
 
@@ -540,7 +549,7 @@ async def get_product_name(message: types.Message, state: FSMContext):
         "💰 **أدخل سعر الوحدة بالدولار:**\n"
         "مثال: 0.001\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_product_price)
 
@@ -554,11 +563,11 @@ async def get_product_price(message: types.Message, state: FSMContext):
             "📦 **أدخل الحد الأدنى للكمية:**\n"
             "مثال: 100\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_product_min)
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001):", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001):", reply_markup=None())
 
 @router.message(AdminStates.waiting_product_min)
 async def get_product_min(message: types.Message, state: FSMContext):
@@ -567,19 +576,19 @@ async def get_product_min(message: types.Message, state: FSMContext):
         min_units = int(message.text)
         
         if min_units <= 0:
-            return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+            return await message.answer("⚠️ الحد الأدنى يجب أن يكون أكبر من 0:", reply_markup=None())
         
         await state.update_data(product_min=min_units)
         await message.answer(
             "📈 **أدخل نسبة الربح (%):**\n"
             "مثال: 10\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_product_profit)
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):", reply_markup=None())
 
 @router.message(AdminStates.waiting_product_profit)
 async def get_product_profit(message: types.Message, state: FSMContext, db_pool):
@@ -611,7 +620,7 @@ async def get_product_profit(message: types.Message, state: FSMContext, db_pool)
         await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10):", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10):", reply_markup=None())
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
@@ -846,7 +855,7 @@ async def add_category_step_name(message: types.Message, state: FSMContext):
             "❌ الاسم يجب أن يكون بدون مسافات. استخدم شرطة سفلية `_` بدلاً من المسافة.\n"
             "مثال: `games` أو `chat_apps`\n\n"
             "أدخل اسم داخلي صحيح:",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         return
     
@@ -860,7 +869,7 @@ async def add_category_step_name(message: types.Message, state: FSMContext):
         "مثال: `🎮 ألعاب`\n"
         "مثال: `💬 تطبيقات دردشة`\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_category_display_name)
 
@@ -872,7 +881,7 @@ async def add_category_step_display_name(message: types.Message, state: FSMConte
     
     display_name = message.text.strip()
     if len(display_name) < 2:
-        await message.answer("❌ الاسم المعروض قصير جداً. أدخل اسم أطول:", reply_markup=get_cancel_keyboard())
+        await message.answer("❌ الاسم المعروض قصير جداً. أدخل اسم أطول:", reply_markup=None())
         return
     
     await state.update_data(category_display_name=display_name)
@@ -886,7 +895,7 @@ async def add_category_step_display_name(message: types.Message, state: FSMConte
         "مثال: `💬` للدردشة\n"
         "أو اتركه فارغاً للايقونة الافتراضية `📁`\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_category_icon)
 
@@ -912,7 +921,7 @@ async def add_category_step_icon(message: types.Message, state: FSMContext):
         "مثال: `1` (يظهر أولاً)\n"
         "مثال: `5` (يظهر خامساً)\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_category_sort)
 
@@ -925,7 +934,7 @@ async def add_category_step_sort(message: types.Message, state: FSMContext, db_p
     try:
         sort_order = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح للترتيب:", reply_markup=get_cancel_keyboard())
+        await message.answer("❌ يرجى إدخال رقم صحيح للترتيب:", reply_markup=None())
         return
     
     data = await state.get_data()
@@ -940,7 +949,7 @@ async def add_category_step_sort(message: types.Message, state: FSMContext, db_p
             await message.answer(
                 f"❌ قسم باسم **{name}** موجود مسبقاً.\n"
                 "الرجاء استخدام اسم داخلي مختلف.",
-                reply_markup=get_cancel_keyboard()
+                reply_markup=None()
             )
             await state.clear()
             return
@@ -1003,7 +1012,7 @@ async def edit_category_display_start(callback: types.CallbackQuery, state: FSMC
             "مثال: `🎮 ألعاب جديدة`\n"
             "مثال: `💬 تطبيقات دردشة`\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_edit_category_value)
         await callback.answer()
@@ -1025,7 +1034,7 @@ async def edit_category_icon_start(callback: types.CallbackQuery, state: FSMCont
             "مثال: `📱`\n"
             "مثال: `🎯`\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_edit_category_value)
         await callback.answer()
@@ -1046,7 +1055,7 @@ async def edit_category_sort_start(callback: types.CallbackQuery, state: FSMCont
             "مثال: `5` (يظهر خامساً)\n\n"
             "📌 الأرقام الأصغر تظهر أولاً\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_edit_category_value)
         await callback.answer()
@@ -1135,11 +1144,11 @@ async def edit_category_save(message: types.Message, state: FSMContext, db_pool)
         if field == 'display_name':
             if len(value) < 2:
                 await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول (حرفين على الأقل):", 
-                                    reply_markup=get_cancel_keyboard())
+                                    reply_markup=None())
                 return
             if len(value) > 50:
                 await message.answer("❌ الاسم طويل جداً. الحد الأقصى 50 حرف:", 
-                                    reply_markup=get_cancel_keyboard())
+                                    reply_markup=None())
                 return
             update_value = value
             field_name = "الاسم المعروض"
@@ -1147,7 +1156,7 @@ async def edit_category_save(message: types.Message, state: FSMContext, db_pool)
         elif field == 'icon':
             if len(value) > 10:
                 await message.answer("❌ الأيقونة طويلة جداً. استخدم رمز واحد أو رمزين:", 
-                                    reply_markup=get_cancel_keyboard())
+                                    reply_markup=None())
                 return
             update_value = value if value else "📁"
             field_name = "الأيقونة"
@@ -1157,13 +1166,13 @@ async def edit_category_save(message: types.Message, state: FSMContext, db_pool)
                 sort_val = int(value)
                 if sort_val < 0 or sort_val > 999:
                     await message.answer("❌ الرقم خارج النطاق المسموح (0-999):", 
-                                        reply_markup=get_cancel_keyboard())
+                                        reply_markup=None())
                     return
                 update_value = sort_val
                 field_name = "الترتيب"
             except ValueError:
                 await message.answer("❌ يرجى إدخال رقم صحيح:", 
-                                    reply_markup=get_cancel_keyboard())
+                                    reply_markup=None())
                 return
         
         else:
@@ -1300,7 +1309,9 @@ async def delete_category_confirm(callback: types.CallbackQuery, db_pool):
             f"{warning}"
             f"{products_list}\n\n"
             f"**هذا الإجراء لا يمكن التراجع عنه!**",
-            reply_markup=builder.as_markup()
+            reply_markup=get_confirmation_keyboard(
+                callback_yes=f"confirm_del_cat_{cat_id}",
+                callback_no="delete_category"
         )
         await callback.answer()
         
@@ -1460,9 +1471,7 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     if not categories:
         await callback.message.edit_text(
             "⚠️ لا توجد أقسام حالياً.\n\nقم بإضافة قسم أولاً من لوحة التحكم.",
-            reply_markup=InlineKeyboardBuilder().row(
-                types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin")
-            ).as_markup()
+            reply_markup=get_back_to_admin_inline_keyboard()
         )
         return
     
@@ -1643,7 +1652,6 @@ async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.message.answer(
         "أدخل اسم الخيار:",
-        reply_markup=get_cancel_keyboard()
     )
     await state.set_state(AdminStates.waiting_option_name)
 
@@ -1655,7 +1663,7 @@ async def add_option_step_name(message: types.Message, state: FSMContext):
     
     name = message.text.strip()
     if len(name) < 2:
-        await message.answer("❌ الاسم قصير جداً. أدخل اسم مناسب:", reply_markup=get_cancel_keyboard())
+        await message.answer("❌ الاسم قصير جداً. أدخل اسم مناسب:", reply_markup=None())
         return
     
     await state.update_data(option_name=name)
@@ -1666,7 +1674,7 @@ async def add_option_step_name(message: types.Message, state: FSMContext):
         f"مثال: `60` لـ 60 UC\n"
         f"الاسم: **{name}**\n\n"
         f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_option_quantity)
 
@@ -1680,7 +1688,7 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
         quantity = int(message.text.strip())
         
         if quantity <= 0:
-            return await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+            return await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=None())
         
         await state.update_data(option_quantity=quantity)
         
@@ -1694,12 +1702,12 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
             f"الاسم: **{option_name}**\n"
             f"الكمية: **{quantity}**\n\n"
             f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_option_supplier_price)
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للكمية:", reply_markup=None())
 
 @router.message(AdminStates.waiting_option_supplier_price)
 async def add_option_step_supplier_price(message: types.Message, state: FSMContext, db_pool):
@@ -1710,10 +1718,10 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
     try:
         supplier_price = float(message.text.strip())
     except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للسعر:", reply_markup=get_cancel_keyboard())
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للسعر:", reply_markup=None())
     
     if supplier_price <= 0:
-        return await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+        return await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=None())
     
     await state.update_data(supplier_price=supplier_price)
     
@@ -1738,7 +1746,7 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
         f"الكمية: **{quantity}**\n"
         f"سعر المورد: **${supplier_price:.3f}**\n\n"
         f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_option_profit)
 
@@ -1752,7 +1760,7 @@ async def add_option_step_profit(message: types.Message, state: FSMContext):
         profit_percent = float(message.text.strip())
         
         if profit_percent < 0:
-            return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+            return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=None())
         
         await state.update_data(profit_percent=profit_percent)
         
@@ -1770,12 +1778,12 @@ async def add_option_step_profit(message: types.Message, state: FSMContext):
             f"سعر المورد: **${supplier_price:.3f}**\n"
             f"نسبة الربح: **{profit_percent}%**\n\n"
             f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
+            reply_markup=None()
         )
         await state.set_state(AdminStates.waiting_option_description)
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح لنسبة الربح:", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح لنسبة الربح:", reply_markup=None())
 
 @router.message(AdminStates.waiting_option_description)
 async def add_option_step_description(message: types.Message, state: FSMContext, db_pool):
@@ -2003,7 +2011,7 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
         
         if field == 'name':
             if len(value) < 2:
-                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:", reply_markup=get_cancel_keyboard())
+                await message.answer("❌ الاسم قصير جداً. أدخل اسم أطول:", reply_markup=None())
                 return
             update_value = value
             field_name = "الاسم"
@@ -2013,39 +2021,39 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
             try:
                 quantity = int(value)
                 if quantity <= 0:
-                    await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+                    await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=None())
                     return
                 update_value = quantity
                 field_name = "الكمية"
                 db_column = "quantity"
             except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
+                await message.answer("❌ يرجى إدخال رقم صحيح للكمية:", reply_markup=None())
                 return
             
         elif field == 'price':
             try:
                 price = float(value)
                 if price <= 0:
-                    await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
+                    await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=None())
                     return
                 update_value = price
                 field_name = "سعر المورد"
                 db_column = "price_usd"
             except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):", reply_markup=get_cancel_keyboard())
+                await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):", reply_markup=None())
                 return
             
         elif field == 'profit':
             try:
                 profit = float(value)
                 if profit < 0:
-                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=None())
                     return
                 update_value = profit
                 field_name = "نسبة الربح"
                 db_column = "profit_percentage"
             except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):", reply_markup=get_cancel_keyboard())
+                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):", reply_markup=None())
                 return
             
         elif field == 'desc':
@@ -2352,7 +2360,7 @@ async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext)
         "مثال: `1 1 100`\n\n"
         "أو أرسل /cancel للإلغاء",
         parse_mode="Markdown",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_points_settings)
 
@@ -2521,7 +2529,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
     try:
         new_rate = float(message.text)
     except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):", reply_markup=get_cancel_keyboard())
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):", reply_markup=None())
     
     from config import ADMIN_ID, MODERATORS
     admin_ids = [ADMIN_ID] + MODERATORS
@@ -2649,7 +2657,7 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
                 "❌ المستخدم غير موجود في قاعدة البيانات.\n"
                 "يجب على المستخدم استخدام البوت مرة واحدة على الأقل.\n\n"
                 "أو أرسل /cancel للإلغاء",
-                reply_markup=get_cancel_keyboard()
+                reply_markup=None()
             )
         
         success, msg = await add_admin(db_pool, new_admin_id, message.from_user.id)
@@ -2677,7 +2685,7 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
         await state.clear()
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط):", reply_markup=get_cancel_keyboard())
+        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط):", reply_markup=None())
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
@@ -2875,7 +2883,7 @@ async def user_info_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "👤 **أدخل آيدي المستخدم للحصول على معلوماته:**\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_user_info)
 
@@ -2958,7 +2966,7 @@ async def add_points_start(callback: types.CallbackQuery, state: FSMContext):
         user_id = int(callback.data.split("_")[2])
         await state.update_data(target_user=user_id)
         await callback.message.answer(f"⭐ **أدخل عدد النقاط لإضافتها للمستخدم {user_id}:**\n\nأو أرسل /cancel للإلغاء",
-                                      reply_markup=get_cancel_keyboard())
+                                      reply_markup=None())
         await state.set_state(AdminStates.waiting_points_amount)
     except Exception as e:
         logger.error(f"خطأ في بدء إضافة نقاط: {e}")
@@ -2971,7 +2979,7 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
         points = int(message.text)
         
         if points <= 0:
-            return await message.answer("⚠️ يرجى إدخال رقم موجب:", reply_markup=get_cancel_keyboard())
+            return await message.answer("⚠️ يرجى إدخال رقم موجب:", reply_markup=None())
         
         data = await state.get_data()
         user_id = data['target_user']
@@ -2999,7 +3007,7 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
         await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):", reply_markup=None())
     except Exception as e:
         logger.error(f"خطأ في إضافة نقاط: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}")
@@ -3012,7 +3020,7 @@ async def edit_balance_from_info(callback: types.CallbackQuery, state: FSMContex
         user_id = int(callback.data.split("_")[2])
         await state.update_data(target_user=user_id)
         await callback.message.answer(f"💰 **أدخل الرصيد الجديد للمستخدم {user_id}:**\n\nأو أرسل /cancel للإلغاء",
-                                      reply_markup=get_cancel_keyboard())
+                                      reply_markup=None())
         await state.set_state(AdminStates.waiting_balance_amount)
     except Exception as e:
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
@@ -3023,7 +3031,7 @@ async def finalize_add_balance(message: types.Message, state: FSMContext, db_poo
     try:
         amount = float(message.text)
     except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 5000):", reply_markup=get_cancel_keyboard())
+        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 5000):", reply_markup=None())
     
     data = await state.get_data()
     user_id = data['target_user']
@@ -3100,7 +3108,7 @@ async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_p
         f"📝 **أدخل السعر الجديد:**\n\n"
         f"أو أرسل /cancel للإلغاء",
         parse_mode="Markdown",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_new_rate)
 
@@ -3114,7 +3122,7 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
         new_rate = float(message.text)
         
         if new_rate <= 0:
-            return await message.answer("⚠️ يرجى إدخال رقم موجب:", reply_markup=get_cancel_keyboard())
+            return await message.answer("⚠️ يرجى إدخال رقم موجب:", reply_markup=None())
         
         from database import set_exchange_rate
         await set_exchange_rate(db_pool, new_rate)
@@ -3134,7 +3142,7 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
         await state.clear()
         
     except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):", reply_markup=get_cancel_keyboard())
+        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):", reply_markup=None())
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
@@ -3155,7 +3163,7 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
         "• *نص مائل*\n"
         "• `كود`\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=None()
     )
     await state.set_state(AdminStates.waiting_broadcast_msg)
 # ============= إرسال رسالة جماعية (تابع) =============
@@ -3291,7 +3299,10 @@ async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bo
         f"• ❌ فشل: {failed_count}\n"
         f"• 👥 الإجمالي: {total_users}\n\n"
     )
-    
+        await callback.message.edit_text(
+        result_text,
+        reply_markup=get_back_to_admin_inline_keyboard()  # زر رجوع للوحة التحكم
+    )
     if failed_users:
         failed_sample = failed_users[:10]
         result_text += f"⚠️ أمثلة على المستخدمين الذين فشل الإرسال لهم:\n"
@@ -3772,7 +3783,7 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
     try:
         discount = float(message.text.strip())
         if discount < 0 or discount > 100:
-            return await message.answer("❌ نسبة الخصم يجب أن تكون بين 0 و 100:", reply_markup=get_cancel_keyboard())
+            return await message.answer("❌ نسبة الخصم يجب أن تكون بين 0 و 100:", reply_markup=None())
         
         data = await state.get_data()
         user_id = data['target_user']
@@ -3811,7 +3822,7 @@ async def set_custom_discount(message: types.Message, state: FSMContext, db_pool
         await state.clear()
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
+        await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=None())
 
 @router.callback_query(F.data.startswith("downgrade_vip_"))
 async def downgrade_vip_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -3967,5 +3978,5 @@ async def admin_back_handler(message: types.Message, state: FSMContext, db_pool)
     else:
         await message.answer(
             "✅ تم الإلغاء",
-            reply_markup=get_back_keyboard()
+            reply_markup=get_back_inline_keyboard()
         )
