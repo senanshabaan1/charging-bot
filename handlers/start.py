@@ -10,7 +10,7 @@ import pytz
 import random
 import string
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
-from handlers.keyboards import get_main_menu_keyboard
+from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -465,6 +465,14 @@ async def my_account(message: types.Message, db_pool):
         f"👤 **الاسم:** {first_name or message.from_user.full_name}\n"
         f"📅 **اليوزر:** @{username or message.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
+        f"⭐ **نقاطك:** {points}\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"📊 **تفاصيل النقاط:**\n"
+        f"• من الإحالات: {points_from_referrals} نقطة\n"
+        f"• من المشتريات: {points_from_orders} نقطة\n\n"
+        f"📋 **سجل العمليات:**\n"
+        f"• عدد عمليات الشحن: {deposits_count}\n"
+        f"• عدد عمليات الشراء: {orders_count}\n\n"
         f"👑 **نظام VIP:**\n"
         f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
@@ -533,7 +541,8 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
         f"• 1 نقطة لكل مشترك جديد\n"
-        f"• كل 100 نقطة = 1$ ({five_usd_value:.0f} ل.س)\n\n"
+        f"• كل 100 نقطة = 1$ ({five_usd_value:.0f} ل.س)\n"
+        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
@@ -763,6 +772,14 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"👤 **الاسم:** {first_name or callback.from_user.full_name}\n"
         f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
+        f"⭐ **نقاطك:** {points}\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"📊 **تفاصيل النقاط:**\n"
+        f"• من الإحالات: {points_from_referrals} نقطة\n"
+        f"• من المشتريات: {points_from_orders} نقطة\n\n"
+        f"📋 **سجل العمليات:**\n"
+        f"• عدد عمليات الشحن: {deposits_count}\n"
+        f"• عدد عمليات الشراء: {orders_count}\n\n"
         f"👑 **نظام VIP:**\n"
         f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
@@ -825,6 +842,7 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
         f"• من الإحالات: {points_from_referrals} نقطة\n"
         f"• من المشتريات: {points_from_orders} نقطة\n"
         f"• تم استردادها: {abs(points_redeemed)} نقطة\n\n"
+        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)"
     )
     
@@ -972,7 +990,7 @@ async def show_help(message: types.Message):
         "• عرض الرصيد الحالي\n"
         "• عرض النقاط وقيمتها\n"
         "• رابط الإحالة الخاص بك\n"
-        "• سجل العمليات\n"
+        "• سجل النقاط\n"
         "• استرداد النقاط\n"
         "• مستوى VIP والخصم\n\n"
         
