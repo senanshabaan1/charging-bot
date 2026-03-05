@@ -138,7 +138,6 @@ async def global_cancel_handler(message: types.Message, state: FSMContext, db_po
 
 @router.message(Command("admin"))
 async def admin_panel(message: types.Message, db_pool):
-    """عرض لوحة تحكم الإدارة"""
     if not is_admin(message.from_user.id):
         return
 
@@ -146,57 +145,53 @@ async def admin_panel(message: types.Message, db_pool):
     bot_status = await get_bot_status(db_pool)
     status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
 
-    kb = [
-        [types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
-         types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats")],
-        
-        [types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
-         types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info")],
-        
-        
-        [types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points")],
-        
-        [types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
-         types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")],
-        
-        [types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
-         types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points")],
-        
-        [types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
-         types.InlineKeyboardButton(text="📊 تقارير ونسخ احتياطي", callback_data="reports_menu")],
-        
-        [types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
-         types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product")],
-        
-        [types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
-         types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products")],
-        
-        [types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
-         types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot")],
-        
-        [types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
-         types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins")],
-        
-        [types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
-         types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message")],
-        
-        [types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
-         types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options")],
-
-        [types.InlineKeyboardButton(text="📁 إدارة الأقسام", callback_data="manage_categories"),
-         types.InlineKeyboardButton(text="➕ إضافة قسم", callback_data="add_category")],
+    # مصفوفة الأزرار (نص الزر, callback_data)
+    buttons_data = [
+        ("📈 سعر الصرف", "edit_rate"),
+        ("📊 الإحصائيات", "bot_stats"),
+        ("📢 رسالة للكل", "broadcast"),
+        ("👤 معلومات مستخدم", "user_info"),
+        ("⭐ إدارة النقاط", "manage_points"),
+        ("💳 الأكثر إيداعاً", "top_deposits"),
+        ("🛒 الأكثر طلبات", "top_orders"),
+        ("🔗 الأكثر إحالة", "top_referrals"),
+        ("⭐ الأكثر نقاط", "top_points"),
+        ("👥 إحصائيات VIP", "vip_stats"),
+        ("📊 تقارير ونسخ", "reports_menu"),
+        ("➕ إضافة منتج", "add_product"),
+        ("✏️ تعديل منتج", "edit_product"),
+        ("🗑️ حذف منتج", "delete_product"),
+        ("📱 عرض المنتجات", "list_products"),
+        ("📞 أرقام سيرياتل", "edit_syriatel"),
+        ("🔄 تشغيل/إيقاف", "toggle_bot"),
+        ("⚠️ تصفير البوت", "reset_bot"),
+        ("👑 إدارة المشرفين", "manage_admins"),
+        ("✏️ رسالة الصيانة", "edit_maintenance"),
+        ("✉️ رسالة لمستخدم", "send_custom_message"),
+        ("🔄 تفعيل/إيقاف التطبيقات", "manage_apps_status"),
+        ("🎮 إدارة خيارات الألعاب", "manage_options"),
+        ("📁 إدارة الأقسام", "manage_categories"),
+        ("➕ إضافة قسم", "add_category"),
     ]
+    
+    builder = InlineKeyboardBuilder()
+    
+    # إضافة الأزرار باستخدام loop
+    for text, callback in buttons_data:
+        builder.add(types.InlineKeyboardButton(text=text, callback_data=callback))
+    
+    # توزيع 3 أزرار في كل صف
+    builder.adjust(3)
     
     await message.answer(
         f"🛠 **لوحة تحكم الإدارة**\n\n"
         f"حالة البوت: {status_text}\n\n"
         f"🔸 **اختر الإجراء المطلوب:**",
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb),
+        reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
 
 # ============= العودة للوحة التحكم =============
-
 @router.callback_query(F.data == "back_to_admin")
 @router.callback_query(F.data == "back_to_admin_panel")
 async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
@@ -205,9 +200,48 @@ async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
     
     bot_status = await get_bot_status(db_pool)
     status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
-    
-    await admin_panel(callback.message, db_pool)
 
+    builder = InlineKeyboardBuilder()
+    
+    # نفس الأزرار
+    builder.add(
+        types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
+        types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats"),
+        types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
+        types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info"),
+        types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points"),
+        types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
+        types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders"),
+        types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
+        types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points"),
+        types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
+        types.InlineKeyboardButton(text="📊 تقارير ونسخ", callback_data="reports_menu"),
+        types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
+        types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product"),
+        types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
+        types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products"),
+        types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
+        types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot"),
+        types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
+        types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins"),
+        types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
+        types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message"),
+        types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
+        types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options"),
+        types.InlineKeyboardButton(text="📁 إدارة الأقسام", callback_data="manage_categories"),
+        types.InlineKeyboardButton(text="➕ إضافة قسم", callback_data="add_category"),
+    )
+    
+    # توزيع 3 أزرار في كل صف
+    builder.adjust(3)
+    
+    await callback.message.edit_text(
+        f"🛠 **لوحة تحكم الإدارة**\n\n"
+        f"حالة البوت: {status_text}\n\n"
+        f"🔸 **اختر الإجراء المطلوب:**",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
 # ============= تشغيل/إيقاف البوت =============
 
 @router.callback_query(F.data == "toggle_bot")
@@ -1409,46 +1443,121 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
-    """عرض جميع المنتجات لإدارة خياراتها"""
+    """إدارة خيارات المنتجات - عرض الأقسام أولاً"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     async with db_pool.acquire() as conn:
-        products = await conn.fetch('''
-            SELECT a.id, a.name, c.display_name, a.type
-            FROM applications a
-            LEFT JOIN categories c ON a.category_id = c.id
-            ORDER BY c.sort_order, a.name
-        ''')
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
     
-    text = "📦 **إدارة خيارات المنتجات**\n\n"
+    if not categories:
+        await callback.message.edit_text(
+            "⚠️ لا توجد أقسام حالياً.\n\nقم بإضافة قسم أولاً من لوحة التحكم.",
+            reply_markup=InlineKeyboardBuilder().row(
+                types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin")
+            ).as_markup()
+        )
+        return
     
-    if not products:
-        text += "⚠️ لا توجد منتجات حالياً."
-    else:
-        text += "**جميع المنتجات:**\n\n"
-        type_icons = {
-            'game': '🎮',
-            'subscription': '📅',
-            'service': '📱'
-        }
-        for p in products:
-            icon = type_icons.get(p['type'], '📦')
-            text += f"{icon} **{p['name']}** - {p['display_name'] or 'بدون قسم'}\n"
+    text = "📁 **إدارة خيارات المنتجات**\n\n"
+    text += "اختر القسم لعرض التطبيقات التابعة له:\n\n"
     
     builder = InlineKeyboardBuilder()
     
-    for product in products:
-        type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
+    for cat in categories:
+        # جلب عدد التطبيقات في هذا القسم
+        async with db_pool.acquire() as conn:
+            apps_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM applications WHERE category_id = $1",
+                cat['id']
+            )
+        
         builder.row(types.InlineKeyboardButton(
-            text=f"{type_icon} {product['name']}",
+            text=f"{cat['icon']} {cat['display_name']} ({apps_count} تطبيق)",
+            callback_data=f"manage_opts_cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة تطبيق جديد", 
+        callback_data="add_new_game"
+    ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للوحة التحكم", 
+        callback_data="back_to_admin"
+    ))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("manage_opts_cat_"))
+async def manage_options_category(callback: types.CallbackQuery, db_pool):
+    """عرض تطبيقات قسم معين لإدارة خياراتها"""
+    cat_id = int(callback.data.split("_")[3])
+    
+    async with db_pool.acquire() as conn:
+        category = await conn.fetchrow(
+            "SELECT * FROM categories WHERE id = $1",
+            cat_id
+        )
+        
+        products = await conn.fetch('''
+            SELECT a.id, a.name, a.type, a.is_active,
+                   (SELECT COUNT(*) FROM product_options WHERE product_id = a.id) as options_count
+            FROM applications a
+            WHERE a.category_id = $1
+            ORDER BY a.is_active DESC, a.name
+        ''', cat_id)
+    
+    if not products:
+        await callback.message.edit_text(
+            f"{category['icon']} **{category['display_name']}**\n\n"
+            f"⚠️ لا توجد تطبيقات في هذا القسم.\n\n"
+            f"يمكنك إضافة تطبيق جديد باستخدام الزر أدناه.",
+            reply_markup=InlineKeyboardBuilder().row(
+                types.InlineKeyboardButton(text="➕ إضافة تطبيق جديد", callback_data="add_new_game"),
+                types.InlineKeyboardButton(text="🔙 رجوع للأقسام", callback_data="manage_options")
+            ).as_markup()
+        )
+        return
+    
+    text = f"{category['icon']} **{category['display_name']}**\n"
+    text += f"📊 عدد التطبيقات: {len(products)}\n"
+    text += "➖➖➖➖➖➖\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    
+    # تجميع الأزرار في أعمدة
+    for product in products:
+        # تحديد الأيقونة حسب النوع والحالة
+        if not product['is_active']:
+            icon = "🔒"
+            status = " (متوقف)"
+        elif product['type'] == 'game':
+            icon = "🎮"
+            status = ""
+        elif product['type'] == 'subscription':
+            icon = "📅"
+            status = ""
+        else:
+            icon = "📱"
+            status = ""
+        
+        options_info = f" [{product['options_count']} خيار]" if product['options_count'] > 0 else ""
+        
+        button_text = f"{icon} {product['name']}{status}{options_info}"
+        
+        builder.row(types.InlineKeyboardButton(
+            text=button_text,
             callback_data=f"prod_options_{product['id']}"
         ))
     
-    builder.row(types.InlineKeyboardButton(text="➕ إضافة منتج جديد", callback_data="add_product"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للأقسام", 
+        callback_data="manage_options"
+    ))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
 
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
@@ -1503,7 +1612,10 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
             types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
+    builder.row(
+    types.InlineKeyboardButton(text="🔙 رجوع للقسم", callback_data=f"manage_opts_cat_{product['category_id']}"),
+    types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="manage_options")
+    )
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
