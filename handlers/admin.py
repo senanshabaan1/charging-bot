@@ -3300,7 +3300,7 @@ async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext, bo
         f"• ❌ فشل: {failed_count}\n"
         f"• 👥 الإجمالي: {total_users}\n\n"
     )
-        await callback.message.edit_text(
+    await callback.message.edit_text(
         result_text,
         reply_markup=get_back_to_admin_inline_keyboard()  # زر رجوع للوحة التحكم
     )
