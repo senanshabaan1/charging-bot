@@ -130,15 +130,25 @@ async def show_categories(message: types.Message, db_pool):
         "🔸 اختر الفئة التي تريدها:", 
         reply_markup=builder.as_markup()
     )
+@router.callback_query(F.data.startswith("disabled_app_"))
+async def handle_disabled_app(callback: types.CallbackQuery):
+    """معالج للتطبيقات المعطلة"""
+    app_id = int(callback.data.split("_")[2])
+    
+    await callback.answer(
+        "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+        show_alert=True
+    )
 
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
-    """عرض التطبيقات في قسم معين - مع تمييز نوع التطبيق"""
+    """عرض التطبيقات في قسم معين - مع تمييز التطبيقات المعطلة"""
     cat_id = int(callback.data.split("_")[1])
     
     async with db_pool.acquire() as conn:
+        # جلب جميع التطبيقات في القسم (سواء مفعلة أو معطلة)
         apps = await conn.fetch(
-            "SELECT * FROM applications WHERE category_id = $1 AND is_active = TRUE ORDER BY name",
+            "SELECT * FROM applications WHERE category_id = $1 ORDER BY is_active DESC, name",
             cat_id
         )
         category = await conn.fetchrow(
@@ -153,48 +163,64 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
         vip_level = user_vip.get('vip_level', 0)
+        vip_icon = user_vip.get('icon', '⚪')
+        vip_name = user_vip.get('name', 'عادي')
     
     if not apps:
         await callback.answer("لا توجد تطبيقات في هذا القسم حالياً", show_alert=True)
         return
     
     builder = InlineKeyboardBuilder()
-    
     buttons = []
+    
     for app in apps:
-        unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
-        profit_percentage = float(app.get('profit_percentage', 0) or 0)
-        min_units = int(app.get('min_units', 1) or 1)
+        is_active = app['is_active']
         
-        # تعيين الأيقونة حسب نوع التطبيق
-        if app['type'] == 'game':
-            icon = "🎮"
-        elif app['type'] == 'subscription':
-            icon = "📅"
+        # تحديد الأيقونة حسب حالة التطبيق ونوعه
+        if not is_active:
+            icon = "🔒"  # قفل للتطبيقات المعطلة
+            status_text = " (متوقف)"
+            callback_data = f"disabled_app_{app['id']}"
         else:
-            icon = "📱"
-        
-        # حساب السعر مع الخصم
-        final_price_usd = unit_price * (1 + (profit_percentage / 100))
-        discounted_price_usd = final_price_usd * (1 - discount/100)
-        price_syp = discounted_price_usd * current_rate
-        
-        # عرض السعر مع إشارة الخصم
-        if discount > 0:
-            original_price = final_price_usd * current_rate
-            if app['type'] == 'game' and min_units > 1:
-                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units}) (خصم {discount}%)"
+            # تعيين الأيقونة حسب نوع التطبيق للمفعلة
+            if app['type'] == 'game':
+                icon = "🎮"
+            elif app['type'] == 'subscription':
+                icon = "📅"
             else:
-                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
+                icon = "📱"
+            status_text = ""
+            callback_data = f"buy_{app['id']}_{app['type']}"
+        
+        if is_active:
+            # حساب السعر فقط للتطبيقات المفعلة
+            unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
+            profit_percentage = float(app.get('profit_percentage', 0) or 0)
+            min_units = int(app.get('min_units', 1) or 1)
+            
+            final_price_usd = unit_price * (1 + (profit_percentage / 100))
+            discounted_price_usd = final_price_usd * (1 - discount/100)
+            price_syp = discounted_price_usd * current_rate
+            
+            # عرض السعر مع إشارة الخصم
+            if discount > 0:
+                original_price = final_price_usd * current_rate
+                if app['type'] == 'game' and min_units > 1:
+                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units}) (خصم {discount}%)"
+                else:
+                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
+            else:
+                if app['type'] == 'game' and min_units > 1:
+                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units})"
+                else:
+                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
         else:
-            if app['type'] == 'game' and min_units > 1:
-                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units})"
-            else:
-                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
+            # للتطبيقات المعطلة - عرض رسالة التوقف فقط
+            button_text = f"{icon} {app['name']} (متوقف)"
         
         buttons.append(types.InlineKeyboardButton(
             text=button_text, 
-            callback_data=f"buy_{app['id']}_{app['type']}"
+            callback_data=callback_data
         ))
     
     # ترتيب الأزرار (2 في كل صف)
@@ -209,14 +235,12 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_categories"
     ))
     
-    # إظهار مستوى المستخدم
-
-    vip_icons = ["⚪ VIP 0", "🔵 VIP 1", "🟣 VIP 2", "🟡 VIP 3"]
-    vip_text = vip_icons[vip_level] if vip_level < len(vip_icons) else "VIP 0 ⚪"
+    # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
         f"📱 **{category['display_name']}**\n\n"
-        f"👤 مستواك: {vip_text} (خصم {discount}%)\n"
-        f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
+        f"👤 مستواك: {vip_icon} {vip_name} (خصم {discount}%)\n"
+        f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
+        f"🔒 التطبيقات المقفلة متوقفة حالياً\n\n"
         "🔸 اختر التطبيق المطلوب:", 
         reply_markup=builder.as_markup()
     )
@@ -260,7 +284,14 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         if not app:
             await callback.answer("عذراً، هذا التطبيق غير متوفر حالياً.", show_alert=True)
             return
-        
+                # التحقق من حالة التفعيل
+        if not app['is_active']:
+            await callback.answer(
+                "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+                show_alert=True
+            )
+            return
+
         current_rate = await get_exchange_rate(db_pool)
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
