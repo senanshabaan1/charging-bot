@@ -1,36 +1,59 @@
 # handlers/keyboards.py
 from aiogram import types
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
-# ============= دوال الكيبورد الإنلاين فقط (Inline Keyboard) =============
+# ============= دوال الكيبورد العادية (Reply Keyboard) =============
+# هذي للقوائم الرئيسية - تظهر في أسفل الشاشة
 
 def get_main_menu_keyboard(is_admin_user: bool = False):
-    """القائمة الرئيسية - إنلاين (تظهر تحت الرسالة)"""
-    builder = InlineKeyboardBuilder()
+    """القائمة الرئيسية - أزرار سفلية كبيرة"""
+    builder = ReplyKeyboardBuilder()
     
-    # الأزرار الرئيسية - 2 في كل صف
-    builder.row(
-        types.InlineKeyboardButton(text="🛒 خدمات الشحن", callback_data="services"),
-        types.InlineKeyboardButton(text="💰 شحن المحفظة", callback_data="deposit"),
-        width=2
-    )
-    
-    builder.row(
-        types.InlineKeyboardButton(text="👤 حسابي", callback_data="profile"),
-        types.InlineKeyboardButton(text="❓ مساعدة", callback_data="help"),
-        width=2
-    )
+    # الأزرار الأساسية - كل واحد بصف لحالو عشان يكون كبير
+    builder.row(types.KeyboardButton(text="🛒 خدمات الشحن"))
+    builder.row(types.KeyboardButton(text="💰 شحن المحفظة"))
+    builder.row(types.KeyboardButton(text="👤 حسابي"))
     
     if is_admin_user:
-        builder.row(
-            types.InlineKeyboardButton(text="⚙️ لوحة التحكم", callback_data="admin_panel"),
-            width=1
-        )
+        builder.row(types.KeyboardButton(text="⚙️ لوحة التحكم"))
     
-    return builder.as_markup()
+    builder.row(types.KeyboardButton(text="❓ مساعدة"))
+    
+    return builder.as_markup(resize_keyboard=True)
+
+def get_cancel_keyboard():
+    """زر إلغاء موحد - يظهر أثناء العمليات"""
+    builder = ReplyKeyboardBuilder()
+    builder.row(types.KeyboardButton(text="❌ إلغاء"))
+    return builder.as_markup(resize_keyboard=True)
+
+def get_back_keyboard():
+    """زر رجوع للقائمة السابقة"""
+    builder = ReplyKeyboardBuilder()
+    builder.row(types.KeyboardButton(text="🔙 رجوع"))
+    return builder.as_markup(resize_keyboard=True)
+
+def get_main_menu_only_keyboard():
+    """العودة للقائمة الرئيسية فقط"""
+    builder = ReplyKeyboardBuilder()
+    builder.row(types.KeyboardButton(text="🏠 القائمة الرئيسية"))
+    return builder.as_markup(resize_keyboard=True)
+
+def get_back_and_cancel_keyboard():
+    """أزرار رجوع وإلغاء معاً"""
+    builder = ReplyKeyboardBuilder()
+    builder.row(
+        types.KeyboardButton(text="🔙 رجوع"),
+        types.KeyboardButton(text="❌ إلغاء")
+    )
+    return builder.as_markup(resize_keyboard=True)
+
+
+# ============= دوال الكيبورد الإنلاين (Inline Keyboard) =============
+# هذي تظهر تحت الرسالة - مناسبة للقوائم الفرعية والخيارات الكثيرة
 
 def get_categories_keyboard(categories):
-    """عرض الأقسام - إنلاين (2 في كل صف)"""
+    """عرض الأقسام - إنلاين (2-3 أزرار في كل صف)"""
     builder = InlineKeyboardBuilder()
     
     # عرض الأقسام 2 في كل صف
@@ -52,7 +75,7 @@ def get_categories_keyboard(categories):
     return builder.as_markup()
 
 def get_apps_keyboard(apps, category_name, current_rate, vip_discount=0):
-    """عرض التطبيقات في قسم معين - إنلاين (كل تطبيق بصف)"""
+    """عرض التطبيقات في قسم معين - إنلاين"""
     builder = InlineKeyboardBuilder()
     
     for app in apps:
@@ -69,36 +92,36 @@ def get_apps_keyboard(apps, category_name, current_rate, vip_discount=0):
             discounted_price_usd = final_price_usd * (1 - vip_discount/100)
             price_syp = discounted_price_usd * current_rate
             
-            min_units = int(app.get('min_units', 1) or 1)
-            
-            if min_units > 1:
-                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units})"
-            else:
-                button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
-            
+            button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
             if vip_discount > 0:
-                button_text += f" 🔹 خصم {vip_discount}%"
+                button_text += f" (خصم {vip_discount}%)"
         else:
             icon = "🔒"
             callback_data = f"disabled_app_{app['id']}"
-            button_text = f"{icon} {app['name']}\n(متوقف مؤقتاً)"
+            button_text = f"{icon} {app['name']} (متوقف)"
         
         builder.row(types.InlineKeyboardButton(
             text=button_text,
             callback_data=callback_data
         ))
     
-    # أزرار التنقل - صف واحد
-    builder.row(
-        types.InlineKeyboardButton(text="🔙 رجوع للأقسام", callback_data="back_to_categories"),
-        types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="back_to_main"),
-        width=2
-    )
+    # أزرار التنقل
+    nav_buttons = []
+    nav_buttons.append(types.InlineKeyboardButton(
+        text="🔙 رجوع للأقسام",
+        callback_data="back_to_categories"
+    ))
+    nav_buttons.append(types.InlineKeyboardButton(
+        text="🏠 القائمة الرئيسية",
+        callback_data="back_to_main"
+    ))
+    
+    builder.row(*nav_buttons)
     
     return builder.as_markup()
 
 def get_options_keyboard(options, app_name, current_rate, vip_discount=0, app_type='game'):
-    """عرض خيارات التطبيق (فئات) - إنلاين (كل خيار بصف)"""
+    """عرض خيارات التطبيق (فئات) - إنلاين"""
     builder = InlineKeyboardBuilder()
     
     for opt in options:
@@ -111,24 +134,21 @@ def get_options_keyboard(options, app_name, current_rate, vip_discount=0, app_ty
             opt_price = float(opt['price_usd']) if opt['price_usd'] else 0
             discounted_price_usd = opt_price * (1 - vip_discount/100)
             price_syp = discounted_price_usd * current_rate
-            quantity = int(opt.get('quantity', 1) or 1)
             
-            if quantity > 1:
-                button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س ({quantity} وحدة)"
-            else:
-                button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
-            
+            button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
             if vip_discount > 0:
-                button_text += f" 🔹 خصم {vip_discount}%"
+                button_text += f" (خصم {vip_discount}%)"
         else:
             icon = "🔒"
             callback_data = f"disabled_option_{opt['id']}"
-            button_text = f"{icon} {opt['name']}\n(متوقف مؤقتاً)"
+            button_text = f"{icon} {opt['name']} (متوقف)"
         
         builder.row(types.InlineKeyboardButton(
             text=button_text,
             callback_data=callback_data
         ))
+    
+    # عرض وصف الخيار إذا موجود - كنص منفصل
     
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع للتطبيقات",
@@ -159,9 +179,8 @@ def get_confirmation_keyboard(callback_yes: str = "confirm", callback_no: str = 
     """أزرار تأكيد وإلغاء"""
     builder = InlineKeyboardBuilder()
     builder.row(
-        types.InlineKeyboardButton(text="✅ تأكيد ودفع", callback_data=callback_yes),
-        types.InlineKeyboardButton(text="❌ إلغاء", callback_data=callback_no),
-        width=2
+        types.InlineKeyboardButton(text="✅ تأكيد", callback_data=callback_yes),
+        types.InlineKeyboardButton(text="❌ إلغاء", callback_data=callback_no)
     )
     return builder.as_markup()
 
@@ -170,8 +189,7 @@ def get_yes_no_keyboard(yes_data: str = "yes", no_data: str = "no"):
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="✅ نعم", callback_data=yes_data),
-        types.InlineKeyboardButton(text="❌ لا", callback_data=no_data),
-        width=2
+        types.InlineKeyboardButton(text="❌ لا", callback_data=no_data)
     )
     return builder.as_markup()
 
@@ -180,104 +198,39 @@ def get_points_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="📋 سجل النقاط", callback_data="points_history"),
-        types.InlineKeyboardButton(text="🎁 استرداد نقاط", callback_data="redeem_points"),
-        width=2
+        types.InlineKeyboardButton(text="🎁 استرداد نقاط", callback_data="redeem_points")
     )
     builder.row(
-        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link"),
-        width=1
+        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link")
     )
     return builder.as_markup()
 
-def get_deposit_keyboard():
-    """كيبورد إنلاين لشحن المحفظة"""
-    builder = InlineKeyboardBuilder()
-    
-    # مبالغ مقترحة للشحن
-    amounts = [1000, 2500, 5000, 10000, 25000, 50000]
-    
-    # عرض المبالغ 2 في كل صف
-    for i in range(0, len(amounts), 2):
-        row = []
-        for amount in amounts[i:i+2]:
-            row.append(types.InlineKeyboardButton(
-                text=f"{amount:,.0f} ل.س",
-                callback_data=f"deposit_{amount}"
-            ))
-        builder.row(*row)
-    
-    builder.row(
-        types.InlineKeyboardButton(text="💰 مبلغ آخر", callback_data="deposit_custom"),
-        width=1
-    )
-    
-    builder.row(
-        types.InlineKeyboardButton(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"),
-        width=1
-    )
-    
-    return builder.as_markup()
 
-def get_profile_keyboard():
-    """كيبورد إنلاين للحساب الشخصي"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="💰 رصيدي", callback_data="balance"),
-        types.InlineKeyboardButton(text="⭐ نقاطي", callback_data="my_points"),
-        width=2
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="📋 طلباتي", callback_data="my_orders"),
-        types.InlineKeyboardButton(text="🎁 كوبوناتي", callback_data="my_coupons"),
-        width=2
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link"),
-        width=1
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"),
-        width=1
-    )
-    return builder.as_markup()
+# ============= دوال مساعدة =============
 
-def get_admin_main_keyboard():
-    """لوحة تحكم الإدارة - إنلاين (3 أزرار في كل صف)"""
-    builder = InlineKeyboardBuilder()
-    
-    # أزرار الإدارة - 3 في كل صف
-    admin_buttons = [
-        ("📈 سعر الصرف", "edit_rate"),
-        ("📊 الإحصائيات", "bot_stats"),
-        ("📢 رسالة للكل", "broadcast"),
-        ("👤 معلومات مستخدم", "user_info"),
-        ("⭐ إدارة النقاط", "manage_points"),
-        ("💳 الأكثر إيداعاً", "top_deposits"),
-        ("🛒 الأكثر طلبات", "top_orders"),
-        ("🔗 الأكثر إحالة", "top_referrals"),
-        ("⭐ الأكثر نقاط", "top_points"),
-        ("👥 إحصائيات VIP", "vip_stats"),
-        ("📊 تقارير ونسخ", "reports_menu"),
-        ("➕ إضافة منتج", "add_product"),
-        ("✏️ تعديل منتج", "edit_product"),
-        ("🗑️ حذف منتج", "delete_product"),
-        ("📱 عرض المنتجات", "list_products"),
-        ("📞 أرقام سيرياتل", "edit_syriatel"),
-        ("🔄 تشغيل/إيقاف", "toggle_bot"),
-        ("⚠️ تصفير البوت", "reset_bot"),
-        ("👑 إدارة المشرفين", "manage_admins"),
-        ("✏️ رسالة الصيانة", "edit_maintenance"),
-        ("✉️ رسالة لمستخدم", "send_custom_message"),
-        ("🔄 تفعيل/إيقاف التطبيقات", "manage_apps_status"),
-        ("🎮 إدارة خيارات الألعاب", "manage_options"),
-        ("📁 إدارة الأقسام", "manage_categories"),
-        ("➕ إضافة قسم", "add_category"),
-    ]
-    
-    for text, callback in admin_buttons:
-        builder.add(types.InlineKeyboardButton(text=text, callback_data=callback))
-    
-    # توزيع 3 أزرار في كل صف
-    builder.adjust(3)
-    
-    return builder.as_markup()
+async def send_message_with_back_keyboard(bot, chat_id: int, text: str, parse_mode: str = None):
+    """إرسال رسالة مع كيبورد رجوع"""
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=get_back_keyboard(),
+        parse_mode=parse_mode
+    )
+
+async def send_message_with_cancel_keyboard(bot, chat_id: int, text: str, parse_mode: str = None):
+    """إرسال رسالة مع كيبورد إلغاء"""
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=get_cancel_keyboard(),
+        parse_mode=parse_mode
+    )
+
+async def send_message_with_main_menu_keyboard(bot, chat_id: int, text: str, is_admin: bool = False, parse_mode: str = None):
+    """إرسال رسالة مع القائمة الرئيسية"""
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=get_main_menu_keyboard(is_admin),
+        parse_mode=parse_mode
+    )
