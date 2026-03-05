@@ -1580,7 +1580,7 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
     builder.row(
     types.InlineKeyboardButton(text="🔙 رجوع للقسم", callback_data=f"manage_opts_cat_{product['category_id']}"),
     types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="manage_options")
-    
+    )
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
 # ============= إضافة خيار جديد =============
