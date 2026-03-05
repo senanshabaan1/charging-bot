@@ -10,7 +10,7 @@ import pytz
 import random
 import string
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
-from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
+from handlers.keyboards import get_main_menu_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router()
