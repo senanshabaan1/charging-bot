@@ -1339,9 +1339,11 @@ async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
         "📱 **إدارة حالة التطبيقات**\n\n"
         "اختر القسم لعرض التطبيقات والتحكم بحالتها:\n"
         "• ✅ نشط\n"
-        "• ❌ غير نشط",
+        "• 🔒 مقفل\n"
+        "• ❌ غير نشط (قديم)",
         reply_markup=builder.as_markup()
     )
+
 
 @router.callback_query(F.data.startswith("app_status_cat_"))
 async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
@@ -1359,12 +1361,28 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     if not apps:
         return await callback.answer("لا توجد تطبيقات في هذا القسم", show_alert=True)
     
-    text = f"{category['icon']} **{category['display_name']}**\n\nاختر التطبيق لتغيير حالته:\n\n"
+    text = f"{category['icon']} **{category['display_name']}**\n\n"
+    text += "اختر التطبيق لتغيير حالته:\n"
+    text += "• ✅ نشط (يظهر للمستخدمين)\n"
+    text += "• 🔒 مقفل (يظهر بقفل ولا يمكن شراؤه)\n"
+    text += "• ❌ غير نشط (مخفي تماماً)\n\n"
     
     builder = InlineKeyboardBuilder()
     
     for app in apps:
-        status_icon = "✅" if app['is_active'] else "❌"
+        if app['is_active']:
+            status_icon = "✅"
+        else:
+            # التحقق إذا كان التطبيق مقفول (له خيارات) أو معطل تماماً
+            options_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                app['id']
+            )
+            if options_count > 0:
+                status_icon = "🔒"  # مقفل (له خيارات لكن غير مفعل)
+            else:
+                status_icon = "❌"  # غير نشط (بدون خيارات)
+        
         button_text = f"{status_icon} {app['name']}"
         builder.row(types.InlineKeyboardButton(
             text=button_text,
@@ -1375,9 +1393,10 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
+
 @router.callback_query(F.data.startswith("toggle_app_"))
 async def toggle_app_status(callback: types.CallbackQuery, db_pool):
-    """تغيير حالة التطبيق"""
+    """تغيير حالة التطبيق (تشغيل/إيقاف/قفل)"""
     parts = callback.data.split("_")
     app_id = int(parts[2])
     current_status = bool(int(parts[3]))
@@ -1386,8 +1405,21 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE applications SET is_active = $1 WHERE id = $2", new_status, app_id)
         app = await conn.fetchrow("SELECT name FROM applications WHERE id = $1", app_id)
+        
+        # التحقق من وجود خيارات
+        options_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+            app_id
+        )
     
-    status_text = "✅ مفعل" if new_status else "❌ معطل"
+    if new_status:
+        status_text = "✅ مفعل (نشط)"
+    else:
+        if options_count > 0:
+            status_text = "🔒 مقفل (يظهر بقفل)"
+        else:
+            status_text = "❌ معطل (مخفي)"
+    
     await callback.answer(f"تم تغيير حالة {app['name']} إلى {status_text}")
     
     # العودة لقائمة التطبيقات
@@ -1405,7 +1437,8 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
         db_pool
     )
 
-# ============= إدارة خيارات الألعاب =============
+
+# ============= إدارة خيارات المنتجات =============
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
@@ -1415,10 +1448,10 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     
     async with db_pool.acquire() as conn:
         products = await conn.fetch('''
-            SELECT a.id, a.name, c.display_name, a.type
+            SELECT a.id, a.name, c.display_name, a.type, a.is_active
             FROM applications a
             LEFT JOIN categories c ON a.category_id = c.id
-            ORDER BY c.sort_order, a.name
+            ORDER BY a.is_active DESC, c.sort_order, a.name
         ''')
     
     text = "📦 **إدارة خيارات المنتجات**\n\n"
@@ -1427,21 +1460,40 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
         text += "⚠️ لا توجد منتجات حالياً."
     else:
         text += "**جميع المنتجات:**\n\n"
-        type_icons = {
-            'game': '🎮',
-            'subscription': '📅',
-            'service': '📱'
-        }
         for p in products:
-            icon = type_icons.get(p['type'], '📦')
-            text += f"{icon} **{p['name']}** - {p['display_name'] or 'بدون قسم'}\n"
+            # تحديد الأيقونة حسب الحالة
+            if p['is_active']:
+                status_icon = "✅"
+            else:
+                # التحقق من وجود خيارات
+                options_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                    p['id']
+                )
+                if options_count > 0:
+                    status_icon = "🔒"
+                else:
+                    status_icon = "❌"
+            
+            type_icon = "🎮" if p['type'] == 'game' else "📅" if p['type'] == 'subscription' else "📱"
+            text += f"{status_icon} {type_icon} **{p['name']}** - {p['display_name'] or 'بدون قسم'}\n"
     
     builder = InlineKeyboardBuilder()
     
     for product in products:
+        # تحديد الأيقونة للزر
+        if product['is_active']:
+            status_icon = "✅"
+        else:
+            options_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                product['id']
+            )
+            status_icon = "🔒" if options_count > 0 else "❌"
+        
         type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
         builder.row(types.InlineKeyboardButton(
-            text=f"{type_icon} {product['name']}",
+            text=f"{status_icon} {type_icon} {product['name']}",
             callback_data=f"prod_options_{product['id']}"
         ))
     
@@ -1450,23 +1502,43 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
+
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
-    """عرض خيارات منتج معين"""
+    """عرض خيارات منتج معين - مع إظهار جميع الخيارات (مفعلة ومعطلة)"""
     product_id = int(callback.data.split("_")[2])
     
     async with db_pool.acquire() as conn:
         product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+        # جلب جميع الخيارات (مفعلة ومعطلة)
         options = await conn.fetch(
-            "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
             product_id
         )
+        
+        # جلب سعر الصرف لعرضه
+        from database import get_exchange_rate
+        current_rate = await get_exchange_rate(db_pool)
     
-    # تحديد نوع المنتج
+    # تحديد نوع المنتج وأيقونته
     type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
     
-    text = f"{type_icon} **{product['name']}**\n"
+    # تحديد حالة المنتج
+    if product['is_active']:
+        product_status = "✅ مفعل"
+        product_status_icon = "✅"
+    else:
+        if options and len(options) > 0:
+            product_status = "🔒 مقفل (يظهر للمستخدمين لكن لا يمكن شراؤه)"
+            product_status_icon = "🔒"
+        else:
+            product_status = "❌ معطل (مخفي)"
+            product_status_icon = "❌"
+    
+    text = f"{product_status_icon} {type_icon} **{product['name']}**\n"
     text += f"📝 **النوع:** {product['type']}\n"
+    text += f"📊 **الحالة:** {product_status}\n"
+    text += f"💵 **سعر الصرف:** {current_rate:,.0f} ل.س = 1$\n"
     if product.get('description'):
         text += f"📄 {product['description']}\n"
     text += "➖➖➖➖➖➖\n\n"
@@ -1474,231 +1546,106 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
     if not options:
         text += "⚠️ لا توجد خيارات لهذا المنتج."
     else:
-        text += f"**الخيارات الحالية ({len(options)}):**\n\n"
+        active_count = sum(1 for opt in options if opt['is_active'])
+        inactive_count = len(options) - active_count
+        text += f"**الخيارات:** ✅ {active_count} مفعل | 🔒 {inactive_count} معطل\n\n"
+        
         for i, opt in enumerate(options, 1):
-            text += f"**{i}. {opt['name']}**\n"
-            text += f"   🆔 `{opt['id']}`\n"
-            text += f"   📦 الكمية: {opt['quantity']}\n"
-            text += f"   💰 سعر المورد: ${float(opt['price_usd']):.3f}\n"
+            if opt['is_active']:
+                status = "✅"
+                price_info = f"💰 ${float(opt['price_usd']):.3f}"
+                if opt.get('quantity'):
+                    price_info += f" | 📦 {opt['quantity']}"
+            else:
+                status = "🔒"
+                price_info = "غير متاح"
+            
+            text += f"{status} **{i}. {opt['name']}**\n"
+            text += f"   🆔 `{opt['id']}` | {price_info}\n"
             if opt.get('description'):
                 text += f"   📝 {opt['description']}\n"
             text += "   ➖➖➖➖\n"
     
     builder = InlineKeyboardBuilder()
+    
+    # زر تبديل حالة المنتج نفسه
+    if product['is_active']:
+        product_action = "🔒 قفل التطبيق (يظهر بقفل)"
+    else:
+        if options and len(options) > 0:
+            product_action = "✅ فتح التطبيق (نشط)"
+        else:
+            product_action = "✅ تفعيل التطبيق"
+    
+    builder.row(types.InlineKeyboardButton(
+        text=product_action, 
+        callback_data=f"toggle_app_from_options_{product_id}_{'1' if product['is_active'] else '0'}"
+    ))
+    
     builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
     
     for opt in options:
+        status_icon = "✅" if opt['is_active'] else "🔒"
+        action_text = "تعطيل" if opt['is_active'] else "تفعيل"
         builder.row(
-            types.InlineKeyboardButton(text=f"✏️ تعديل {opt['name']}", callback_data=f"edit_option_{opt['id']}"),
-            types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
+            types.InlineKeyboardButton(
+                text=f"{status_icon} تعديل {opt['name']}", 
+                callback_data=f"edit_option_{opt['id']}"
+            ),
+            types.InlineKeyboardButton(
+                text=action_text, 
+                callback_data=f"toggle_option_{opt['id']}"
+            )
         )
     
-    builder.row(types.InlineKeyboardButton(text="📋 إضافة قوالب جاهزة", callback_data=f"templates_menu_{product_id}"))
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
-@router.callback_query(F.data.startswith("templates_menu_"))
-async def templates_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """عرض قائمة القوالب الجاهزة حسب نوع المنتج"""
-    product_id = int(callback.data.split("_")[2])
-    
-    async with db_pool.acquire() as conn:
-        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
-    
-    await state.update_data(product_id=product_id, product_type=product['type'])
-    
-    builder = InlineKeyboardBuilder()
-    
-    # قوالب للألعاب
-    if product['type'] == 'game':
-        builder.row(types.InlineKeyboardButton(text="🎯 قالب PUBG", callback_data=f"template_pubg_{product_id}"))
-        builder.row(types.InlineKeyboardButton(text="🔥 قالب Free Fire", callback_data=f"template_ff_{product_id}"))
-        builder.row(types.InlineKeyboardButton(text="⚔️ قالب Clash of Clans", callback_data=f"template_coc_{product_id}"))
-    
-    # قوالب للاشتراكات
-    elif product['type'] == 'subscription':
-        builder.row(types.InlineKeyboardButton(text="📅 اشتراكات شهرية", callback_data=f"template_monthly_{product_id}"))
-        builder.row(types.InlineKeyboardButton(text="📅 اشتراكات سنوية", callback_data=f"template_yearly_{product_id}"))
-    
-    # قوالب للخدمات العادية
-    elif product['type'] == 'service':
-        builder.row(types.InlineKeyboardButton(text="📊 متابعين انستغرام", callback_data=f"template_insta_{product_id}"))
-        builder.row(types.InlineKeyboardButton(text="🎵 متابعين تيك توك", callback_data=f"template_tiktok_{product_id}"))
-        builder.row(types.InlineKeyboardButton(text="⭐ نجوم تليجرام", callback_data=f"template_stars_{product_id}"))
-    
-    builder.row(types.InlineKeyboardButton(text="✏️ إدخال يدوي", callback_data=f"add_option_{product_id}"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"prod_options_{product_id}"))
-    
-    await callback.message.edit_text(
-        f"📋 **قوالب جاهزة لـ {product['name']}**\n\n"
-        f"اختر القالب المناسب:",
-        reply_markup=builder.as_markup()
-    )
-@router.callback_query(F.data.startswith("template_insta_"))
-async def add_instagram_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب متابعين انستغرام"""
-    product_id = int(callback.data.split("_")[2])
-    
-    options = [
-        ('100 متابع', 100, 0.99),
-        ('500 متابع', 500, 4.99),
-        ('1000 متابع', 1000, 9.99),
-        ('2500 متابع', 2500, 24.99),
-        ('5000 متابع', 5000, 49.99),
-    ]
-    
-    async with db_pool.acquire() as conn:
-        # حذف القديم إذا وجد
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            product_id
-        )
-        
-        # إضافة الجديد
-        for i, (name, qty, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', product_id, name, qty, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات متابعين انستغرام بنجاح!**\n\n"
-        f"• 100 متابع - $0.99\n"
-        f"• 500 متابع - $4.99\n"
-        f"• 1000 متابع - $9.99\n"
-        f"• 2500 متابع - $24.99\n"
-        f"• 5000 متابع - $49.99"
-    )
 
-@router.callback_query(F.data.startswith("template_tiktok_"))
-async def add_tiktok_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب متابعين تيك توك"""
-    product_id = int(callback.data.split("_")[2])
-    
-    options = [
-        ('100 متابع', 100, 0.99),
-        ('500 متابع', 500, 4.99),
-        ('1000 متابع', 1000, 9.99),
-        ('2500 متابع', 2500, 24.99),
-        ('5000 متابع', 5000, 49.99),
-    ]
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            product_id
-        )
-        
-        for i, (name, qty, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', product_id, name, qty, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات متابعين تيك توك بنجاح!**\n\n"
-        f"• 100 متابع - $0.99\n"
-        f"• 500 متابع - $4.99\n"
-        f"• 1000 متابع - $9.99\n"
-        f"• 2500 متابع - $24.99\n"
-        f"• 5000 متابع - $49.99"
-    )
+# ============= تبديل حالة التطبيق من صفحة الخيارات =============
 
-@router.callback_query(F.data.startswith("template_stars_"))
-async def add_telegram_stars_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب نجوم تليجرام"""
-    product_id = int(callback.data.split("_")[2])
-    
-    options = [
-        ('50 نجمة', 50, 0.99),
-        ('100 نجمة', 100, 1.99),
-        ('250 نجمة', 250, 4.99),
-        ('500 نجمة', 500, 9.99),
-        ('1000 نجمة', 1000, 19.99),
-    ]
+@router.callback_query(F.data.startswith("toggle_app_from_options_"))
+async def toggle_app_from_options(callback: types.CallbackQuery, db_pool):
+    """تبديل حالة التطبيق من صفحة الخيارات"""
+    parts = callback.data.split("_")
+    app_id = int(parts[4])
+    current_status = bool(int(parts[5]))
+    new_status = not current_status
     
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            product_id
+            "UPDATE applications SET is_active = $1 WHERE id = $2", 
+            new_status, app_id
         )
+        app = await conn.fetchrow("SELECT name FROM applications WHERE id = $1", app_id)
         
-        for i, (name, qty, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', product_id, name, qty, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات نجوم تليجرام بنجاح!**\n\n"
-        f"• 50 نجمة - $0.99\n"
-        f"• 100 نجمة - $1.99\n"
-        f"• 250 نجمة - $4.99\n"
-        f"• 500 نجمة - $9.99\n"
-        f"• 1000 نجمة - $19.99"
-    )
-
-@router.callback_query(F.data.startswith("template_monthly_"))
-async def add_monthly_subscription_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب اشتراكات شهرية"""
-    product_id = int(callback.data.split("_")[2])
-    
-    options = [
-        ('شهر واحد', 30, 4.99),
-        ('3 أشهر', 90, 12.99),
-        ('6 أشهر', 180, 24.99),
-        ('12 شهر', 365, 49.99),
-    ]
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            product_id
+        # التحقق من وجود خيارات
+        options_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+            app_id
         )
-        
-        for i, (name, days, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', product_id, name, days, price, i)
     
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات الاشتراكات الشهرية بنجاح!**\n\n"
-        f"• شهر واحد - $4.99\n"
-        f"• 3 أشهر - $12.99\n"
-        f"• 6 أشهر - $24.99\n"
-        f"• 12 شهر - $49.99"
-    )
-
-@router.callback_query(F.data.startswith("template_yearly_"))
-async def add_yearly_subscription_template(callback: types.CallbackQuery, db_pool):
-    """إضافة قالب اشتراكات سنوية"""
-    product_id = int(callback.data.split("_")[2])
+    if new_status:
+        status_text = "✅ مفعل"
+    else:
+        if options_count > 0:
+            status_text = "🔒 مقفل"
+        else:
+            status_text = "❌ معطل"
     
-    options = [
-        ('سنة واحدة', 365, 49.99),
-        ('سنتين', 730, 89.99),
-        ('3 سنوات', 1095, 129.99),
-    ]
+    await callback.answer(f"✅ تم تغيير حالة {app['name']} إلى {status_text}")
     
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM product_options WHERE product_id = $1",
-            product_id
-        )
-        
-        for i, (name, days, price) in enumerate(options):
-            await conn.execute('''
-                INSERT INTO product_options (product_id, name, quantity, price_usd, sort_order, is_active)
-                VALUES ($1, $2, $3, $4, $5, TRUE)
-            ''', product_id, name, days, price, i)
-    
-    await callback.message.edit_text(
-        f"✅ **تم إضافة خيارات الاشتراكات السنوية بنجاح!**\n\n"
-        f"• سنة واحدة - $49.99\n"
-        f"• سنتين - $89.99\n"
-        f"• 3 سنوات - $129.99"
+    # العودة لقائمة الخيارات
+    await show_product_options(
+        types.CallbackQuery(
+            id=callback.id,
+            from_user=callback.from_user,
+            chat_instance="dummy",
+            message=callback.message,
+            data=f"prod_options_{app_id}"
+        ), 
+        db_pool
     )
 
 # ============= إضافة خيار جديد =============
