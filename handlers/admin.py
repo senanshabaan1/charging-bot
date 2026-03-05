@@ -2173,7 +2173,6 @@ async def toggle_option_status(callback: types.CallbackQuery, db_pool):
         new_status = not current_status
         
         async with db_pool.acquire() as conn:
-            # جلب معلومات الخيار والمنتج المرتبط به
             option = await conn.fetchrow(
                 "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
                 option_id
@@ -2183,30 +2182,25 @@ async def toggle_option_status(callback: types.CallbackQuery, db_pool):
                 await callback.answer("❌ الخيار غير موجود", show_alert=True)
                 return
             
-            # تحديث حالة الخيار
             await conn.execute(
                 "UPDATE product_options SET is_active = $1 WHERE id = $2",
                 new_status, option_id
-            )
-            
-            # جلب جميع الخيارات المحدثة لنفس المنتج
-            options = await conn.fetch(
-                "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
-                option['product_id']
             )
         
         status_text = "✅ مفعل" if new_status else "🔒 معطل"
         await callback.answer(f"تم تغيير حالة الخيار '{option['name']}' إلى {status_text}")
         
-        # العودة لقائمة الخيارات المحدثة
-        fake_callback = types.CallbackQuery(
-            id='0',
+        # ✅ الحل الصحيح: استدعاء الدالة مباشرة مع callback الحقيقي
+        # ننشئ Callback جديد بنفس البيانات لكن مع تحديث الـ data
+        new_callback = types.CallbackQuery(
+            id=callback.id,
             from_user=callback.from_user,
+            chat_instance=callback.chat_instance,  # 👈 هذا هو الحقل المطلوب
             message=callback.message,
             data=f"prod_options_{option['product_id']}",
             bot=callback.bot
         )
-        await show_product_options(fake_callback, db_pool)
+        await show_product_options(new_callback, db_pool)
         
     except Exception as e:
         logger.error(f"❌ خطأ في toggle_option_status: {e}")
