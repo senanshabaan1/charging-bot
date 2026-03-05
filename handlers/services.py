@@ -270,21 +270,21 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
     )
 
 # ============= بدء الطلب =============
+
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء طلب شراء مع تطبيق الخصم - عرض جميع الخيارات مع تمييز المعطل"""
+    """بدء طلب شراء مع تطبيق الخصم"""
     parts = callback.data.split("_")
     app_id = int(parts[1])
     app_type = parts[2] if len(parts) > 2 else 'service'
     
     async with db_pool.acquire() as conn:
-        app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", app_id)
+        app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1 AND is_active = TRUE", app_id)
         
         if not app:
             await callback.answer("عذراً، هذا التطبيق غير متوفر حالياً.", show_alert=True)
             return
-        
-        # التحقق من حالة تفعيل التطبيق نفسه
+                # التحقق من حالة التفعيل
         if not app['is_active']:
             await callback.answer(
                 "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
@@ -311,52 +311,35 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         'vip_level': vip_level
     })
     
-    # جلب جميع الخيارات (المفعلة والمعطلة) من product_options
-    async with db_pool.acquire() as conn:
-        options = await conn.fetch(
-            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
-            app_id
-        )
+    # جلب الخيارات من product_options
+    options = await get_product_options(db_pool, app_id)
     
-    # إذا كان هناك خيارات، اعرضها كلها مع تمييز المعطل
+    # إذا كان هناك خيارات محددة مسبقاً، اعرضها
     if options and len(options) > 0:
         builder = InlineKeyboardBuilder()
-        
         for opt in options:
-            is_active = opt['is_active']
             opt_price = float(opt['price_usd']) if opt['price_usd'] is not None else 0.0
             
-            # تحديد الأيقونة حسب الحالة
-            if is_active:
-                # أيقونة مناسبة حسب نوع التطبيق للمفعلة
-                if app_type == 'game':
-                    icon = "🎮"
-                elif app_type == 'subscription':
-                    icon = "📅"
-                else:
-                    icon = "📱"
-                callback_data = f"var_{opt['id']}"
-            else:
-                icon = "🔒"  # قفل للخيارات المعطلة
-                callback_data = f"disabled_option_{opt['id']}"
+            price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
+            discounted_price_usd = price_with_profit * (1 - discount/100)
+            price_syp = discounted_price_usd * current_rate
             
-            # حساب السعر فقط للخيارات المفعلة
-            if is_active:
-                price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
-                discounted_price_usd = price_with_profit * (1 - discount/100)
-                price_syp = discounted_price_usd * current_rate
-                
-                if discount > 0:
-                    button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
-                else:
-                    button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
-            else:
-                # للخيارات المعطلة - عرض رسالة التوقف فقط
-                button_text = f"{icon} {opt['name']} (متوقف)"
+            # أيقونة مناسبة حسب نوع التطبيق
+            if app_type == 'game':
+                icon = "🎮"
+            elif app_type == 'subscription':
+                icon = "📅"
+            else:  # service
+                icon = "📱"
+            
+            button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
+            
+            if discount > 0:
+                button_text += f" (خصم {discount}%)"
             
             builder.row(types.InlineKeyboardButton(
                 text=button_text,
-                callback_data=callback_data
+                callback_data=f"var_{opt['id']}"
             ))
         
         builder.row(types.InlineKeyboardButton(
@@ -367,22 +350,12 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         # رسالة مناسبة حسب نوع التطبيق
         type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "خدمة"
         
-        # حساب عدد الخيارات المتاحة
-        active_count = sum(1 for opt in options if opt['is_active'])
-        disabled_count = len(options) - active_count
-        
-        status_message = ""
-        if disabled_count > 0:
-            status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً"
-        
         await callback.message.edit_text(
             f"**{app_dict['name']}**\n\n"
             f"📱 **النوع:** {type_name}\n"
             f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
-            f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
-            f"{status_message}\n\n"
-            "🔸 **اختر الخيار المناسب:**\n"
-            "🔒 الخيارات المقفلة متوقفة مؤقتاً",
+            f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
+            "🔸 **اختر الخيار المناسب:**",
             reply_markup=builder.as_markup()
         )
         await state.set_state(OrderStates.choosing_variant)
@@ -418,15 +391,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             parse_mode="Markdown"
         )
 
-@router.callback_query(F.data.startswith("disabled_option_"))
-async def handle_disabled_option(callback: types.CallbackQuery):
-    """معالج للخيارات المعطلة"""
-    option_id = int(callback.data.split("_")[2])
-    
-    await callback.answer(
-        "🔒 هذا الخيار متوقف حالياً، يرجى المحاولة لاحقاً أو اختيار خيار آخر",
-        show_alert=True
-    )
 # ============= استلام الكمية =============
 
 @router.message(OrderStates.qty)
