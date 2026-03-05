@@ -8,7 +8,7 @@ import asyncio
 import logging
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from datetime import datetime
-from handlers.keyboards import get_main_menu_keyboard, get_deposit_keyboard, get_back_inline_keyboard
+from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
 from database import is_admin_user
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     
     await callback.message.answer(
         msg,
-        reply_markup=None
+        reply_markup=get_cancel_keyboard()
     )
 
 # ============= استلام المبلغ =============
@@ -162,7 +162,7 @@ async def get_amount(message: types.Message, state: FSMContext):
             return await message.answer(
                 "⚠️ المبلغ يجب أن يكون أكبر من 0.\n"
                 "الرجاء إدخال مبلغ صحيح:",
-                reply_markup=None
+                reply_markup=get_cancel_keyboard()
             )
         
         # التحقق من الحد الأدنى للمبلغ
@@ -170,14 +170,14 @@ async def get_amount(message: types.Message, state: FSMContext):
             return await message.answer(
                 "⚠️ الحد الأدنى للمبلغ هو 1.\n"
                 "الرجاء إدخال مبلغ أكبر:",
-                reply_markup=None
+                reply_markup=get_cancel_keyboard()
             )
         
     except ValueError:
         return await message.answer(
             "⚠️ خطأ في الصيغة!\n"
             "الرجاء إدخال رقم صحيح (مثال: 5000 أو 50.5):",
-            reply_markup=None
+            reply_markup=get_cancel_keyboard()
         )
     
     data = await state.get_data()
@@ -210,7 +210,7 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"{nums_text}\n"
             f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على الرقم لنسخه*",
-            reply_markup=None,
+            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -224,7 +224,7 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"`{data['wallet']}`\n\n"
             f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على رقم المحفظة لنسخه*",
-            reply_markup=None,
+            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -236,7 +236,7 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"`{data['wallet']}`\n\n"
             f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
             f"💡 *اضغط على العنوان لنسخه*",
-            reply_markup=None,
+            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_photo)
@@ -331,7 +331,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             return await message.answer(
                 "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون أرقام فقط وطوله 8 أرقام على الأقل.\n"
                 "📝 يرجى إدخال رقم صحيح:",
-                reply_markup=None,
+                reply_markup=get_cancel_keyboard(),
                 parse_mode="Markdown"
             )
     
@@ -490,6 +490,6 @@ async def invalid_photo(message: types.Message):
     await message.answer(
         "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n"
         "📸 أرسل الصورة الآن، أو اضغط على زر الإلغاء.",
-        reply_markup=None,
+        reply_markup=get_cancel_keyboard(),
         parse_mode="Markdown"
     )
