@@ -1312,7 +1312,8 @@ async def delete_category_confirm(callback: types.CallbackQuery, db_pool):
             reply_markup=get_confirmation_keyboard(
                 callback_yes=f"confirm_del_cat_{cat_id}",
                 callback_no="delete_category"
-        )
+       )  
+) 
         await callback.answer()
         
     except Exception as e:
