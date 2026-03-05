@@ -1409,46 +1409,120 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
-    """عرض جميع المنتجات لإدارة خياراتها"""
+    """إدارة خيارات المنتجات - عرض الأقسام أولاً"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     async with db_pool.acquire() as conn:
-        products = await conn.fetch('''
-            SELECT a.id, a.name, c.display_name, a.type
-            FROM applications a
-            LEFT JOIN categories c ON a.category_id = c.id
-            ORDER BY c.sort_order, a.name
-        ''')
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
     
-    text = "📦 **إدارة خيارات المنتجات**\n\n"
+    if not categories:
+        await callback.message.edit_text(
+            "⚠️ لا توجد أقسام حالياً.\n\nقم بإضافة قسم أولاً من لوحة التحكم.",
+            reply_markup=InlineKeyboardBuilder().row(
+                types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin")
+            ).as_markup()
+        )
+        return
     
-    if not products:
-        text += "⚠️ لا توجد منتجات حالياً."
-    else:
-        text += "**جميع المنتجات:**\n\n"
-        type_icons = {
-            'game': '🎮',
-            'subscription': '📅',
-            'service': '📱'
-        }
-        for p in products:
-            icon = type_icons.get(p['type'], '📦')
-            text += f"{icon} **{p['name']}** - {p['display_name'] or 'بدون قسم'}\n"
+    text = "📁 **إدارة خيارات المنتجات**\n\n"
+    text += "اختر القسم لعرض التطبيقات التابعة له:\n\n"
     
     builder = InlineKeyboardBuilder()
     
-    for product in products:
-        type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
+    for cat in categories:
+        # جلب عدد التطبيقات في هذا القسم
+        async with db_pool.acquire() as conn:
+            apps_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM applications WHERE category_id = $1",
+                cat['id']
+            )
+        
         builder.row(types.InlineKeyboardButton(
-            text=f"{type_icon} {product['name']}",
+            text=f"{cat['icon']} {cat['display_name']} ({apps_count} تطبيق)",
+            callback_data=f"manage_opts_cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة تطبيق جديد", 
+        callback_data="add_new_game"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للوحة التحكم", 
+        callback_data="back_to_admin"
+    ))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("manage_opts_cat_"))
+async def manage_options_category(callback: types.CallbackQuery, db_pool):
+    """عرض تطبيقات قسم معين لإدارة خياراتها"""
+    cat_id = int(callback.data.split("_")[3])
+    
+    async with db_pool.acquire() as conn:
+        category = await conn.fetchrow(
+            "SELECT * FROM categories WHERE id = $1",
+            cat_id
+        )
+        
+        products = await conn.fetch('''
+            SELECT a.id, a.name, a.type, a.is_active,
+                   (SELECT COUNT(*) FROM product_options WHERE product_id = a.id) as options_count
+            FROM applications a
+            WHERE a.category_id = $1
+            ORDER BY a.is_active DESC, a.name
+        ''', cat_id)
+    
+    if not products:
+        await callback.message.edit_text(
+            f"{category['icon']} **{category['display_name']}**\n\n"
+            f"⚠️ لا توجد تطبيقات في هذا القسم.\n\n"
+            f"يمكنك إضافة تطبيق جديد باستخدام الزر أدناه.",
+            reply_markup=InlineKeyboardBuilder().row(
+                types.InlineKeyboardButton(text="➕ إضافة تطبيق جديد", callback_data="add_new_game"),
+                types.InlineKeyboardButton(text="🔙 رجوع للأقسام", callback_data="manage_options")
+            ).as_markup()
+        )
+        return
+    
+    text = f"{category['icon']} **{category['display_name']}**\n"
+    text += f"📊 عدد التطبيقات: {len(products)}\n"
+    text += "➖➖➖➖➖➖\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    
+    # تجميع الأزرار في أعمدة
+    for product in products:
+        # تحديد الأيقونة حسب النوع والحالة
+        if not product['is_active']:
+            icon = "🔒"
+            status = " (متوقف)"
+        elif product['type'] == 'game':
+            icon = "🎮"
+            status = ""
+        elif product['type'] == 'subscription':
+            icon = "📅"
+            status = ""
+        else:
+            icon = "📱"
+            status = ""
+        
+        options_info = f" [{product['options_count']} خيار]" if product['options_count'] > 0 else ""
+        
+        button_text = f"{icon} {product['name']}{status}{options_info}"
+        
+        builder.row(types.InlineKeyboardButton(
+            text=button_text,
             callback_data=f"prod_options_{product['id']}"
         ))
     
-    builder.row(types.InlineKeyboardButton(text="➕ إضافة منتج جديد", callback_data="add_product"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للأقسام", 
+        callback_data="manage_options"
+    ))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
 
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
@@ -1503,7 +1577,9 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
             types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
+    builder.row(
+    types.InlineKeyboardButton(text="🔙 رجوع للقسم", callback_data=f"manage_opts_cat_{product['category_id']}"),
+    types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="manage_options")
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
