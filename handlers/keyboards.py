@@ -8,7 +8,7 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     """القائمة الرئيسية - إنلاين (تظهر تحت الرسالة)"""
     builder = InlineKeyboardBuilder()
     
-    # الأزرار الرئيسية
+    # الأزرار الرئيسية - 2 في كل صف
     builder.row(
         types.InlineKeyboardButton(text="🛒 خدمات الشحن", callback_data="services"),
         types.InlineKeyboardButton(text="💰 شحن المحفظة", callback_data="deposit"),
@@ -30,7 +30,7 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     return builder.as_markup()
 
 def get_categories_keyboard(categories):
-    """عرض الأقسام - إنلاين (2-3 أزرار في كل صف)"""
+    """عرض الأقسام - إنلاين (2 في كل صف)"""
     builder = InlineKeyboardBuilder()
     
     # عرض الأقسام 2 في كل صف
@@ -52,7 +52,7 @@ def get_categories_keyboard(categories):
     return builder.as_markup()
 
 def get_apps_keyboard(apps, category_name, current_rate, vip_discount=0):
-    """عرض التطبيقات في قسم معين - إنلاين"""
+    """عرض التطبيقات في قسم معين - إنلاين (كل تطبيق بصف)"""
     builder = InlineKeyboardBuilder()
     
     for app in apps:
@@ -88,7 +88,7 @@ def get_apps_keyboard(apps, category_name, current_rate, vip_discount=0):
             callback_data=callback_data
         ))
     
-    # أزرار التنقل
+    # أزرار التنقل - صف واحد
     builder.row(
         types.InlineKeyboardButton(text="🔙 رجوع للأقسام", callback_data="back_to_categories"),
         types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="back_to_main"),
@@ -98,7 +98,7 @@ def get_apps_keyboard(apps, category_name, current_rate, vip_discount=0):
     return builder.as_markup()
 
 def get_options_keyboard(options, app_name, current_rate, vip_discount=0, app_type='game'):
-    """عرض خيارات التطبيق (فئات) - إنلاين"""
+    """عرض خيارات التطبيق (فئات) - إنلاين (كل خيار بصف)"""
     builder = InlineKeyboardBuilder()
     
     for opt in options:
@@ -206,15 +206,15 @@ def get_deposit_keyboard():
             ))
         builder.row(*row)
     
-    builder.row(types.InlineKeyboardButton(
-        text="💰 مبلغ آخر", 
-        callback_data="deposit_custom"
-    ))
+    builder.row(
+        types.InlineKeyboardButton(text="💰 مبلغ آخر", callback_data="deposit_custom"),
+        width=1
+    )
     
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع للقائمة الرئيسية", 
-        callback_data="back_to_main"
-    ))
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"),
+        width=1
+    )
     
     return builder.as_markup()
 
@@ -239,4 +239,45 @@ def get_profile_keyboard():
         types.InlineKeyboardButton(text="🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"),
         width=1
     )
+    return builder.as_markup()
+
+def get_admin_main_keyboard():
+    """لوحة تحكم الإدارة - إنلاين (3 أزرار في كل صف)"""
+    builder = InlineKeyboardBuilder()
+    
+    # أزرار الإدارة - 3 في كل صف
+    admin_buttons = [
+        ("📈 سعر الصرف", "edit_rate"),
+        ("📊 الإحصائيات", "bot_stats"),
+        ("📢 رسالة للكل", "broadcast"),
+        ("👤 معلومات مستخدم", "user_info"),
+        ("⭐ إدارة النقاط", "manage_points"),
+        ("💳 الأكثر إيداعاً", "top_deposits"),
+        ("🛒 الأكثر طلبات", "top_orders"),
+        ("🔗 الأكثر إحالة", "top_referrals"),
+        ("⭐ الأكثر نقاط", "top_points"),
+        ("👥 إحصائيات VIP", "vip_stats"),
+        ("📊 تقارير ونسخ", "reports_menu"),
+        ("➕ إضافة منتج", "add_product"),
+        ("✏️ تعديل منتج", "edit_product"),
+        ("🗑️ حذف منتج", "delete_product"),
+        ("📱 عرض المنتجات", "list_products"),
+        ("📞 أرقام سيرياتل", "edit_syriatel"),
+        ("🔄 تشغيل/إيقاف", "toggle_bot"),
+        ("⚠️ تصفير البوت", "reset_bot"),
+        ("👑 إدارة المشرفين", "manage_admins"),
+        ("✏️ رسالة الصيانة", "edit_maintenance"),
+        ("✉️ رسالة لمستخدم", "send_custom_message"),
+        ("🔄 تفعيل/إيقاف التطبيقات", "manage_apps_status"),
+        ("🎮 إدارة خيارات الألعاب", "manage_options"),
+        ("📁 إدارة الأقسام", "manage_categories"),
+        ("➕ إضافة قسم", "add_category"),
+    ]
+    
+    for text, callback in admin_buttons:
+        builder.add(types.InlineKeyboardButton(text=text, callback_data=callback))
+    
+    # توزيع 3 أزرار في كل صف
+    builder.adjust(3)
+    
     return builder.as_markup()
