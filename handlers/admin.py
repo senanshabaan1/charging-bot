@@ -1452,13 +1452,14 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
-    """عرض خيارات منتج معين"""
+    """عرض خيارات منتج معين - مع تمييز المعطل"""
     product_id = int(callback.data.split("_")[2])
     
     async with db_pool.acquire() as conn:
         product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+        # جلب جميع الخيارات (المفعلة والمعطلة) مع ترتيبها
         options = await conn.fetch(
-            "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
+            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
             product_id
         )
     
@@ -1476,7 +1477,10 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
     else:
         text += f"**الخيارات الحالية ({len(options)}):**\n\n"
         for i, opt in enumerate(options, 1):
-            text += f"**{i}. {opt['name']}**\n"
+            status_icon = "✅" if opt['is_active'] else "🔒"
+            status_text = "" if opt['is_active'] else " (متوقف)"
+            
+            text += f"**{i}. {status_icon} {opt['name']}{status_text}**\n"
             text += f"   🆔 `{opt['id']}`\n"
             text += f"   📦 الكمية: {opt['quantity']}\n"
             text += f"   💰 سعر المورد: ${float(opt['price_usd']):.3f}\n"
@@ -1488,12 +1492,17 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
     builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
     
     for opt in options:
+        # زر تعديل
         builder.row(
             types.InlineKeyboardButton(text=f"✏️ تعديل {opt['name']}", callback_data=f"edit_option_{opt['id']}"),
+            # زر تشغيل/إيقاف
+            types.InlineKeyboardButton(
+                text=f"{'🔒 تعطيل' if opt['is_active'] else '✅ تفعيل'} {opt['name']}", 
+                callback_data=f"toggle_option_{opt['id']}_{'1' if opt['is_active'] else '0'}"
+            ),
             types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
-
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
@@ -1753,7 +1762,6 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     await message.answer(text, reply_markup=builder.as_markup())
 
 # ============= تعديل خيار =============
-
 @router.callback_query(F.data.startswith("edit_option_"))
 async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """عرض قائمة تعديل الخيار"""
@@ -1779,7 +1787,18 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
         builder.row(types.InlineKeyboardButton(text="💰 تعديل سعر المورد", callback_data=f"edit_fld_price_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="📈 تعديل نسبة الربح", callback_data=f"edit_fld_profit_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="📝 تعديل الوصف", callback_data=f"edit_fld_desc_{option_id}"))
+        
+        # إضافة زر لتشغيل/إيقاف الخيار
+        status_text = "🔒 تعطيل" if option['is_active'] else "✅ تفعيل"
+        builder.row(types.InlineKeyboardButton(
+            text=f"{status_text} الخيار", 
+            callback_data=f"toggle_option_{option_id}_{'1' if option['is_active'] else '0'}"
+        ))
+        
         builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"prod_options_{option['product_id']}"))
+        
+        status_icon = "✅" if option['is_active'] else "🔒"
+        status_text = "نشط" if option['is_active'] else "معطل"
         
         text = (
             f"✏️ **تعديل الخيار**\n\n"
@@ -1787,6 +1806,7 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
             f"• الاسم: {option['name']}\n"
             f"• الكمية: {option['quantity']}\n"
             f"• سعر المورد: ${option['price_usd']:.3f}\n"
+            f"• الحالة: {status_icon} {status_text}\n"
         )
         
         if option.get('description'):
@@ -2028,6 +2048,57 @@ async def delete_option_execute(callback: types.CallbackQuery, db_pool):
         bot=callback.bot
     )
     await show_product_options(fake_callback, db_pool)
+
+# ============= تشغيل/إيقاف الخيارات =============
+
+@router.callback_query(F.data.startswith("toggle_option_"))
+async def toggle_option_status(callback: types.CallbackQuery, db_pool):
+    """تشغيل أو إيقاف خيار معين"""
+    try:
+        parts = callback.data.split("_")
+        option_id = int(parts[2])
+        current_status = bool(int(parts[3]))
+        new_status = not current_status
+        
+        async with db_pool.acquire() as conn:
+            # جلب معلومات الخيار والمنتج المرتبط به
+            option = await conn.fetchrow(
+                "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
+                option_id
+            )
+            
+            if not option:
+                await callback.answer("❌ الخيار غير موجود", show_alert=True)
+                return
+            
+            # تحديث حالة الخيار
+            await conn.execute(
+                "UPDATE product_options SET is_active = $1 WHERE id = $2",
+                new_status, option_id
+            )
+            
+            # جلب جميع الخيارات المحدثة لنفس المنتج
+            options = await conn.fetch(
+                "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
+                option['product_id']
+            )
+        
+        status_text = "✅ مفعل" if new_status else "🔒 معطل"
+        await callback.answer(f"تم تغيير حالة الخيار '{option['name']}' إلى {status_text}")
+        
+        # العودة لقائمة الخيارات المحدثة
+        fake_callback = types.CallbackQuery(
+            id='0',
+            from_user=callback.from_user,
+            message=callback.message,
+            data=f"prod_options_{option['product_id']}",
+            bot=callback.bot
+        )
+        await show_product_options(fake_callback, db_pool)
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في toggle_option_status: {e}")
+        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 # ============= إضافة لعبة أو اشتراك جديد =============
 
