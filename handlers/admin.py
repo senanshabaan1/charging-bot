@@ -1387,6 +1387,18 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
             WHERE category_id = $1 
             ORDER BY is_active DESC, name
         ''', cat_id)
+        
+        # جلب عدد الخيارات لكل تطبيق (داخل نفس كتلة الاتصال)
+        apps_with_options = []
+        for app in apps:
+            options_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                app['id']
+            )
+            apps_with_options.append({
+                **app,
+                'options_count': options_count
+            })
     
     if not apps:
         return await callback.answer("لا توجد تطبيقات في هذا القسم", show_alert=True)
@@ -1399,16 +1411,11 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     
-    for app in apps:
+    for app in apps_with_options:
         if app['is_active']:
             status_icon = "✅"
         else:
-            # التحقق إذا كان التطبيق مقفول (له خيارات) أو معطل تماماً
-            options_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
-                app['id']
-            )
-            if options_count > 0:
+            if app['options_count'] > 0:
                 status_icon = "🔒"  # مقفل (له خيارات لكن غير مفعل)
             else:
                 status_icon = "❌"  # غير نشط (بدون خيارات)
@@ -1467,7 +1474,6 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
     )
 
 # ============= إدارة خيارات المنتجات =============
-
 @router.callback_query(F.data == "manage_options")
 async def manage_options_start(callback: types.CallbackQuery, db_pool):
     """عرض جميع المنتجات لإدارة خياراتها"""
@@ -1481,6 +1487,18 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
             LEFT JOIN categories c ON a.category_id = c.id
             ORDER BY a.is_active DESC, c.sort_order, a.name
         ''')
+        
+        # جلب عدد الخيارات لكل منتج (داخل نفس كتلة الاتصال)
+        products_with_options = []
+        for p in products:
+            options_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                p['id']
+            )
+            products_with_options.append({
+                **p,
+                'options_count': options_count
+            })
     
     text = "📦 **إدارة خيارات المنتجات**\n\n"
     
@@ -1488,17 +1506,12 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
         text += "⚠️ لا توجد منتجات حالياً."
     else:
         text += "**جميع المنتجات:**\n\n"
-        for p in products:
+        for p in products_with_options:
             # تحديد الأيقونة حسب الحالة
             if p['is_active']:
                 status_icon = "✅"
             else:
-                # التحقق من وجود خيارات
-                options_count = await conn.fetchval(
-                    "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
-                    p['id']
-                )
-                if options_count > 0:
+                if p['options_count'] > 0:
                     status_icon = "🔒"
                 else:
                     status_icon = "❌"
@@ -1508,16 +1521,12 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     
-    for product in products:
+    for product in products_with_options:
         # تحديد الأيقونة للزر
         if product['is_active']:
             status_icon = "✅"
         else:
-            options_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
-                product['id']
-            )
-            status_icon = "🔒" if options_count > 0 else "❌"
+            status_icon = "🔒" if product['options_count'] > 0 else "❌"
         
         type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
         builder.row(types.InlineKeyboardButton(
@@ -1529,6 +1538,7 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
 
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
