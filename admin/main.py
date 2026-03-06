@@ -81,7 +81,54 @@ async def admin_panel(message: types.Message, db_pool):
         parse_mode="Markdown"
     )
 
-# العودة للوحة التحكم
-@router.callback_query(F.data.in_(["back_to_admin", "back_to_admin_panel"]))
+# ============= العودة للوحة التحكم =============
+@router.callback_query(F.data == "back_to_admin")
+@router.callback_query(F.data == "back_to_admin_panel")
 async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
-    await admin_panel(callback.message, db_pool)
+    """العودة للوحة التحكم الرئيسية"""
+    from database import get_bot_status
+    
+    bot_status = await get_bot_status(db_pool)
+    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
+
+    builder = InlineKeyboardBuilder()
+    
+    # نفس الأزرار
+    builder.add(
+        types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
+        types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats"),
+        types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
+        types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info"),
+        types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points"),
+        types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
+        types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders"),
+        types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
+        types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points"),
+        types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
+        types.InlineKeyboardButton(text="📊 تقارير ونسخ", callback_data="reports_menu"),
+        types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
+        types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product"),
+        types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
+        types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products"),
+        types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
+        types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot"),
+        types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
+        types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins"),
+        types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
+        types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message"),
+        types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
+        types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options"),
+        types.InlineKeyboardButton(text="📁 إدارة الأقسام", callback_data="manage_categories"),
+        types.InlineKeyboardButton(text="➕ إضافة قسم", callback_data="add_category"),
+    )
+    
+    # توزيع 3 أزرار في كل صف
+    builder.adjust(3)
+    
+    await callback.message.edit_text(
+        f"🛠 **لوحة تحكم الإدارة**\n\n"
+        f"حالة البوت: {status_text}\n\n"
+        f"🔸 **اختر الإجراء المطلوب:**",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )

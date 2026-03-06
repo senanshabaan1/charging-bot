@@ -6,9 +6,9 @@ from utils import get_formatted_damascus_time, format_amount
 logger = logging.getLogger(__name__)
 router = Router(name="admin_group")
 
-# معالجة طلبات الشحن من المجموعة
 @router.callback_query(F.data.startswith("appr_dep_"))
 async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
+    """موافقة على طلب شحن من المجموعة"""
     try:
         logger.info(f"📩 استقبال موافقة شحن: {callback.data}")
         
@@ -20,6 +20,8 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
         else:
             await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
             return
+        
+        logger.info(f"✅ موافقة على شحن: user={user_id}, amount={amount}")
         
         async with db_pool.acquire() as conn:
             user = await conn.fetchrow("SELECT username, balance FROM users WHERE user_id = $1", user_id)
@@ -72,6 +74,7 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
             logger.error(f"❌ فشل تحديث رسالة المجموعة: {e}")
         
         await callback.answer("✅ تمت الموافقة بنجاح")
+        
     except Exception as e:
         logger.error(f"❌ خطأ عام في موافقة الشحن: {e}")
         import traceback
@@ -80,6 +83,7 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
 
 @router.callback_query(F.data.startswith("reje_dep_"))
 async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_pool):
+    """رفض طلب شحن من المجموعة"""
     try:
         logger.info(f"📩 استقبال رفض شحن: {callback.data}")
         user_id = int(callback.data.split("_")[2])
@@ -125,13 +129,16 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
             logger.error(f"❌ فشل تحديث رسالة المجموعة: {e}")
         
         await callback.answer("❌ تم رفض الطلب")
+        
     except Exception as e:
         logger.error(f"❌ خطأ في رفض الشحن: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-# معالجة طلبات التطبيقات من المجموعة
+# ============= معالجة طلبات التطبيقات من المجموعة =============
+
 @router.callback_query(F.data.startswith("appr_order_"))
 async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
+    """موافقة على طلب تطبيق من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -174,12 +181,14 @@ async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: 
                 await callback.answer("✅ تمت الموافقة على الطلب")
             else:
                 await callback.answer("❌ الطلب غير موجود", show_alert=True)
+                
     except Exception as e:
         logger.error(f"❌ خطأ في موافقة الطلب: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 @router.callback_query(F.data.startswith("reje_order_"))
 async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
+    """رفض طلب تطبيق من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -211,12 +220,14 @@ async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: B
                 )
             else:
                 await callback.answer("الطلب غير موجود", show_alert=True)
+                
     except Exception as e:
         logger.error(f"❌ خطأ في رفض الطلب: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 @router.callback_query(F.data.startswith("compl_order_"))
 async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
+    """تأكيد تنفيذ الطلب من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -252,6 +263,12 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             from database import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
             
+            total_spent = await conn.fetchval('''
+                SELECT COALESCE(SUM(total_amount_syp), 0) 
+                FROM orders 
+                WHERE user_id = $1 AND status = 'completed'
+            ''', order['user_id'])
+            
             if vip_info:
                 vip_discount = vip_info.get('discount', 0)
                 vip_level = vip_info.get('level', 0)
@@ -283,12 +300,14 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
             )
             
             await callback.answer("✅ تم تأكيد التنفيذ")
+                
     except Exception as e:
         logger.error(f"❌ خطأ في تأكيد التنفيذ: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 @router.callback_query(F.data.startswith("fail_order_"))
 async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
+    """تعذر تنفيذ الطلب من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
         
@@ -318,6 +337,7 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
                 await callback.answer("❌ تم تحديث حالة الطلب")
             else:
                 await callback.answer("❌ الطلب غير موجود", show_alert=True)
+                
     except Exception as e:
         logger.error(f"❌ خطأ في تعذر التنفيذ: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
