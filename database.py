@@ -4,6 +4,7 @@ import logging
 import pytz
 from datetime import datetime
 from config import DB_CONFIG, DATABASE_URL
+from cache import cached, clear_cache
 
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 def format_local_time(dt):
@@ -2403,4 +2404,121 @@ async def add_product_option(db_pool, product_id, name, quantity, price_usd, des
             RETURNING id
         ''', product_id, name, quantity, price_usd, description, sort_order)
         return option_id
-        return False
+
+@cached(ttl=30, key_prefix="exchange_rate")
+async def get_exchange_rate(pool):
+    """جلب سعر الصرف مع كاش 30 ثانية"""
+    try:
+        async with pool.acquire() as conn:
+            rate = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'usd_to_syp'"
+            )
+            return float(rate) if rate else 118
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب سعر الصرف: {e}")
+        return 118
+
+
+@cached(ttl=60, key_prefix="user_vip")
+async def get_user_vip(pool, user_id):
+    """جلب مستوى VIP مع كاش 60 ثانية"""
+    try:
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow('''
+                SELECT vip_level, total_spent, discount_percent, manual_vip
+                FROM users WHERE user_id = $1
+            ''', user_id)
+            
+            if not user:
+                return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0, 'manual_vip': False}
+            
+            return {
+                'vip_level': user['vip_level'],
+                'total_spent': user['total_spent'] or 0,
+                'discount_percent': user['discount_percent'] or 0,
+                'manual_vip': user['manual_vip'] or False
+            }
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب VIP: {e}")
+        return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0, 'manual_vip': False}
+
+
+@cached(ttl=30, key_prefix="user_balance")
+async def get_user_balance(pool, user_id):
+    """جلب رصيد المستخدم مع كاش 30 ثانية"""
+    try:
+        async with pool.acquire() as conn:
+            balance = await conn.fetchval(
+                "SELECT balance FROM users WHERE user_id = $1",
+                user_id
+            )
+            return float(balance) if balance else 0
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب الرصيد: {e}")
+        return 0
+
+
+@cached(ttl=60, key_prefix="categories")
+async def get_categories(pool):
+    """جلب الأقسام مع كاش 60 ثانية"""
+    try:
+        async with pool.acquire() as conn:
+            categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+            return [dict(cat) for cat in categories]
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب الأقسام: {e}")
+        return []
+
+
+@cached(ttl=30, key_prefix="apps_by_category")
+async def get_apps_by_category(pool, category_id):
+    """جلب تطبيقات قسم معين مع كاش 30 ثانية"""
+    try:
+        async with pool.acquire() as conn:
+            apps = await conn.fetch(
+                "SELECT * FROM applications WHERE category_id = $1 AND is_active = TRUE ORDER BY name",
+                category_id
+            )
+            return [dict(app) for app in apps]
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب التطبيقات: {e}")
+        return []
+
+
+@cached(ttl=20, key_prefix="product_options")
+async def get_product_options_cached(pool, product_id):
+    """جلب خيارات المنتج مع كاش 20 ثانية"""
+    try:
+        async with pool.acquire() as conn:
+            options = await conn.fetch(
+                "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY price_usd",
+                product_id
+            )
+            result = []
+            for opt in options:
+                opt_dict = dict(opt)
+                opt_dict['price_usd'] = float(opt_dict['price_usd']) if opt_dict['price_usd'] else 0.0
+                result.append(opt_dict)
+            return result
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب الخيارات: {e}")
+        return []
+
+
+# دوال لتحديث الكاش عند التغيير
+async def invalidate_user_cache(user_id: int):
+    """مسح كاش المستخدم"""
+    clear_cache(f"user_vip:{user_id}")
+    clear_cache(f"user_balance:{user_id}")
+
+
+async def invalidate_exchange_rate():
+    """مسح كاش سعر الصرف"""
+    clear_cache("exchange_rate")
+
+
+async def invalidate_categories():
+    """مسح كاش الأقسام"""
+    clear_cache("categories")
+    clear_cache("apps_by_category")
+
