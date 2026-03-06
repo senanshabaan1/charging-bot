@@ -103,3 +103,197 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
+# ============= إزالة مشرف =============
+
+@router.callback_query(F.data == "remove_admin")
+async def remove_admin_list(callback: types.CallbackQuery, db_pool):
+    """عرض قائمة المشرفين للإزالة"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_all_admins
+    admins = await get_all_admins(db_pool)
+    
+    if len(admins) <= 1:  # إذا كان المشرف الوحيد هو المالك
+        await callback.answer("❌ لا يوجد مشرفين للإزالة", show_alert=True)
+        return
+    
+    builder = InlineKeyboardBuilder()
+    
+    for admin in admins:
+        # منع إزالة المالك
+        if admin['role'] == 'owner':
+            continue
+            
+        username = f"@{admin['username']}" if admin['username'] else f"ID: {admin['user_id']}"
+        builder.row(types.InlineKeyboardButton(
+            text=f"❌ {username}",
+            callback_data=f"remove_admin_{admin['user_id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_admins"))
+    
+    await callback.message.edit_text(
+        "🗑️ **اختر المشرف للإزالة:**",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("remove_admin_"))
+async def remove_admin_confirm(callback: types.CallbackQuery, db_pool):
+    """تأكيد إزالة مشرف"""
+    admin_id = int(callback.data.split("_")[2])
+    
+    from database import get_user_by_id
+    user = await get_user_by_id(db_pool, admin_id)
+    username = user['username'] if user else str(admin_id)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ نعم، أزله", callback_data=f"confirm_remove_admin_{admin_id}"),
+        types.InlineKeyboardButton(text="❌ لا", callback_data="manage_admins")
+    )
+    
+    await callback.message.edit_text(
+        f"⚠️ **تأكيد إزالة مشرف**\n\n"
+        f"هل أنت متأكد من إزالة @{username} من قائمة المشرفين؟",
+        reply_markup=builder.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("confirm_remove_admin_"))
+async def remove_admin_execute(callback: types.CallbackQuery, db_pool):
+    """تنفيذ إزالة المشرف"""
+    admin_id = int(callback.data.split("_")[3])
+    
+    from database import remove_admin
+    success, msg = await remove_admin(db_pool, admin_id, callback.from_user.id)
+    
+    if success:
+        await callback.answer("✅ تمت إزالة المشرف بنجاح")
+        await callback.message.edit_text("✅ **تمت إزالة المشرف بنجاح**")
+    else:
+        await callback.answer(f"❌ {msg}", show_alert=True)
+
+
+# ============= معلومات مشرف =============
+
+@router.callback_query(F.data == "admin_info")
+async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء البحث عن معلومات مشرف"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "👤 **أدخل آيدي المشرف للحصول على معلوماته:**\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=None
+    )
+    
+    await callback.message.answer(
+        "أدخل الآيدي الآن:",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(AdminManageStates.waiting_admin_id)
+
+
+@router.message(AdminManageStates.waiting_admin_id)
+async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
+    """عرض معلومات المشرف"""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        admin_id = int(message.text.strip())
+        
+        from database import get_admin_info
+        info = await get_admin_info(db_pool, admin_id)
+        
+        if not info:
+            await message.answer("❌ المشرف غير موجود أو ليس لديه صلاحيات")
+            await state.clear()
+            return
+        
+        user = info['user']
+        stats = info['stats']
+        role_icon = "👑" if info['role'] == 'owner' else "🛡️"
+        
+        # تنسيق آخر النشاطات
+        recent_text = ""
+        if info['recent_actions']:
+            recent_text = "\n📋 **آخر النشاطات:**\n"
+            for action in info['recent_actions'][:5]:
+                date = action['created_at'].strftime("%Y-%m-%d %H:%M") if action['created_at'] else "غير معروف"
+                recent_text += f"• {action['action']} - {date}\n"
+        
+        text = (
+            f"{role_icon} **معلومات المشرف**\n\n"
+            f"🆔 **الآيدي:** `{user['user_id']}`\n"
+            f"👤 **اليوزر:** @{user['username'] or 'غير معروف'}\n"
+            f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
+            f"👑 **الصلاحية:** {info['role']}\n\n"
+            f"📊 **إحصائيات:**\n"
+            f"• عدد الموافقات: {stats.get('approvals', 0)}\n"
+            f"• عدد الرفض: {stats.get('rejections', 0)}\n"
+            f"• مشرفين أضافهم: {stats.get('admins_added', 0)}\n"
+            f"• مشرفين أزالهم: {stats.get('admins_removed', 0)}\n"
+            f"• إجمالي النشاطات: {stats.get('total_actions', 0)}\n"
+            f"{recent_text}"
+        )
+        
+        await message.answer(text, parse_mode="Markdown")
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط)")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"خطأ في معلومات المشرف: {e}")
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+
+# ============= سجل النشاطات =============
+
+@router.callback_query(F.data == "admin_logs")
+async def admin_logs_show(callback: types.CallbackQuery, db_pool):
+    """عرض سجل نشاطات المشرفين"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    from database import get_admin_logs
+    logs = await get_admin_logs(db_pool, 30)  # آخر 30 نشاط
+    
+    if not logs:
+        await callback.answer("📭 لا توجد نشاطات مسجلة", show_alert=True)
+        return
+    
+    text = "📊 **سجل نشاطات المشرفين**\n\n"
+    
+    for log in logs[:20]:  # عرض أول 20 فقط
+        date = log['created_at'].strftime("%Y-%m-%d %H:%M") if log['created_at'] else "غير معروف"
+        username = f"@{log['username']}" if log['username'] else f"ID: {log['user_id']}"
+        
+        action_names = {
+            'add_admin': '➕ إضافة مشرف',
+            'remove_admin': '➖ إزالة مشرف',
+            'approve_deposit': '✅ موافقة شحن',
+            'reject_deposit': '❌ رفض شحن',
+            'approve_order': '✅ موافقة طلب',
+            'reject_order': '❌ رفض طلب',
+            'approve_redemption': '✅ موافقة استرداد',
+            'reject_redemption': '❌ رفض استرداد',
+            'broadcast': '📢 رسالة جماعية'
+        }
+        
+        action_text = action_names.get(log['action'], log['action'])
+        
+        text += f"• {username}\n"
+        text += f"  {action_text} - {date}\n"
+        text += f"  📝 {log['details']}\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_admins"))
+    
+    # قد تكون الرسالة طويلة، نستخدم answer عادي
+    await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
