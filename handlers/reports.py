@@ -17,17 +17,13 @@ from config import ADMIN_ID, MODERATORS
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
 from handlers.keyboards import get_back_inline_keyboard
 from database import get_report_settings, update_report_setting, get_exchange_rate
-
+from utils import is_admin
 logger = logging.getLogger(__name__)
 router = Router()
 
 class ReportStates(StatesGroup):
     waiting_report_period = State()
     waiting_report_time = State()
-
-def is_admin(user_id):
-    """التحقق من صلاحيات المشرف"""
-    return user_id == ADMIN_ID or user_id in MODERATORS
 
 def remove_timezone_from_df(df):
     """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""

@@ -10,7 +10,7 @@ from datetime import datetime
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
 from database import is_admin_user, get_exchange_rate, get_user_vip, get_points_per_order, get_product_options, get_product_option
-
+from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -19,10 +19,6 @@ class OrderStates(StatesGroup):
     target_id = State()
     confirm = State()
     choosing_variant = State()
-
-def get_damascus_time():
-    """الحصول على الوقت الحالي بتوقيت دمشق"""
-    return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 async def send_order_to_group(bot: Bot, order_data: dict):
     """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
@@ -42,7 +38,7 @@ async def send_order_to_group(bot: Bot, order_data: dict):
         caption += (
             f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
             f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **الوقت:** {get_damascus_time()}\n\n"
+            f"⏰ **الوقت:** {get_formatted_damascus_time()}\n\n"
             "🔹 **الإجراءات:**"
         )
         

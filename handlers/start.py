@@ -11,7 +11,7 @@ import random
 import string
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
 from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
-
+from utils import is_admin
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -38,9 +38,6 @@ async def notify_admins(bot, message_text, db_pool=None):
     logger.info(f"✅ تم إرسال إشعار لـ {sent_count} مشرف")
     return sent_count
 
-# دالة التحقق من المشرفين
-def is_admin(user_id):
-    return user_id == ADMIN_ID or user_id in MODERATORS
 
 # ========== دوال الإلغاء ==========
 

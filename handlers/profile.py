@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 from handlers.keyboards import get_back_inline_keyboard, get_main_menu_keyboard
 from database import get_user_full_stats, get_user_points, get_exchange_rate, get_redemption_rate, is_admin_user
-
+from utils import format_amount, format_datetime
 logger = logging.getLogger(__name__)
 router = Router()
 

@@ -10,7 +10,7 @@ from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAM
 from datetime import datetime
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
 from database import is_admin_user
-
+from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number, parse_number 
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -19,9 +19,6 @@ class DepStates(StatesGroup):
     waiting_tx = State()
     waiting_photo = State()
 
-def get_damascus_time():
-    """الحصول على الوقت الحالي بتوقيت دمشق"""
-    return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 # ============= معالج الرجوع الموحد =============
 
@@ -257,7 +254,7 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
         tx_info_text = f"🔢 رقم العملية: `{tx_info}`\n" if tx_info else ""
         
         # استخدام توقيت دمشق
-        current_time = get_damascus_time()
+        current_time = get_formatted_damascus_time()
         
         caption = (
             "🆕 **طلب شحن جديد**\n\n"

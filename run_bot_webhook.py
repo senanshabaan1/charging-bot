@@ -11,9 +11,11 @@ from database import (
     set_database_timezone, update_old_records_timezone, 
     get_report_settings, DAMASCUS_TZ
 )
+# ✅ تغيير import handlers إلى المجلد الجديد
 from handlers import (
-    start, deposit, services, admin, reports, profile
+    start, deposit, services, reports, profile
 )
+from admin import router as admin_router  # ✅ import من المجلد الجديد
 from handlers.middleware import BotStatusMiddleware, refresh_bot_status_cache
 import pytz
 from datetime import datetime
@@ -180,7 +182,7 @@ async def main():
         # تسجيل الهاندلرز
         dp.include_routers(
             start.router,
-            admin.router,
+            admin_router,
             deposit.router,
             services.router,
             profile.router,

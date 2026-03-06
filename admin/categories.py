@@ -1,0 +1,448 @@
+# admin/categories.py
+from aiogram import Router, F, types
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import logging
+from utils import is_admin, safe_edit_message, get_state_data_field 
+from handlers.keyboards import get_cancel_keyboard
+
+logger = logging.getLogger(__name__)
+router = Router(name="admin_categories")
+
+class CategoryStates(StatesGroup):
+    waiting_category_name = State()
+    waiting_category_display_name = State()
+    waiting_category_icon = State()
+    waiting_category_sort = State()
+    waiting_edit_category_value = State()
+
+
+
+# إدارة الأقسام الرئيسية
+@router.callback_query(F.data == "manage_categories")
+async def manage_categories_menu(callback: types.CallbackQuery, db_pool):
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+    
+    text = "📁 **إدارة الأقسام**\n\n"
+    
+    if not categories:
+        text += "⚠️ لا توجد أقسام حالياً."
+    else:
+        for cat in categories:
+            text += f"{cat['icon']} **{cat['display_name']}**\n"
+            text += f"   🆔: {cat['id']} | ترتيب: {cat['sort_order']}\n"
+            text += f"   الاسم الداخلي: `{cat['name']}`\n\n"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة قسم جديد", callback_data="add_category"))
+    builder.row(types.InlineKeyboardButton(text="✏️ تعديل قسم", callback_data="edit_category"))
+    builder.row(types.InlineKeyboardButton(text="🗑️ حذف قسم", callback_data="delete_category"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+# إضافة قسم
+@router.callback_query(F.data == "add_category")
+async def add_category_start(callback: types.CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    await callback.message.edit_text(
+        "➕ **إضافة قسم جديد - الخطوة 1/4**\n\n"
+        "📝 **أدخل الاسم الداخلي للقسم:**\n"
+        "(يستخدم في البرمجة، بدون مسافات)\n"
+        "مثال: `games`\nمثال: `chat_apps`\n\n"
+        "❌ أرسل /cancel للإلغاء"
+    )
+    await state.set_state(CategoryStates.waiting_category_name)
+
+@router.message(CategoryStates.waiting_category_name)
+async def add_category_step_name(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    
+    name = message.text.strip()
+    if not name or ' ' in name:
+        await message.answer(
+            "❌ الاسم يجب أن يكون بدون مسافات. استخدم شرطة سفلية `_` بدلاً من المسافة.\n"
+            "مثال: `games` أو `chat_apps`\n\nأدخل اسم داخلي صحيح:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+    
+    await state.update_data(category_name=name)
+    await message.answer(
+        "➕ **إضافة قسم جديد - الخطوة 2/4**\n\n"
+        f"📝 **أدخل الاسم المعروض للقسم:**\n"
+        f"(الاسم الذي سيظهر للمستخدمين)\n"
+        f"الاسم الداخلي: **{name}**\n\n"
+        f"مثال: `🎮 ألعاب`\nمثال: `💬 تطبيقات دردشة`\n\n"
+        f"أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(CategoryStates.waiting_category_display_name)
+
+@router.message(CategoryStates.waiting_category_display_name)
+async def add_category_step_display_name(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    
+    display_name = message.text.strip()
+    if len(display_name) < 2:
+        await message.answer("❌ الاسم المعروض قصير جداً. أدخل اسم أطول:", reply_markup=get_cancel_keyboard())
+        return
+    
+    await state.update_data(category_display_name=display_name)
+    await message.answer(
+        "➕ **إضافة قسم جديد - الخطوة 3/4**\n\n"
+        "🎨 **أدخل الأيقونة للقسم:**\n"
+        f"الاسم الداخلي: **{await get_state_data_field(state, 'category_name')}**\n"
+        f"الاسم المعروض: **{display_name}**\n\n"
+        "مثال: `🎮` للألعاب\nمثال: `💬` للدردشة\n"
+        "أو اتركه فارغاً للايقونة الافتراضية `📁`\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(CategoryStates.waiting_category_icon)
+
+@router.message(CategoryStates.waiting_category_icon)
+async def add_category_step_icon(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    
+    icon = message.text.strip() if message.text and message.text != "-" else "📁"
+    await state.update_data(category_icon=icon)
+    
+    await message.answer(
+        "➕ **إضافة قسم جديد - الخطوة 4/4**\n\n"
+        "🔢 **أدخل ترتيب القسم (رقم):**\n"
+        "الأقسام تظهر حسب الترتيب تصاعدياً\n"
+        "مثال: `1` (يظهر أولاً)\nمثال: `5` (يظهر خامساً)\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(CategoryStates.waiting_category_sort)
+
+@router.message(CategoryStates.waiting_category_sort)
+async def add_category_step_sort(message: types.Message, state: FSMContext, db_pool):
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        sort_order = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ يرجى إدخال رقم صحيح للترتيب:", reply_markup=get_cancel_keyboard())
+        return
+    
+    data = await state.get_data()
+    name = data['category_name']
+    display_name = data['category_display_name']
+    icon = data.get('category_icon', '📁')
+    
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchval("SELECT id FROM categories WHERE name = $1", name)
+        if existing:
+            await message.answer(f"❌ قسم باسم **{name}** موجود مسبقاً.\nالرجاء استخدام اسم داخلي مختلف.", reply_markup=get_cancel_keyboard())
+            await state.clear()
+            return
+        
+        await conn.execute('''
+            INSERT INTO categories (name, display_name, icon, sort_order)
+            VALUES ($1, $2, $3, $4)
+        ''', name, display_name, icon, sort_order)
+    
+    await message.answer(
+        f"✅ **تم إضافة القسم بنجاح!**\n\n"
+        f"• الاسم الداخلي: `{name}`\n"
+        f"• الاسم المعروض: {display_name}\n"
+        f"• الأيقونة: {icon}\n"
+        f"• الترتيب: {sort_order}"
+    )
+    await state.clear()
+
+# تعديل قسم
+@router.callback_query(F.data == "edit_category")
+async def edit_category_list(callback: types.CallbackQuery, db_pool):
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+    
+    if not categories:
+        return await callback.answer("❌ لا توجد أقسام", show_alert=True)
+    
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        builder.row(types.InlineKeyboardButton(
+            text=f"✏️ {cat['icon']} {cat['display_name']}",
+            callback_data=f"edit_cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_categories"))
+    await callback.message.edit_text("✏️ **اختر القسم للتعديل:**", reply_markup=builder.as_markup())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_cat_"))
+async def edit_category_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    parts = callback.data.split("_")
+    if len(parts) != 3:
+        return
+    
+    cat_id = int(parts[2])
+    
+    async with db_pool.acquire() as conn:
+        category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
+    
+    if not category:
+        return await callback.answer("❌ القسم غير موجود", show_alert=True)
+    
+    await state.update_data(category_id=cat_id)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text=f"📝 تعديل الاسم المعروض (الحالي: {category['display_name']})", 
+        callback_data=f"edit_cat_display_{cat_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text=f"🎨 تعديل الأيقونة (الحالية: {category['icon']})", 
+        callback_data=f"edit_cat_icon_{cat_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text=f"🔢 تعديل الترتيب (الحالي: {category['sort_order']})", 
+        callback_data=f"edit_cat_sort_{cat_id}"
+    ))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="edit_category"))
+    
+    text = (
+        f"✏️ **تعديل القسم**\n\n"
+        f"**البيانات الحالية:**\n"
+        f"• الاسم الداخلي: `{category['name']}`\n"
+        f"• الاسم المعروض: {category['display_name']}\n"
+        f"• الأيقونة: {category['icon']}\n"
+        f"• الترتيب: {category['sort_order']}\n\n"
+        f"اختر ما تريد تعديله:"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_cat_display_"))
+async def edit_category_display_start(callback: types.CallbackQuery, state: FSMContext):
+    cat_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='display_name', category_id=cat_id)
+    
+    await callback.message.answer(
+        "📝 **أدخل الاسم المعروض الجديد:**\n\n"
+        "مثال: `🎮 ألعاب جديدة`\nمثال: `💬 تطبيقات دردشة`\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(CategoryStates.waiting_edit_category_value)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_cat_icon_"))
+async def edit_category_icon_start(callback: types.CallbackQuery, state: FSMContext):
+    cat_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='icon', category_id=cat_id)
+    
+    await callback.message.answer(
+        "🎨 **أدخل الأيقونة الجديدة:**\n\n"
+        "مثال: `🎮`\nمثال: `💬`\nمثال: `📱`\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(CategoryStates.waiting_edit_category_value)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_cat_sort_"))
+async def edit_category_sort_start(callback: types.CallbackQuery, state: FSMContext):
+    cat_id = int(callback.data.split("_")[3])
+    await state.update_data(edit_field='sort_order', category_id=cat_id)
+    
+    await callback.message.answer(
+        "🔢 **أدخل الترتيب الجديد (رقم):**\n\n"
+        "مثال: `1` (يظهر أولاً)\nمثال: `5` (يظهر خامساً)\n\n"
+        "📌 الأرقام الأصغر تظهر أولاً\n\n"
+        "أو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(CategoryStates.waiting_edit_category_value)
+    await callback.answer()
+
+@router.message(CategoryStates.waiting_edit_category_value)
+async def edit_category_save(message: types.Message, state: FSMContext, db_pool):
+    if not is_admin(message.from_user.id):
+        return
+    
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم إلغاء العملية")
+        return
+    
+    data = await state.get_data()
+    if not data or 'category_id' not in data or 'edit_field' not in data:
+        await state.clear()
+        await message.answer("❌ انتهت صلاحية الجلسة. ابدأ من جديد.")
+        return
+    
+    cat_id = data['category_id']
+    field = data['edit_field']
+    value = message.text.strip()
+    
+    try:
+        if field == 'display_name':
+            if len(value) < 2 or len(value) > 50:
+                await message.answer("❌ الاسم يجب أن يكون بين 2 و 50 حرف:", reply_markup=get_cancel_keyboard())
+                return
+            update_value = value
+            field_name = "الاسم المعروض"
+        elif field == 'icon':
+            if len(value) > 10:
+                await message.answer("❌ الأيقونة طويلة جداً. استخدم رمز واحد أو رمزين:", reply_markup=get_cancel_keyboard())
+                return
+            update_value = value if value else "📁"
+            field_name = "الأيقونة"
+        elif field == 'sort_order':
+            try:
+                sort_val = int(value)
+                if sort_val < 0 or sort_val > 999:
+                    await message.answer("❌ الرقم خارج النطاق المسموح (0-999):", reply_markup=get_cancel_keyboard())
+                    return
+                update_value = sort_val
+                field_name = "الترتيب"
+            except ValueError:
+                await message.answer("❌ يرجى إدخال رقم صحيح:", reply_markup=get_cancel_keyboard())
+                return
+        else:
+            await message.answer("❌ حقل غير معروف")
+            await state.clear()
+            return
+        
+        async with db_pool.acquire() as conn:
+            category_check = await conn.fetchval("SELECT id FROM categories WHERE id = $1", cat_id)
+            if not category_check:
+                await message.answer("❌ القسم غير موجود!")
+                await state.clear()
+                return
+            
+            await conn.execute(f"UPDATE categories SET {field} = $1 WHERE id = $2", update_value, cat_id)
+            category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
+        
+        await message.answer(f"✅ **تم التحديث بنجاح!**\n\n• {field_name} تم تحديثه إلى: **{update_value}**\n• القسم: {category['icon']} {category['display_name']}")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"خطأ في تعديل القسم: {e}")
+        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await state.clear()
+
+# حذف قسم
+@router.callback_query(F.data == "delete_category")
+async def delete_category_list(callback: types.CallbackQuery, db_pool):
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+    
+    if not categories:
+        return await callback.answer("❌ لا توجد أقسام", show_alert=True)
+    
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        if cat['name'] == 'chat_apps':
+            text = f"🔒 {cat['icon']} {cat['display_name']} (افتراضي)"
+            callback_data = "cannot_delete_default"
+        else:
+            text = f"🗑️ {cat['icon']} {cat['display_name']}"
+            callback_data = f"del_cat_{cat['id']}"
+        
+        builder.row(types.InlineKeyboardButton(text=text, callback_data=callback_data))
+    
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_categories"))
+    await callback.message.edit_text(
+        "🗑️ **اختر القسم للحذف:**\n\n"
+        "⚠️ تحذير: حذف القسم سيؤدي إلى حذف جميع المنتجات المرتبطة به!\n"
+        "🔒 الأقسام المقفلة لا يمكن حذفها.",
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "cannot_delete_default")
+async def cannot_delete_default(callback: types.CallbackQuery):
+    await callback.answer("❌ لا يمكن حذف القسم الافتراضي", show_alert=True)
+
+@router.callback_query(F.data.startswith("del_cat_"))
+async def delete_category_confirm(callback: types.CallbackQuery, db_pool):
+    try:
+        cat_id = int(callback.data.split("_")[2])
+        
+        async with db_pool.acquire() as conn:
+            category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
+            if not category:
+                return await callback.answer("❌ القسم غير موجود", show_alert=True)
+            
+            products_count = await conn.fetchval("SELECT COUNT(*) FROM applications WHERE category_id = $1", cat_id)
+            products = []
+            if products_count > 0:
+                products = await conn.fetch("SELECT name FROM applications WHERE category_id = $1 LIMIT 5", cat_id)
+        
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="✅ نعم، احذف نهائياً", callback_data=f"confirm_del_cat_{cat_id}"),
+            types.InlineKeyboardButton(text="❌ لا، تراجع", callback_data="delete_category")
+        )
+        
+        warning = ""
+        products_list = ""
+        if products_count > 0:
+            warning = f"\n\n⚠️ **تحذير شديد:** هذا القسم يحتوي على **{products_count} منتج**!"
+            if products:
+                products_list = "\n\nمنتجات ستُحذف:\n"
+                for p in products:
+                    products_list += f"• {p['name']}\n"
+                if products_count > 5:
+                    products_list += f"• ... و{products_count - 5} منتجات أخرى"
+        
+        await callback.message.edit_text(
+            f"⚠️ **تأكيد حذف القسم**\n\n"
+            f"هل أنت متأكد من حذف هذا القسم نهائياً؟\n\n"
+            f"• **القسم:** {category['icon']} {category['display_name']}\n"
+            f"• **المعرف:** {cat_id}"
+            f"{warning}"
+            f"{products_list}\n\n"
+            f"**هذا الإجراء لا يمكن التراجع عنه!**",
+            reply_markup=builder.as_markup()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"خطأ في delete_category_confirm: {e}")
+        await callback.answer("❌ حدث خطأ", show_alert=True)
+
+@router.callback_query(F.data.startswith("confirm_del_cat_"))
+async def delete_category_execute(callback: types.CallbackQuery, db_pool):
+    try:
+        cat_id = int(callback.data.split("_")[3])
+        
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
+                if not category:
+                    return await callback.answer("❌ القسم غير موجود", show_alert=True)
+                
+                if category['name'] == 'chat_apps':
+                    return await callback.answer("❌ لا يمكن حذف القسم الافتراضي", show_alert=True)
+                
+                await conn.execute("DELETE FROM applications WHERE category_id = $1", cat_id)
+                await conn.execute("DELETE FROM categories WHERE id = $1", cat_id)
+        
+        await callback.answer(f"✅ تم حذف القسم {category['display_name']} وجميع منتجاته بنجاح")
+        await delete_category_list(callback, db_pool)
+    except Exception as e:
+        logger.error(f"خطأ في delete_category_execute: {e}")
+        await callback.answer(f"❌ حدث خطأ: {str(e)}", show_alert=True)
