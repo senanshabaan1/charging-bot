@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 import logging
 from config import ADMIN_ID, MODERATORS
 from handlers.keyboards import get_cancel_keyboard
-from .utils import is_admin, format_message_text, safe_edit_message, format_amount
+from utils import is_admin, format_message_text, safe_edit_message, format_amount
 logger = logging.getLogger(__name__)
 router = Router(name="admin_settings")
 

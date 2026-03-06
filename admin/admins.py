@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
-from .utils import is_admin, format_message_text, safe_edit_message
+from utils import is_admin  
 from handlers.keyboards import get_cancel_keyboard
 
 logger = logging.getLogger(__name__)

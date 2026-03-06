@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.enums import ParseMode
 import asyncio
 import logging
-from .utils import is_admin, format_message_text, safe_edit_message
+from utils import is_admin
 from handlers.keyboards import get_cancel_keyboard
 
 logger = logging.getLogger(__name__)

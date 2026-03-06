@@ -2,7 +2,7 @@
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
-from .utils import is_admin, format_message_text, safe_edit_message
+from utils import is_admin, format_amount, format_percentage
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_stats")
