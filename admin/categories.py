@@ -446,3 +446,69 @@ async def delete_category_execute(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         logger.error(f"خطأ في delete_category_execute: {e}")
         await callback.answer(f"❌ حدث خطأ: {str(e)}", show_alert=True)
+# ============= إضافة الدوال الناقصة لتعديل الأقسام =============
+
+@router.callback_query(F.data.startswith("edit_cat_display_"))
+async def edit_category_display_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل الاسم المعروض"""
+    try:
+        cat_id = int(callback.data.split("_")[3])
+        await state.update_data(edit_field='display_name', category_id=cat_id)
+        
+        await callback.message.answer(
+            "📝 **أدخل الاسم المعروض الجديد:**\n\n"
+            "مثال: `🎮 ألعاب جديدة`\n"
+            "مثال: `💬 تطبيقات دردشة`\n\n"
+            "أو أرسل /cancel للإلغاء",
+            reply_markup=get_cancel_keyboard()
+        )
+        await state.set_state(CategoryStates.waiting_edit_category_value)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"خطأ في edit_category_display_start: {e}")
+        await callback.answer("❌ حدث خطأ", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("edit_cat_icon_"))
+async def edit_category_icon_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل الأيقونة"""
+    try:
+        cat_id = int(callback.data.split("_")[3])
+        await state.update_data(edit_field='icon', category_id=cat_id)
+        
+        await callback.message.answer(
+            "🎨 **أدخل الأيقونة الجديدة:**\n\n"
+            "مثال: `🎮`\n"
+            "مثال: `💬`\n"
+            "مثال: `📱`\n"
+            "مثال: `🎯`\n\n"
+            "أو أرسل /cancel للإلغاء",
+            reply_markup=get_cancel_keyboard()
+        )
+        await state.set_state(CategoryStates.waiting_edit_category_value)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"خطأ في edit_category_icon_start: {e}")
+        await callback.answer("❌ حدث خطأ", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("edit_cat_sort_"))
+async def edit_category_sort_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء تعديل الترتيب"""
+    try:
+        cat_id = int(callback.data.split("_")[3])
+        await state.update_data(edit_field='sort_order', category_id=cat_id)
+        
+        await callback.message.answer(
+            "🔢 **أدخل الترتيب الجديد (رقم):**\n\n"
+            "مثال: `1` (يظهر أولاً)\n"
+            "مثال: `5` (يظهر خامساً)\n\n"
+            "📌 الأرقام الأصغر تظهر أولاً\n\n"
+            "أو أرسل /cancel للإلغاء",
+            reply_markup=get_cancel_keyboard()
+        )
+        await state.set_state(CategoryStates.waiting_edit_category_value)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"خطأ في edit_category_sort_start: {e}")
+        await callback.answer("❌ حدث خطأ", show_alert=True)
