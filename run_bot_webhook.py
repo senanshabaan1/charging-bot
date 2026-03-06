@@ -22,7 +22,8 @@ from datetime import datetime
 from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from handlers.reports import send_daily_report
-
+from cache import clear_cache, get_cache_stats
+import time
 # متغيرات عامة
 scheduler = None
 db_pool = None
@@ -60,20 +61,30 @@ async def on_startup(bot: Bot, base_url: str, db_pool):
         
         # تحديث كاش حالة البوت
         await refresh_bot_status_cache(db_pool)
+                # مسح الكاش عند بدء التشغيل
+        clear_cache()
         
-        # تعيين webhook
-        webhook_url = f"{base_url}/webhook"
-        await bot.set_webhook(webhook_url)
-        logger.info(f"✅ تم تعيين webhook: {webhook_url}")
-        logger.info("✅ البوت جاهز لاستقبال التحديثات")
+        # ✅ تحسين webhook
+        await bot.set_webhook(
+            f"{base_url}/webhook",
+            max_connections=50,  # زيادة الاتصالات
+            allowed_updates=["message", "callback_query", "chat_member"],
+            drop_pending_updates=True  # تجاهل التحديثات القديمة
+        )
+        
+        logger.info(f"✅ تم تعيين webhook: {base_url}/webhook")
+        logger.info(f"📊 إحصائيات الكاش: {get_cache_stats()}")
+        
     except Exception as e:
         logger.error(f"❌ خطأ في بدء التشغيل: {e}")
+
 
 async def on_shutdown(bot: Bot):
     """تشغيل عند الإيقاف"""
     try:
         await bot.delete_webhook()
-        logger.info("✅ تم حذف webhook")
+        clear_cache()
+        logger.info("✅ تم حذف webhook ومسح الكاش")
     except Exception as e:
         logger.error(f"❌ خطأ في حذف webhook: {e}")
 
