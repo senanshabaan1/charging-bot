@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 router = Router(name="profile")
 
 # ========== الملف الشخصي ==========
+# handlers/profile_handlers.py - دالة my_account كاملة مع HTML
+
 @router.message(F.text == "👤 حسابي")
 async def my_account(message: types.Message, db_pool):
     """عرض الملف الشخصي مع أزرار النقاط وسجل العمليات وتفاصيل VIP"""
@@ -38,7 +40,7 @@ async def my_account(message: types.Message, db_pool):
             vip_discount = user_data['discount_percent'] if user_data else 0
             total_spent = user_data['total_spent'] if user_data else 0
             
-            # ✅ إصلاح: حساب إجمالي المشتريات من الطلبات المكتملة
+            # حساب إجمالي المشتريات من الطلبات المكتملة
             total_spent_from_orders = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
@@ -126,37 +128,36 @@ async def my_account(message: types.Message, db_pool):
         types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
     )
     
-    # رسالة الملف الشخصي مع تفاصيل VIP
+    # رسالة الملف الشخصي مع تفاصيل VIP - بصيغة HTML
     profile_text = (
-        f"👤 **الملف الشخصي**\n\n"
-        f"🆔 **الآيدي:** `{user_id}`\n"
-        f"👤 **الاسم:** {first_name or message.from_user.full_name}\n"
-        f"📅 **اليوزر:** @{username or message.from_user.username or 'غير متوفر'}\n"
-        f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
-        f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
-        f"📊 **تفاصيل النقاط:**\n"
+        f"👤 <b>الملف الشخصي</b>\n\n"
+        f"🆔 <b>الآيدي:</b> <code>{user_id}</code>\n"
+        f"👤 <b>الاسم:</b> {first_name or message.from_user.full_name}\n"
+        f"📅 <b>اليوزر:</b> @{username or message.from_user.username or 'غير متوفر'}\n"
+        f"💰 <b>الرصيد:</b> {balance:,.0f} ل.س\n"
+        f"⭐ <b>نقاطك:</b> {points}\n"
+        f"💵 <b>قيمة نقاطك:</b> {points_value_syp:.0f} ل.س\n\n"
+        f"📊 <b>تفاصيل النقاط:</b>\n"
         f"• من الإحالات: {points_from_referrals} نقطة\n"
         f"• من المشتريات: {points_from_orders} نقطة\n\n"
-        f"📋 **سجل العمليات:**\n"
+        f"📋 <b>سجل العمليات:</b>\n"
         f"• عدد عمليات الشحن: {deposits_count}\n"
         f"• عدد عمليات الشراء: {orders_count}\n\n"
-        f"👑 **نظام VIP:**\n"
+        f"👑 <b>نظام VIP:</b>\n"
         f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
-        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
-        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
-        f"🔹 **اختر من الأزرار أدناه:**"
+        f"💱 <b>سعر الصرف:</b> {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎁 <b>كل {redemption_rate} نقطة = 1$</b> ({base_syp:.0f} ل.س)\n\n"
+        f"🔹 <b>اختر من الأزرار أدناه:</b>"
     )
     
     await message.answer(
         profile_text,
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        parse_mode="HTML"  # ✅ تغيير إلى HTML
     )
-
 # ========== رابط الإحالة ==========
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
@@ -325,9 +326,17 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 # ========== العودة للملف الشخصي ==========
+# handlers/profile_handlers.py - السطر 331
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
     """العودة إلى الملف الشخصي"""
+    # ✅ منع خطأ حذف الرسالة
+    try:
+        await callback.message.delete()
+    except:
+        pass  # إذا فشل الحذف، نكمل
+    
+    # استدعاء الملف الشخصي مباشرة
     await my_account(callback.message, db_pool)
 
 # ========== رصيد النقاط ==========
