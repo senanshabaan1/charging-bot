@@ -255,7 +255,7 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
         await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط)", parse_mode="HTML")
         await state.clear()
     except Exception as e:
-        logger.error(f"خطأ في معلومات المشرف: {e}')
+        logger.error(f"خطأ في معلومات المشرف: {e}")
         await message.answer(f"❌ حدث خطأ: {str(e)}", parse_mode="HTML")
         await state.clear()
 
