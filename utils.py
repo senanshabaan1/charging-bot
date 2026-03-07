@@ -17,35 +17,36 @@ def get_formatted_damascus_time():
     return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 def format_datetime(dt, format_str='%Y-%m-%d %H:%M:%S'):
-    """تنسيق أي تاريخ حسب الصيغة المطلوبة - يدعم النصوص والأشياء"""
+    """تنسيق أي تاريخ حسب الصيغة المطلوبة - مع تحويل تلقائي لتوقيت دمشق"""
     if dt is None:
         return "غير معروف"
+    
+    import pytz
+    from datetime import datetime
+    
+    DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
     
     # ✅ إذا كان النص، حاول تحويله إلى datetime
     if isinstance(dt, str):
         try:
-            from datetime import datetime
-            # تنظيف النص من علامات المنطقة الزمنية
+            # محاولة تحويل النص إلى datetime
             clean_dt = dt.replace('+00:00', '').replace('Z', '').replace('T', ' ')
-            # قص الطول إذا كان أطول من اللازم (YYYY-MM-DD HH:MM:SS)
             if len(clean_dt) > 19:
                 clean_dt = clean_dt[:19]
             dt = datetime.fromisoformat(clean_dt)
         except:
-            # إذا فشل التحويل، نرجعه كما هو
             return dt
     
     # ✅ إذا كان datetime object
     if hasattr(dt, 'strftime'):
-        # إذا كان timezone aware، حوله إلى توقيت دمشق
-        if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
-            try:
-                import pytz
-                DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
-                dt = dt.astimezone(DAMASCUS_TZ)
-            except:
-                pass
-        return dt.strftime(format_str)
+        # ✅ التحويل لتوقيت دمشق
+        if dt.tzinfo is None:
+            # إذا كان بدون توقيت، نعتبره UTC ونحوله
+            dt = pytz.UTC.localize(dt)
+        
+        # تحويل لتوقيت دمشق
+        damascus_dt = dt.astimezone(DAMASCUS_TZ)
+        return damascus_dt.strftime(format_str)
     
     return str(dt)
 
