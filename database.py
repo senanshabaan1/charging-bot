@@ -1447,7 +1447,8 @@ async def get_bot_stats(pool):
                     COUNT(*) as total_deposits,
                     COALESCE(SUM(amount_syp), 0) as total_deposit_amount,
                     COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_deposits,
-                    COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_deposits
+                    COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_deposits,
+                    COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_deposits  -- ✅ أضف هذا
                 FROM deposit_requests
             ''')
             
@@ -1456,7 +1457,9 @@ async def get_bot_stats(pool):
                     COUNT(*) as total_orders,
                     COALESCE(SUM(total_amount_syp), 0) as total_order_amount,
                     COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
+                    COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing_orders,  -- ✅ أضف هذا
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_orders,          -- ✅ أضف هذا
                     COALESCE(SUM(points_earned), 0) as total_points_given
                 FROM orders
             ''')
@@ -1506,7 +1509,6 @@ async def get_bot_stats(pool):
     except Exception as e:
         logging.error(f"❌ خطأ في جلب الإحصائيات: {e}")
         return None
-
 # ============= دوال أساسية للمستخدمين =============
 
 async def get_all_users(pool):
