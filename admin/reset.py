@@ -28,14 +28,18 @@ async def reset_bot_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "⚠️ **تحذير: تصفير البوت** ⚠️\n\n"
         "هذا الإجراء سيقوم بحذف:\n"
-        "• جميع المستخدمين\n"
+        "• جميع المستخدمين (عدا المشرفين)\n"
         "• جميع طلبات الشحن\n"
         "• جميع طلبات التطبيقات\n"
         "• جميع النقاط وسجل النقاط\n"
         "• جميع الإحالات\n\n"
-        "**سيتم الاحتفاظ بالمشرفين فقط.**\n\n"
+        "**سيتم الاحتفاظ بـ:**\n"
+        "• المشرفين\n"
+        "• المنتجات والأقسام\n"
+        "• خيارات المنتجات\n\n"
         "هل أنت متأكد؟",
-        reply_markup=builder.as_markup()
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
     )
 
 @router.callback_query(F.data == "confirm_reset")
@@ -44,7 +48,8 @@ async def reset_bot_ask_rate(callback: types.CallbackQuery, state: FSMContext):
         "💰 **أدخل سعر الصرف الجديد**\n"
         "مثال: 118\n\n"
         "سيتم استخدام هذا السعر بعد تصفير البوت.\n\n"
-        "أو أرسل /cancel للإلغاء"
+        "أو أرسل /cancel للإلغاء",
+        parse_mode="Markdown"
     )
     await state.set_state(ResetStates.waiting_reset_rate)
 
@@ -63,27 +68,31 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
     admin_ids_str = ','.join([str(id) for id in admin_ids if id])
     
     async with db_pool.acquire() as conn:
-        # حذف البيانات
+        # ✅ حذف بيانات المستخدمين والطلبات فقط
         await conn.execute("DELETE FROM points_history")
         await conn.execute("DELETE FROM redemption_requests")
         await conn.execute("DELETE FROM deposit_requests")
         await conn.execute("DELETE FROM orders")
-        await conn.execute("DELETE FROM product_options")
         
-        # ✅ إعادة ضبط كل الـ sequences
+        # ✅ لا نحذف product_options ولا applications
+        # await conn.execute("DELETE FROM product_options")  # ❌ محذوف
+        # await conn.execute("DELETE FROM applications")     # ❌ محذوف
+        
+        # ✅ إعادة ضبط sequences للجداول التي تم حذفها فقط
         sequences = [
             "orders_id_seq",
             "deposit_requests_id_seq", 
             "redemption_requests_id_seq",
-            "points_history_id_seq",
-            "product_options_id_seq",
-            "applications_id_seq",
-            "categories_id_seq"
+            "points_history_id_seq"
+            # "product_options_id_seq",  # ❌ محذوف
+            # "applications_id_seq",      # ❌ محذوف
+            # "categories_id_seq"         # ❌ محذوف (الأقسام تبقى)
         ]
         
         for seq in sequences:
             try:
                 await conn.execute(f"ALTER SEQUENCE {seq} RESTART WITH 1")
+                logger.info(f"✅ تم تصفير {seq}")
             except Exception as e:
                 logger.warning(f"⚠️ لم يتم تصفير {seq}: {e}")
         
@@ -114,7 +123,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         await conn.execute("UPDATE bot_settings SET value = '1' WHERE key IN ('points_per_order', 'points_per_referral')")
         await conn.execute("UPDATE bot_settings SET value = '100' WHERE key = 'redemption_rate'")
         
-        # إعادة ضبط مستويات VIP
+        # إعادة ضبط مستويات VIP (تبقى نفسها)
         await conn.execute('''
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
             VALUES 
@@ -138,7 +147,9 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         f"• VIP 1: 3500 ل.س - خصم 1%\n"
         f"• VIP 2: 6500 ل.س - خصم 2%\n"
         f"• VIP 3: 12000 ل.س - خصم 3%\n\n"
-        f"البوت الآن جاهز للبدء من جديد!"
+        f"✅ **المنتجات والخيارات والأقسام لم يتم حذفها**\n\n"
+        f"البوت الآن جاهز للبدء من جديد!",
+        parse_mode="Markdown"
     )
     await state.clear()
 
