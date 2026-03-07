@@ -1455,7 +1455,7 @@ async def get_bot_stats(pool):
             orders_stats = await conn.fetchrow('''
                 SELECT 
                     COUNT(*) as total_orders,
-                    COALESCE(SUM(total_amount_syp), 0) as total_order_amount,
+                    COALESCE(SUM(CASE WHEN status = 'completed' THEN total_amount_syp END), 0) as total_completed_amount,
                     COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
                     COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing_orders,  -- ✅ أضف هذا
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
