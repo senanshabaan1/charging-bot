@@ -6,7 +6,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin, safe_edit_message, get_state_data_field 
 from handlers.keyboards import get_cancel_keyboard
-
+# أضف هذا في بداية الملف
+import sys
+print("✅ categories.py is loaded", file=sys.stderr)
 logger = logging.getLogger(__name__)
 router = Router(name="admin_categories")
 
@@ -194,6 +196,8 @@ async def edit_category_list(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data.startswith("edit_cat_"))
 async def edit_category_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    logger.info(f"📩 استقبال edit_cat_: {callback.data}")
+    print(f"📩 استقبال edit_cat_: {callback.data}", file=sys.stderr)
     parts = callback.data.split("_")
     if len(parts) != 3:
         return
@@ -242,6 +246,7 @@ async def edit_category_menu(callback: types.CallbackQuery, state: FSMContext, d
 async def edit_category_display_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء تعديل الاسم المعروض"""
     logger.info(f"📩 استقبال edit_cat_display_: {callback.data}")
+    print(f"📩 استقبال edit_cat_display_: {callback.data}", file=sys.stderr)
     try:
         cat_id = int(callback.data.split("_")[3])
         await state.update_data(edit_field='display_name', category_id=cat_id)
