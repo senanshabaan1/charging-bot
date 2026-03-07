@@ -102,8 +102,9 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             f"📊 **إحصائيات الطلبات:**\n"
             f"• إجمالي الطلبات: {orders.get('total_count', 0)} طلب\n"
             f"• إجمالي المبالغ: {format_amount(orders.get('total_amount', 0))}\n"
-            f"• الطلبات المعلقة: {points_pending} طلب\n"
+            f"• الطلبات قيد التنفيذ: {processing_count} طلب\n"
             f"• الطلبات المكتملة: {orders.get('completed_count', 0)} طلب\n"
+            f"• الطلبات الفاشلة: {failed_count} طلب\n"
             f"• قيمة المكتملة: {format_amount(orders.get('completed_amount', 0))}\n"
             f"• نقاط مكتسبة من الطلبات المكتملة: {points_earned}\n"
         )
