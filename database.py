@@ -1460,7 +1460,7 @@ async def get_bot_stats(pool):
                     COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing_orders,  -- ✅ أضف هذا
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
                     COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_orders,          -- ✅ أضف هذا
-                    COALESCE(SUM(points_earned), 0) as total_points_given
+                    COALESCE(SUM(CASE WHEN status = 'completed' THEN points_earned END), 0) as total_points_given  -- ✅ النقاط فقط من المكتملة
                 FROM orders
             ''')
             
