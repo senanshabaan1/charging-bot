@@ -76,7 +76,8 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         if next_level and next_level.get('remaining', 0) > 0:
             progress_text = f"\n📊 متبقي {next_level['remaining']:,.0f} ل.س للمستوى {next_level['next_level_name']}"
         points_earned = orders.get('total_points_earned', 0) if orders else 0
-        points_pending = orders.get('total_count', 0) - orders.get('completed_count', 0)
+        processing_count = orders.get('processing_count', 0) if orders else 0
+        failed_count = orders.get('failed_count', 0) if orders else 0
         info_text = (
             f"👤 **معلومات المستخدم**\n\n"
             f"🆔 **الآيدي:** `{user['user_id']}`\n"
