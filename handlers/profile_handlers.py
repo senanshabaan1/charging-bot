@@ -326,18 +326,124 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 # ========== العودة للملف الشخصي ==========
-# handlers/profile_handlers.py - السطر 331
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
-    """العودة إلى الملف الشخصي"""
-    # ✅ منع خطأ حذف الرسالة
-    try:
-        await callback.message.delete()
-    except:
-        pass  # إذا فشل الحذف، نكمل
+    """العودة إلى الملف الشخصي - مع سعر الصرف الحالي وتفاصيل VIP"""
+    user_id = callback.from_user.id
     
-    # استدعاء الملف الشخصي مباشرة
-    await my_account(callback.message, db_pool)
+    # جلب سعر الصرف الحالي من قاعدة البيانات
+    from database import get_exchange_rate, get_redemption_rate, get_next_vip_level
+    exchange_rate = await get_exchange_rate(db_pool)
+    redemption_rate = await get_redemption_rate(db_pool)
+    
+    async with db_pool.acquire() as conn:
+        try:
+            user_data = await conn.fetchrow(
+                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
+                user_id
+            )
+            balance = user_data['balance'] if user_data else 0
+            points = user_data['total_points'] if user_data else 0
+            username = user_data['username'] if user_data else None
+            first_name = user_data['first_name'] if user_data else None
+            vip_level = user_data['vip_level'] if user_data else 0
+            vip_discount = user_data['discount_percent'] if user_data else 0
+            total_spent = user_data['total_spent'] if user_data else 0
+            
+            # جلب إحصائيات النقاط
+            points_from_referrals = await conn.fetchval(
+                "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'referral'",
+                user_id
+            ) or 0
+            
+            points_from_orders = await conn.fetchval(
+                "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'order_completed'",
+                user_id
+            ) or 0
+            
+            # جلب إحصائيات العمليات
+            deposits_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
+                user_id
+            ) or 0
+            
+            orders_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
+                user_id
+            ) or 0
+            
+        except Exception as e:
+            print(f"خطأ في جلب البيانات: {e}")
+            balance = 0
+            points = 0
+            username = None
+            first_name = None
+            vip_level = 0
+            vip_discount = 0
+            total_spent = 0
+            points_from_referrals = 0
+            points_from_orders = 0
+            deposits_count = 0
+            orders_count = 0
+    
+    # حساب قيمة النقاط بسعر الصرف الحالي
+    points_value_usd = (points / redemption_rate) 
+    points_value_syp = points_value_usd * exchange_rate
+    base_syp = 1 * exchange_rate
+    
+    # تحديد أيقونة VIP
+    vip_icons = ["⚪", "🔵", "🟣", "🟡"]
+    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
+    
+    # حساب التقدم للمستوى التالي
+    next_level_info = get_next_vip_level(total_spent)
+    
+    if next_level_info and next_level_info.get('remaining', 0) > 0:
+        remaining = next_level_info['remaining']
+        next_level_name = next_level_info['next_level_name']
+        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
+    else:
+        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="show_referral"),
+        types.InlineKeyboardButton(text="⭐ رصيد النقاط", callback_data="show_points_balance")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="📊 سجل العمليات", callback_data="transactions_history"),
+        types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
+    )
+    
+    profile_text = (
+        f"👤 **الملف الشخصي**\n\n"
+        f"🆔 **الآيدي:** `{user_id}`\n"
+        f"👤 **الاسم:** {first_name or callback.from_user.full_name}\n"
+        f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
+        f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
+        f"⭐ **نقاطك:** {points}\n"
+        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
+        f"📊 **تفاصيل النقاط:**\n"
+        f"• من الإحالات: {points_from_referrals} نقطة\n"
+        f"• من المشتريات: {points_from_orders} نقطة\n\n"
+        f"📋 **سجل العمليات:**\n"
+        f"• عدد عمليات الشحن: {deposits_count}\n"
+        f"• عدد عمليات الشراء: {orders_count}\n\n"
+        f"👑 **نظام VIP:**\n"
+        f"• مستواك: {vip_icon} VIP {vip_level}\n"
+        f"• خصمك الحالي: {vip_discount}%\n"
+        f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
+        f"{progress_text}\n\n"
+        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
+        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
+        f"🔹 **اختر من الأزرار أدناه:**"
+    )
+    
+    await callback.message.edit_text(
+        profile_text,
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
 
 # ========== رصيد النقاط ==========
 @router.callback_query(F.data == "show_points_balance")
