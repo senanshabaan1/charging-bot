@@ -13,7 +13,7 @@ from database import (
 )
 # ✅ تغيير import handlers إلى المجلد الجديد
 from handlers import (
-    start, deposit, services, reports, profile
+    start, deposit, services, reports, profile_handlers
 )
 from admin import router as admin_router  # ✅ import من المجلد الجديد
 from handlers.middleware import BotStatusMiddleware, refresh_bot_status_cache
@@ -196,7 +196,7 @@ async def main():
             admin_router,
             deposit.router,
             services.router,
-            profile.router,
+            profile_handlers.router,
             reports.router
         )
         

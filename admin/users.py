@@ -6,6 +6,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin, format_amount, format_datetime
 from handlers.keyboards import get_cancel_keyboard
+from database import (
+    get_user_profile, 
+    invalidate_user_cache,  # ✅ إضافة مسح الكاش
+    get_exchange_rate,
+    get_redemption_rate,
+    get_next_vip_level
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_users")
@@ -15,7 +22,7 @@ class UserStates(StatesGroup):
     waiting_balance_amount = State()
     waiting_points_amount = State()
 
-# معلومات المستخدم
+# معلومات المستخدم (معدل لاستخدام الكاش)
 @router.callback_query(F.data == "user_info")
 async def user_info_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer(
@@ -30,8 +37,7 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
     try:
         user_id = int(message.text)
         
-        from database import get_user_profile
-        profile = await get_user_profile(db_pool, user_id)
+        profile = await get_user_profile(db_pool, user_id)  # هذه الدالة ممكن تضيفلها كاش
         
         if not profile:
             await message.answer("⚠️ **المستخدم غير موجود**")
@@ -42,19 +48,25 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         deposits = profile['deposits']
         orders = profile['orders']
         
-        join_date = user['created_at'].strftime("%Y-%m-%d %H:%M") if user.get('created_at') else "غير معروف"
-        last_active = user['last_activity'].strftime("%Y-%m-%d %H:%M") if user.get('last_activity') else "غير معروف"
+        join_date = format_datetime(user.get('created_at'), '%Y-%m-%d %H:%M')
+        last_active = format_datetime(user.get('last_activity'), '%Y-%m-%d %H:%M')
         manual_status = " (يدوي)" if user.get('manual_vip') else ""
+        
+        # حساب المستوى التالي
+        next_level = get_next_vip_level(user.get('total_spent', 0))
+        progress_text = ""
+        if next_level and next_level.get('remaining', 0) > 0:
+            progress_text = f"\n📊 متبقي {next_level['remaining']:,.0f} ل.س للمستوى {next_level['next_level_name']}"
         
         info_text = (
             f"👤 **معلومات المستخدم**\n\n"
             f"🆔 **الآيدي:** `{user['user_id']}`\n"
             f"👤 **اليوزر:** @{user['username'] or 'غير موجود'}\n"
             f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
-            f"💰 **الرصيد:** {user.get('balance', 0):,.0f} ل.س\n"
+            f"💰 **الرصيد:** {format_amount(user.get('balance', 0))}\n"
             f"⭐ **النقاط:** {user.get('total_points', 0)}\n"
-            f"👑 **مستوى VIP:** {user.get('vip_level', 0)}{manual_status}\n"
-            f"💰 **إجمالي الإنفاق:** {user.get('total_spent', 0):,.0f} ل.س\n"
+            f"👑 **مستوى VIP:** {user.get('vip_level', 0)}{manual_status} (خصم {user.get('discount_percent', 0)}%){progress_text}\n"
+            f"💰 **إجمالي الإنفاق:** {format_amount(user.get('total_spent', 0))}\n"
             f"🔒 **الحالة:** {'🚫 محظور' if user.get('is_banned') else '✅ نشط'}\n"
             f"📅 **تاريخ التسجيل:** {join_date}\n"
             f"⏰ **آخر نشاط:** {last_active}\n"
@@ -63,15 +75,15 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             
             f"📊 **إحصائيات الإيداعات:**\n"
             f"• إجمالي الإيداعات: {deposits.get('total_count', 0)} عملية\n"
-            f"• إجمالي المبالغ: {deposits.get('total_amount', 0):,.0f} ل.س\n"
+            f"• إجمالي المبالغ: {format_amount(deposits.get('total_amount', 0))}\n"
             f"• الإيداعات المقبولة: {deposits.get('approved_count', 0)} عملية\n"
-            f"• قيمة المقبولة: {deposits.get('approved_amount', 0):,.0f} ل.س\n\n"
+            f"• قيمة المقبولة: {format_amount(deposits.get('approved_amount', 0))}\n\n"
             
             f"📊 **إحصائيات الطلبات:**\n"
             f"• إجمالي الطلبات: {orders.get('total_count', 0)} طلب\n"
-            f"• إجمالي المبالغ: {orders.get('total_amount', 0):,.0f} ل.س\n"
+            f"• إجمالي المبالغ: {format_amount(orders.get('total_amount', 0))}\n"
             f"• الطلبات المكتملة: {orders.get('completed_count', 0)} طلب\n"
-            f"• قيمة المكتملة: {orders.get('completed_amount', 0):,.0f} ل.س\n"
+            f"• قيمة المكتملة: {format_amount(orders.get('completed_amount', 0))}\n"
             f"• نقاط مكتسبة من الطلبات: {orders.get('total_points_earned', 0)}\n"
         )
         
@@ -89,6 +101,7 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         
         await message.answer(info_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
         await state.clear()
+        
     except ValueError:
         await message.answer("⚠️ **الرجاء إدخال آيدي صحيح (أرقام فقط)**")
         await state.clear()
@@ -97,7 +110,7 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
 
-# إضافة نقاط
+# إضافة نقاط (مع مسح الكاش)
 @router.callback_query(F.data.startswith("add_points_"))
 async def add_points_start(callback: types.CallbackQuery, state: FSMContext):
     try:
@@ -134,6 +147,9 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
             ''', user_id, points, 'admin_add', f'إضافة نقاط من الأدمن: {points}')
             
             new_total = await conn.fetchval("SELECT total_points FROM users WHERE user_id = $1", user_id)
+            
+            # ✅ مسح كاش المستخدم
+            await invalidate_user_cache(user_id)
         
         await message.answer(f"✅ تم إضافة {points} نقطة للمستخدم @{user['username']}\n⭐ الرصيد الجديد: {new_total}")
         
@@ -150,7 +166,7 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
 
-# تعديل الرصيد
+# تعديل الرصيد (مع مسح الكاش)
 @router.callback_query(F.data.startswith("edit_bal_"))
 async def edit_balance_from_info(callback: types.CallbackQuery, state: FSMContext):
     try:
@@ -177,6 +193,9 @@ async def finalize_add_balance(message: types.Message, state: FSMContext, db_poo
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET balance = balance + $1, total_deposits = total_deposits + $1 WHERE user_id = $2", amount, user_id)
         user = await conn.fetchrow("SELECT username, balance, total_points FROM users WHERE user_id = $1", user_id)
+        
+        # ✅ مسح كاش المستخدم
+        await invalidate_user_cache(user_id)
     
     await message.answer(
         f"✅ **تمت إضافة الرصيد بنجاح**\n\n"
@@ -200,7 +219,7 @@ async def finalize_add_balance(message: types.Message, state: FSMContext, db_poo
     
     await state.clear()
 
-# تبديل حالة الحظر
+# تبديل حالة الحظر (مع مسح الكاش)
 @router.callback_query(F.data.startswith("toggle_ban_"))
 async def toggle_ban_from_info(callback: types.CallbackQuery, db_pool):
     try:
@@ -212,6 +231,9 @@ async def toggle_ban_from_info(callback: types.CallbackQuery, db_pool):
             if user:
                 new_status = not user['is_banned']
                 await conn.execute("UPDATE users SET is_banned = $1 WHERE user_id = $2", new_status, user_id)
+                
+                # ✅ مسح كاش المستخدم
+                await invalidate_user_cache(user_id)
                 
                 status_text = "محظور" if new_status else "نشط"
                 await callback.message.answer(f"✅ تم تغيير حالة المستخدم إلى: {status_text}")
