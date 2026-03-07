@@ -17,11 +17,36 @@ def get_formatted_damascus_time():
     return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 def format_datetime(dt, format_str='%Y-%m-%d %H:%M:%S'):
-    """تنسيق أي تاريخ حسب الصيغة المطلوبة"""
+    """تنسيق أي تاريخ حسب الصيغة المطلوبة - يدعم النصوص والأشياء"""
     if dt is None:
         return "غير معروف"
+    
+    # ✅ إذا كان النص، حاول تحويله إلى datetime
+    if isinstance(dt, str):
+        try:
+            from datetime import datetime
+            # تنظيف النص من علامات المنطقة الزمنية
+            clean_dt = dt.replace('+00:00', '').replace('Z', '').replace('T', ' ')
+            # قص الطول إذا كان أطول من اللازم (YYYY-MM-DD HH:MM:SS)
+            if len(clean_dt) > 19:
+                clean_dt = clean_dt[:19]
+            dt = datetime.fromisoformat(clean_dt)
+        except:
+            # إذا فشل التحويل، نرجعه كما هو
+            return dt
+    
+    # ✅ إذا كان datetime object
     if hasattr(dt, 'strftime'):
+        # إذا كان timezone aware، حوله إلى توقيت دمشق
+        if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+            try:
+                import pytz
+                DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
+                dt = dt.astimezone(DAMASCUS_TZ)
+            except:
+                pass
         return dt.strftime(format_str)
+    
     return str(dt)
 
 # ============= دوال تنسيق العملة =============
