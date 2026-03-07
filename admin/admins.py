@@ -223,7 +223,7 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
         
         user = info['user']
         stats = info['stats']
-        role_icon = "👑" if info['role'] == 'owner' else "🛡️'
+        role_icon = "👑" if info['role'] == 'owner' else "🛡️"
         
         # تنسيق آخر النشاطات
         recent_text = ""
