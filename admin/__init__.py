@@ -15,10 +15,9 @@ from .broadcast import router as broadcast_router
 from .group_handlers import router as group_router
 from .reset import router as reset_router
 
-# إنشاء الراوتر الرئيسي للمشرفين
 router = Router(name="admin")
 
-# تضمين جميع الراوترات الفرعية
+# ✅ Make sure each router is included only once
 router.include_routers(
     main_router,
     settings_router,

@@ -3,10 +3,9 @@ from .start import router as start_router
 from .services import router as services_router
 from .deposit import router as deposit_router
 from .reports import router as reports_router
-from .profile_handlers import router as profile_router 
+from .profile_handlers import router as profile_router  # ✅ Only once
 
-# ✅ تغيير import admin إلى المجلد الجديد
-from admin import router as admin_router
+from admin import router as admin_router  # ✅ Only once
 
 __all__ = [
     'start_router',

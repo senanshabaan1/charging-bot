@@ -196,7 +196,6 @@ async def main():
             admin_router,
             deposit.router,
             services.router,
-            profile_handlers.router,
             reports.router
         )
         
