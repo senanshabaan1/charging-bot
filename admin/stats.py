@@ -37,14 +37,14 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
         
         "💰 **الإيداعات:**\n"
         f"• 📋 الإجمالي: {stats['deposits'].get('total_deposits', 0)}\n"
-        f"• 💰 إجمالي المبالغ (المكتملة فقط): {stats['orders'].get('total_completed_amount', 0):,.0f} ل.س\n"  # ✅ هذا الجديد
+        f"• 💸 إجمالي المبالغ: {stats['deposits'].get('total_deposit_amount', 0):,.0f} ل.س\n"هذا الجديد
         f"• ⏳ المعلقة: {stats['deposits'].get('pending_deposits', 0)}\n"
         f"• ✅ المنجزة: {stats['deposits'].get('approved_deposits', 0)}\n"
         f"• ❌ المرفوضة: {stats['deposits'].get('rejected_deposits', 0)}\n\n"
         
         "🛒 **الطلبات:**\n"
         f"• 📋 الإجمالي: {stats['orders'].get('total_orders', 0)}\n"
-        f"• 💸 إجمالي المبالغ: {stats['orders'].get('total_order_amount', 0):,.0f} ل.س\n"
+        f"• 💰 إجمالي المبالغ: {stats['orders'].get('total_completed_amount', 0):,.0f} ل.س\n"  # ✅ هذا الجديد
         f"• ⏳ المعلقة: {stats['orders'].get('pending_orders', 0)}\n"
         f"• 🔄 قيد التنفيذ: {stats['orders'].get('processing_orders', 0)}\n"
         f"• ✅ المكتملة: {stats['orders'].get('completed_orders', 0)}\n"
@@ -55,8 +55,7 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
         f"• 💰 عمليات استرداد: {stats['points'].get('total_redemptions', 0)}\n"
         f"• ⭐ نقاط مستردة: {stats['points'].get('total_points_redeemed', 0)}\n"
         f"• 💵 قيمة المستردة: {stats['points'].get('total_redemption_amount', 0):,.0f} ل.س\n\n"
-        
-        f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
+                
     )
     
     await callback.message.answer(stats_text, parse_mode="Markdown")
