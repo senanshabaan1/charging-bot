@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin_stats")
 
 # إحصائيات البوت
+# admin/stats.py - في دالة show_bot_stats
 @router.callback_query(F.data == "bot_stats")
 async def show_bot_stats(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
@@ -33,21 +34,28 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
         f"• 🚫 المحظورين: {stats['users'].get('banned_users', 0)}\n"
         f"• 🆕 الجدد اليوم: {stats['users'].get('new_users_today', 0)}\n"
         f"• ⭐ إجمالي النقاط: {stats['users'].get('total_points', 0)}\n\n"
+        
         "💰 **الإيداعات:**\n"
         f"• 📋 الإجمالي: {stats['deposits'].get('total_deposits', 0)}\n"
         f"• 💸 إجمالي المبالغ: {stats['deposits'].get('total_deposit_amount', 0):,.0f} ل.س\n"
         f"• ⏳ المعلقة: {stats['deposits'].get('pending_deposits', 0)}\n"
-        f"• ✅ المنجزة: {stats['deposits'].get('approved_deposits', 0)}\n\n"
+        f"• ✅ المنجزة: {stats['deposits'].get('approved_deposits', 0)}\n"
+        f"• ❌ المرفوضة: {stats['deposits'].get('rejected_deposits', 0)}\n\n"
+        
         "🛒 **الطلبات:**\n"
         f"• 📋 الإجمالي: {stats['orders'].get('total_orders', 0)}\n"
         f"• 💸 إجمالي المبالغ: {stats['orders'].get('total_order_amount', 0):,.0f} ل.س\n"
         f"• ⏳ المعلقة: {stats['orders'].get('pending_orders', 0)}\n"
+        f"• 🔄 قيد التنفيذ: {stats['orders'].get('processing_orders', 0)}\n"
         f"• ✅ المكتملة: {stats['orders'].get('completed_orders', 0)}\n"
+        f"• ❌ الفاشلة: {stats['orders'].get('failed_orders', 0)}\n"
         f"• ⭐ نقاط ممنوحة: {stats['orders'].get('total_points_given', 0)}\n\n"
+        
         "🎁 **نظام النقاط:**\n"
         f"• 💰 عمليات استرداد: {stats['points'].get('total_redemptions', 0)}\n"
         f"• ⭐ نقاط مستردة: {stats['points'].get('total_points_redeemed', 0)}\n"
         f"• 💵 قيمة المستردة: {stats['points'].get('total_redemption_amount', 0):,.0f} ل.س\n\n"
+        
         f"💵 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
     )
     
