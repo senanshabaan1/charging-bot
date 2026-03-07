@@ -4,14 +4,15 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
-from utils import is_admin  
+from utils import is_admin, format_datetime
 from handlers.keyboards import get_cancel_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_admins")
 
 class AdminManageStates(StatesGroup):
-    waiting_admin_id = State()
+    waiting_admin_id = State()           # للإضافة
+    waiting_admin_info_id = State()      # للمعلومات
 
 # إدارة المشرفين
 @router.callback_query(F.data == "manage_admins")
@@ -42,7 +43,8 @@ async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(admins_text, reply_markup=builder.as_markup())
 
-# إضافة مشرف
+# ============= إضافة مشرف =============
+
 @router.callback_query(F.data == "add_admin")
 async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -103,6 +105,7 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
     except Exception as e:
         await message.answer(f"❌ حدث خطأ: {str(e)}")
         await state.clear()
+
 # ============= إزالة مشرف =============
 
 @router.callback_query(F.data == "remove_admin")
@@ -175,7 +178,6 @@ async def remove_admin_execute(callback: types.CallbackQuery, db_pool):
     else:
         await callback.answer(f"❌ {msg}", show_alert=True)
 
-
 # ============= معلومات مشرف =============
 
 @router.callback_query(F.data == "admin_info")
@@ -194,10 +196,10 @@ async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
         "أدخل الآيدي الآن:",
         reply_markup=get_cancel_keyboard()
     )
-    await state.set_state(AdminManageStates.waiting_admin_id)
+    await state.set_state(AdminManageStates.waiting_admin_info_id)  # ✅ حالة جديدة
 
 
-@router.message(AdminManageStates.waiting_admin_id)
+@router.message(AdminManageStates.waiting_admin_info_id)  # ✅ حالة جديدة
 async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
     """عرض معلومات المشرف"""
     if not is_admin(message.from_user.id):
@@ -223,7 +225,7 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
         if info['recent_actions']:
             recent_text = "\n📋 **آخر النشاطات:**\n"
             for action in info['recent_actions'][:5]:
-                date = action['created_at'].strftime("%Y-%m-%d %H:%M") if action['created_at'] else "غير معروف"
+                date = format_datetime(action['created_at'], "%Y-%m-%d %H:%M")
                 recent_text += f"• {action['action']} - {date}\n"
         
         text = (
@@ -271,7 +273,7 @@ async def admin_logs_show(callback: types.CallbackQuery, db_pool):
     text = "📊 **سجل نشاطات المشرفين**\n\n"
     
     for log in logs[:20]:  # عرض أول 20 فقط
-        date = log['created_at'].strftime("%Y-%m-%d %H:%M") if log['created_at'] else "غير معروف"
+        date = format_datetime(log['created_at'], "%Y-%m-%d %H:%M")
         username = f"@{log['username']}" if log['username'] else f"ID: {log['user_id']}"
         
         action_names = {
@@ -295,5 +297,21 @@ async def admin_logs_show(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_admins"))
     
-    # قد تكون الرسالة طويلة، نستخدم answer عادي
     await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+# ============= معالج المدخلات الخاطئة =============
+
+@router.message(AdminManageStates.waiting_admin_id)
+@router.message(AdminManageStates.waiting_admin_info_id)
+async def wrong_input_handler(message: types.Message, state: FSMContext):
+    """معالج المدخلات الخاطئة"""
+    if message.text in ["/cancel", "/الغاء", "❌ إلغاء"]:
+        await state.clear()
+        await message.answer("✅ تم الإلغاء", reply_markup=get_cancel_keyboard())
+        return
+    
+    await message.answer(
+        "❌ يرجى إدخال آيدي صحيح (أرقام فقط)\nأو أرسل /cancel للإلغاء",
+        reply_markup=get_cancel_keyboard()
+    )
