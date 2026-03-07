@@ -362,7 +362,7 @@ async def process_order_rejection(order_id: int, callback: types.CallbackQuery, 
     """معالجة رفض الطلب في الخلفية"""
     try:
         async with db_pool.acquire() as conn:
-            order = await conn.fetchrow("SELECT user_id, total_amount_syp FROM orders WHERE id = $1", order_id)
+            order = await conn.fetchrow("SELECT id, user_id, total_amount_syp FROM orders WHERE id = $1", order_id)
             
             if order:
                 logger.info(f"📝 جاري رفض الطلب #{order_id} للمستخدم {order['user_id']}")
@@ -401,8 +401,14 @@ async def notify_user_order_rejected(bot, order):
     try:
         logger.info(f"📤 محاولة إرسال إشعار رفض للمستخدم {order['user_id']}")
         
+        # ✅ تأكد من أن order['id'] موجود، وإلا استخدم order['order_id'] أو order.get('id')
+        order_id = order.get('id') or order.get('order_id')
+        if not order_id:
+            logger.error(f"❌ لا يوجد معرف للطلب في البيانات: {dict(order)}")
+            return
+        
         text = (
-            f"❌ **تم رفض طلبك #{order['id']}**\n\n"
+            f"❌ **تم رفض طلبك #{order_id}**\n\n"
             f"💰 **تم إعادة:** {order['total_amount_syp']:,.0f} ل.س لرصيدك\n\n"
             f"🔸 **الأسباب المحتملة:**\n"
             "• مشكلة في معلومات الحساب المستهدف\n"
@@ -415,7 +421,8 @@ async def notify_user_order_rejected(bot, order):
         logger.info(f"✅ تم إرسال إشعار رفض للمستخدم {order['user_id']}")
         
     except Exception as e:
-        logger.error(f"❌ فشل إرسال إشعار للمستخدم {order['user_id']}: {e}")
+        logger.error(f"❌ فشل إرسال إشعار للمستخدم {order.get('user_id', 'unknown')}: {e}")
+        logger.error(f"📦 order data: {dict(order)}")
 
 @router.callback_query(F.data.startswith("compl_order_"))
 async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
@@ -593,8 +600,13 @@ async def notify_user_order_failed(bot, order):
     try:
         logger.info(f"📤 محاولة إرسال إشعار فشل للمستخدم {order['user_id']}")
         
+        order_id = order.get('id') or order.get('order_id')
+        if not order_id:
+            logger.error(f"❌ لا يوجد معرف للطلب في البيانات: {dict(order)}")
+            return
+        
         text = (
-            f"❌ **تعذر تنفيذ طلبك #{order['id']}**\n\n"
+            f"❌ **تعذر تنفيذ طلبك #{order_id}**\n\n"
             f"💰 **تم إعادة المبلغ إلى رصيدك:** {order['total_amount_syp']:,.0f} ل.س\n"
             f"⭐ لم تتم إضافة نقاط لهذا الطلب\n\n"
             f"🔸 **الأسباب المحتملة:**\n"
@@ -609,4 +621,5 @@ async def notify_user_order_failed(bot, order):
         logger.info(f"✅ تم إرسال إشعار فشل للمستخدم {order['user_id']}")
         
     except Exception as e:
-        logger.error(f"❌ فشل إرسال إشعار للمستخدم {order['user_id']}: {e}")
+        logger.error(f"❌ فشل إرسال إشعار للمستخدم {order.get('user_id', 'unknown')}: {e}")
+        logger.error(f"📦 order data: {dict(order)}")
