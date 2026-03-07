@@ -1377,8 +1377,10 @@ async def get_user_profile(pool, user_id):
                     COUNT(*) as total_count,
                     COALESCE(SUM(total_amount_syp), 0) as total_amount,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_count,
+                    COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing_count,
+                    COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_count,
                     COALESCE(SUM(CASE WHEN status = 'completed' THEN total_amount_syp END), 0) as completed_amount,
-                    COALESCE(SUM(points_earned), 0) as total_points_earned
+                    COALESCE(SUM(CASE WHEN status = 'completed' THEN points_earned END), 0) as total_points_earned
                 FROM orders 
                 WHERE user_id = $1
             ''', user_id)
