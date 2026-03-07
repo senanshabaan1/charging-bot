@@ -9,7 +9,7 @@ from database import (
     get_redemption_rate, get_exchange_rate, get_next_vip_level,
     generate_referral_code, create_redemption_request
 )
-from utils import is_admin
+from utils import format_datetime, is_admin
 
 logger = logging.getLogger(__name__)
 router = Router(name="profile")
@@ -135,20 +135,11 @@ async def my_account(message: types.Message, db_pool):
         f"👤 <b>الاسم:</b> {first_name or message.from_user.full_name}\n"
         f"📅 <b>اليوزر:</b> @{username or message.from_user.username or 'غير متوفر'}\n"
         f"💰 <b>الرصيد:</b> {balance:,.0f} ل.س\n"
-        f"⭐ <b>نقاطك:</b> {points}\n"
-        f"💵 <b>قيمة نقاطك:</b> {points_value_syp:.0f} ل.س\n\n"
-        f"📊 <b>تفاصيل النقاط:</b>\n"
-        f"• من الإحالات: {points_from_referrals} نقطة\n"
-        f"• من المشتريات: {points_from_orders} نقطة\n\n"
-        f"📋 <b>سجل العمليات:</b>\n"
-        f"• عدد عمليات الشحن: {deposits_count}\n"
-        f"• عدد عمليات الشراء: {orders_count}\n\n"
         f"👑 <b>نظام VIP:</b>\n"
         f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
-        f"💱 <b>سعر الصرف:</b> {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 <b>كل {redemption_rate} نقطة = 1$</b> ({base_syp:.0f} ل.س)\n\n"
         f"🔹 <b>اختر من الأزرار أدناه:</b>"
     )
@@ -204,7 +195,6 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"🎁 مميزات الإحالة:\n"
         f"• 1 نقطة لكل مشترك جديد\n"
         f"• كل 100 نقطة = 1$ ({base_syp:.0f} ل.س)\n"
-        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
@@ -259,7 +249,6 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     text = (
         f"🎁 **استرداد النقاط**\n\n"
         f"لديك {points} نقطة\n"
-        f"💰 **سعر الصرف الحالي:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)\n\n"
         f"اختر المبلغ الذي تريد استرداده:"
     )
@@ -422,19 +411,11 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
         f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
         f"⭐ **نقاطك:** {points}\n"
-        f"💵 **قيمة نقاطك:** {points_value_syp:.0f} ل.س\n\n"
-        f"📊 **تفاصيل النقاط:**\n"
-        f"• من الإحالات: {points_from_referrals} نقطة\n"
-        f"• من المشتريات: {points_from_orders} نقطة\n\n"
-        f"📋 **سجل العمليات:**\n"
-        f"• عدد عمليات الشحن: {deposits_count}\n"
-        f"• عدد عمليات الشراء: {orders_count}\n\n"
         f"👑 **نظام VIP:**\n"
         f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
-        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
         f"🔹 **اختر من الأزرار أدناه:**"
     )
@@ -539,34 +520,36 @@ async def transactions_history(callback: types.CallbackQuery, db_pool):
             user_id
         ) or 0
     
+    # ✅ استخدام HTML بدلاً من Markdown
     text = (
-        f"📊 **سجل العمليات**\n\n"
-        f"**إحصائيات سريعة:**\n"
+        f"📊 <b>سجل العمليات</b>\n\n"
+        f"<b>إحصائيات سريعة:</b>\n"
         f"💰 إجمالي الشحن: {deposits_count} عملية | {deposits_total:,.0f} ل.س\n"
         f"🛒 إجمالي الشراء: {orders_count} عملية | {orders_total:,.0f} ل.س\n\n"
     )
     
     if deposits:
-        text += "**🟢 آخر عمليات الشحن:**\n"
+        text += "<b>🟢 آخر عمليات الشحن:</b>\n"
         for d in deposits:
             status_icon = "✅" if d['status'] == 'approved' else "⏳" if d['status'] == 'pending' else "❌"
-            date = d['created_at'].strftime("%Y-%m-%d %H:%M") if d['created_at'] else "-"
+            date = format_datetime(d['created_at'], "%Y-%m-%d %H:%M")
             text += f"{status_icon} {d['amount_syp']:,.0f} ل.س - {date}\n"
     else:
-        text += "**🟢 آخر عمليات الشحن:**\nلا توجد عمليات شحن بعد.\n"
+        text += "<b>🟢 آخر عمليات الشحن:</b>\nلا توجد عمليات شحن بعد.\n"
     
     text += "\n"
     
     if orders:
-        text += "**🔵 آخر عمليات الشراء:**\n"
+        text += "<b>🔵 آخر عمليات الشراء:</b>\n"
         for o in orders:
             status_icon = "✅" if o['status'] == 'completed' else "⏳" if o['status'] == 'pending' else "❌"
-            date = o['created_at'].strftime("%Y-%m-%d %H:%M") if o['created_at'] else "-"
+            # ✅ هنا التصحيح: o['created_at']
+            date = format_datetime(o['created_at'], "%Y-%m-%d %H:%M")
             text += f"{status_icon} {o['app_name']} - {o['total_amount_syp']:,.0f} ل.س - {date}\n"
     else:
-        text += "**🔵 آخر عمليات الشراء:**\nلا توجد عمليات شراء بعد.\n"
+        text += "<b>🔵 آخر عمليات الشراء:</b>\nلا توجد عمليات شراء بعد.\n"
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.message.edit_text(text, parse_mode="HTML")
     
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
