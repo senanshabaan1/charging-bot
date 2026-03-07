@@ -37,7 +37,7 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
     try:
         user_id = int(message.text)
         
-        profile = await get_user_profile(db_pool, user_id)  # هذه الدالة ممكن تضيفلها كاش
+        profile = await get_user_profile(db_pool, user_id)  # هذه الدالة ممكن عليها كاش
         
         if not profile:
             await message.answer("⚠️ **المستخدم غير موجود**")
@@ -48,8 +48,26 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         deposits = profile['deposits']
         orders = profile['orders']
         
+        # ✅ تسجيل معلومات التوقيت الخام
+        created_at_raw = user.get('created_at')
+        last_active_raw = user.get('last_activity')
+        
+        logger.info(f"📅 created_at raw value: {created_at_raw}")
+        logger.info(f"📅 created_at type: {type(created_at_raw)}")
+        logger.info(f"📅 last_activity raw value: {last_active_raw}")
+        logger.info(f"📅 last_activity type: {type(last_active_raw)}")
+        
+        # ✅ جرب التنسيق بدون معالجة (فقط للتجربة)
+        if created_at_raw and hasattr(created_at_raw, 'strftime'):
+            logger.info(f"📅 created_at as datetime: {created_at_raw}")
+            logger.info(f"📅 created_at tzinfo: {created_at_raw.tzinfo}")
+        
         join_date = format_datetime(user.get('created_at'), '%Y-%m-%d %H:%M')
         last_active = format_datetime(user.get('last_activity'), '%Y-%m-%d %H:%M')
+        
+        logger.info(f"📅 created_at formatted: {join_date}")
+        logger.info(f"📅 last_activity formatted: {last_active}")
+        
         manual_status = " (يدوي)" if user.get('manual_vip') else ""
         
         # حساب المستوى التالي
@@ -57,7 +75,8 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
         progress_text = ""
         if next_level and next_level.get('remaining', 0) > 0:
             progress_text = f"\n📊 متبقي {next_level['remaining']:,.0f} ل.س للمستوى {next_level['next_level_name']}"
-        
+        points_earned = orders.get('total_points_earned', 0) if orders else 0
+        points_pending = orders.get('total_count', 0) - orders.get('completed_count', 0)
         info_text = (
             f"👤 **معلومات المستخدم**\n\n"
             f"🆔 **الآيدي:** `{user['user_id']}`\n"
@@ -82,9 +101,10 @@ async def user_info_show(message: types.Message, state: FSMContext, db_pool):
             f"📊 **إحصائيات الطلبات:**\n"
             f"• إجمالي الطلبات: {orders.get('total_count', 0)} طلب\n"
             f"• إجمالي المبالغ: {format_amount(orders.get('total_amount', 0))}\n"
+            f"• الطلبات المعلقة: {points_pending} طلب\n"
             f"• الطلبات المكتملة: {orders.get('completed_count', 0)} طلب\n"
             f"• قيمة المكتملة: {format_amount(orders.get('completed_amount', 0))}\n"
-            f"• نقاط مكتسبة من الطلبات: {orders.get('total_points_earned', 0)}\n"
+            f"• نقاط مكتسبة من الطلبات المكتملة: {points_earned}\n"
         )
         
         builder = InlineKeyboardBuilder()
