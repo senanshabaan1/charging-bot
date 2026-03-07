@@ -42,8 +42,7 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
         
         "🛒 **الطلبات:**\n"
         f"• 📋 الإجمالي: {stats['orders'].get('total_orders', 0)}\n"
-        f"• 💰 إجمالي المبالغ (كل الطلبات): {stats['orders'].get('total_order_amount', 0):,.0f} ل.س\n"
-        f"• 💰 إجمالي المبالغ (المكتملة): {stats['orders'].get('total_completed_amount', 0):,.0f} ل.س\n"
+        f"• 💰 إجمالي المبالغ: {stats['orders'].get('total_completed_amount', 0):,.0f} ل.س\n"
         f"• ⏳ المعلقة: {stats['orders'].get('pending_orders', 0)}\n"
         f"• 🔄 قيد التنفيذ: {stats['orders'].get('processing_orders', 0)}\n"
         f"• ✅ المكتملة: {stats['orders'].get('completed_orders', 0)}\n"
