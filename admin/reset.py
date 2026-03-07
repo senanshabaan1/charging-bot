@@ -63,12 +63,31 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
     admin_ids_str = ','.join([str(id) for id in admin_ids if id])
     
     async with db_pool.acquire() as conn:
+        # حذف البيانات
         await conn.execute("DELETE FROM points_history")
         await conn.execute("DELETE FROM redemption_requests")
         await conn.execute("DELETE FROM deposit_requests")
         await conn.execute("DELETE FROM orders")
-        await conn.execute("ALTER SEQUENCE orders_id_seq RESTART WITH 1")
+        await conn.execute("DELETE FROM product_options")
         
+        # ✅ إعادة ضبط كل الـ sequences
+        sequences = [
+            "orders_id_seq",
+            "deposit_requests_id_seq", 
+            "redemption_requests_id_seq",
+            "points_history_id_seq",
+            "product_options_id_seq",
+            "applications_id_seq",
+            "categories_id_seq"
+        ]
+        
+        for seq in sequences:
+            try:
+                await conn.execute(f"ALTER SEQUENCE {seq} RESTART WITH 1")
+            except Exception as e:
+                logger.warning(f"⚠️ لم يتم تصفير {seq}: {e}")
+        
+        # حذف المستخدمين مع الاحتفاظ بالمشرفين
         if admin_ids_str:
             await conn.execute(f"DELETE FROM users WHERE user_id NOT IN ({admin_ids_str})")
             
@@ -85,6 +104,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         else:
             await conn.execute("DELETE FROM users")
         
+        # تحديث الإعدادات
         await conn.execute('''
             INSERT INTO bot_settings (key, value, description) 
             VALUES ('usd_to_syp', $1, 'سعر صرف الدولار مقابل الليرة')
@@ -94,6 +114,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         await conn.execute("UPDATE bot_settings SET value = '1' WHERE key IN ('points_per_order', 'points_per_referral')")
         await conn.execute("UPDATE bot_settings SET value = '100' WHERE key = 'redemption_rate'")
         
+        # إعادة ضبط مستويات VIP
         await conn.execute('''
             INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
             VALUES 
@@ -116,7 +137,7 @@ async def execute_reset_bot(message: types.Message, state: FSMContext, db_pool):
         f"👑 **نظام VIP الجديد:**\n"
         f"• VIP 1: 3500 ل.س - خصم 1%\n"
         f"• VIP 2: 6500 ل.س - خصم 2%\n"
-        f"• VIP 3: 12000 ل.س - خصم 4%\n\n"
+        f"• VIP 3: 12000 ل.س - خصم 3%\n\n"
         f"البوت الآن جاهز للبدء من جديد!"
     )
     await state.clear()
