@@ -537,15 +537,24 @@ async def notify_user_order_completed(bot, order, points, user_points, vip_icon,
     except Exception as e:
         logger.error(f"❌ فشل إرسال رسالة للمستخدم: {e}")
 
-
 @router.callback_query(F.data.startswith("fail_order_"))
 async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
     """تعذر تنفيذ الطلب من المجموعة"""
     try:
         order_id = int(callback.data.split("_")[2])
+        logger.info(f"📩 استقبال فشل تنفيذ للطلب #{order_id}")
         
         # ✅ استجابة فورية
         await callback.answer("❌ جاري معالجة الفشل...", show_alert=False)
+        
+        # تحديث الرسالة فوراً
+        try:
+            await callback.message.edit_text(
+                callback.message.text.replace("🔄 **جاري التنفيذ...**", "") + "\n\n⏳ **جاري معالجة الفشل...**",
+                reply_markup=None
+            )
+        except:
+            pass
         
         # تنفيذ في الخلفية
         asyncio.create_task(process_order_failure(order_id, callback, db_pool, bot))
@@ -559,10 +568,12 @@ async def process_order_failure(order_id: int, callback: types.CallbackQuery, db
     """معالجة فشل الطلب في الخلفية"""
     try:
         async with db_pool.acquire() as conn:
-            order = await conn.fetchrow("SELECT user_id, total_amount_syp FROM orders WHERE id = $1", order_id)
+            # ✅ أضف id للاستعلام
+            order = await conn.fetchrow("SELECT id, user_id, total_amount_syp FROM orders WHERE id = $1", order_id)
             
             if order:
                 logger.info(f"📝 جاري معالجة فشل الطلب #{order_id} للمستخدم {order['user_id']}")
+                logger.info(f"📦 order data: {dict(order)}")  # للتأكد
                 
                 # إعادة الرصيد
                 await conn.execute(
@@ -579,7 +590,7 @@ async def process_order_failure(order_id: int, callback: types.CallbackQuery, db
                 # ✅ مسح كاش المستخدم
                 await invalidate_user_cache(order['user_id'])
                 
-                # ✅ استخدم await بدلاً من create_task
+                # ✅ إرسال إشعار (await مباشر)
                 await notify_user_order_failed(bot, order)
         
         # تحديث رسالة المجموعة
@@ -599,6 +610,7 @@ async def notify_user_order_failed(bot, order):
     """إرسال إشعار للمستخدم بفشل الطلب"""
     try:
         logger.info(f"📤 محاولة إرسال إشعار فشل للمستخدم {order['user_id']}")
+        logger.info(f"📦 order data in notify: {dict(order)}")
         
         order_id = order.get('id') or order.get('order_id')
         if not order_id:
