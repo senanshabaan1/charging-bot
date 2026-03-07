@@ -241,6 +241,7 @@ async def edit_category_menu(callback: types.CallbackQuery, state: FSMContext, d
 @router.callback_query(F.data.startswith("edit_cat_display_"))
 async def edit_category_display_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء تعديل الاسم المعروض"""
+    logger.info(f"📩 استقبال edit_cat_display_: {callback.data}")
     try:
         cat_id = int(callback.data.split("_")[3])
         await state.update_data(edit_field='display_name', category_id=cat_id)
