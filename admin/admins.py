@@ -23,12 +23,12 @@ async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
     from database import get_all_admins
     admins = await get_all_admins(db_pool)
     
-    admins_text = "👑 **قائمة المشرفين**\n\n"
+    admins_text = "👑 <b>قائمة المشرفين</b>\n\n"
     for admin in admins:
         role_icon = "👑" if admin['role'] == 'owner' else "🛡️"
         username = f"@{admin['username']}" if admin['username'] else f"ID: {admin['user_id']}"
         name = admin['first_name'] or ""
-        admins_text += f"{role_icon} {username}\n   🆔 `{admin['user_id']}`\n   📝 {name}\n\n"
+        admins_text += f"{role_icon} {username}\n   🆔 <code>{admin['user_id']}</code>\n   📝 {name}\n\n"
     
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -41,7 +41,7 @@ async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
     )
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin"))
     
-    await callback.message.edit_text(admins_text, reply_markup=builder.as_markup())
+    await callback.message.edit_text(admins_text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 # ============= إضافة مشرف =============
 
@@ -51,10 +51,11 @@ async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.message.edit_text(
-        "👤 **إضافة مشرف جديد**\n\n"
+        "👤 <b>إضافة مشرف جديد</b>\n\n"
         "أدخل الآيدي (ID) الخاص بالمستخدم الذي تريد إضافته كمشرف:\n\n"
         "💡 يمكن للمستخدم الحصول على آيديه عبر إرسال /id للبوت\n\n"
-        "أو أرسل /cancel للإلغاء"
+        "أو أرسل /cancel للإلغاء",
+        parse_mode="HTML"
     )
     await state.set_state(AdminManageStates.waiting_admin_id)
 
@@ -71,39 +72,42 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
         
         if not user:
             return await message.answer(
-                "❌ المستخدم غير موجود في قاعدة البيانات.\n"
+                "❌ <b>المستخدم غير موجود</b> في قاعدة البيانات.\n"
                 "يجب على المستخدم استخدام البوت مرة واحدة على الأقل.\n\n"
                 "أو أرسل /cancel للإلغاء",
-                reply_markup=get_cancel_keyboard()
+                reply_markup=get_cancel_keyboard(),
+                parse_mode="HTML"
             )
         
         success, msg = await add_admin(db_pool, new_admin_id, message.from_user.id)
         
         if success:
             await message.answer(
-                f"✅ **تمت إضافة المشرف بنجاح!**\n\n"
+                f"✅ <b>تمت إضافة المشرف بنجاح!</b>\n\n"
                 f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
-                f"🆔 الآيدي: `{new_admin_id}`\n\n"
-                f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل الصلاحيات."
+                f"🆔 الآيدي: <code>{new_admin_id}</code>\n\n"
+                f"🔸 ملاحظة: قد تحتاج إلى إعادة تشغيل البوت لتفعيل الصلاحيات.",
+                parse_mode="HTML"
             )
             
             try:
                 await message.bot.send_message(
                     new_admin_id,
-                    f"🎉 **مبروك! تمت إضافتك كمشرف في البوت**\n\n"
+                    f"🎉 <b>مبروك! تمت إضافتك كمشرف في البوت</b>\n\n"
                     f"🔸 يمكنك الآن استخدام لوحة التحكم عبر إرسال /admin\n"
-                    f"👤 تمت الإضافة بواسطة: @{message.from_user.username}"
+                    f"👤 تمت الإضافة بواسطة: @{message.from_user.username}",
+                    parse_mode="HTML"
                 )
             except:
                 pass
         else:
-            await message.answer(f"❌ {msg}")
+            await message.answer(f"❌ {msg}", parse_mode="HTML")
         
         await state.clear()
     except ValueError:
-        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط):", reply_markup=get_cancel_keyboard())
+        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط):", reply_markup=get_cancel_keyboard(), parse_mode="HTML")
     except Exception as e:
-        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        await message.answer(f"❌ حدث خطأ: {str(e)}", parse_mode="HTML")
         await state.clear()
 
 # ============= إزالة مشرف =============
@@ -117,17 +121,16 @@ async def remove_admin_list(callback: types.CallbackQuery, db_pool):
     from database import get_all_admins
     admins = await get_all_admins(db_pool)
     
-    if len(admins) <= 1:  # إذا كان المشرف الوحيد هو المالك
+    # فلترة المشرفين: نعرض فقط المشرفين العاديين (admin) وليس المالك (owner)
+    admins_to_show = [a for a in admins if a['role'] != 'owner']
+    
+    if not admins_to_show:
         await callback.answer("❌ لا يوجد مشرفين للإزالة", show_alert=True)
         return
     
     builder = InlineKeyboardBuilder()
     
-    for admin in admins:
-        # منع إزالة المالك
-        if admin['role'] == 'owner':
-            continue
-            
+    for admin in admins_to_show:
         username = f"@{admin['username']}" if admin['username'] else f"ID: {admin['user_id']}"
         builder.row(types.InlineKeyboardButton(
             text=f"❌ {username}",
@@ -137,8 +140,9 @@ async def remove_admin_list(callback: types.CallbackQuery, db_pool):
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_admins"))
     
     await callback.message.edit_text(
-        "🗑️ **اختر المشرف للإزالة:**",
-        reply_markup=builder.as_markup()
+        "🗑️ <b>اختر المشرف للإزالة:</b>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
 
@@ -158,9 +162,10 @@ async def remove_admin_confirm(callback: types.CallbackQuery, db_pool):
     )
     
     await callback.message.edit_text(
-        f"⚠️ **تأكيد إزالة مشرف**\n\n"
+        f"⚠️ <b>تأكيد إزالة مشرف</b>\n\n"
         f"هل أنت متأكد من إزالة @{username} من قائمة المشرفين؟",
-        reply_markup=builder.as_markup()
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
 
@@ -174,7 +179,7 @@ async def remove_admin_execute(callback: types.CallbackQuery, db_pool):
     
     if success:
         await callback.answer("✅ تمت إزالة المشرف بنجاح")
-        await callback.message.edit_text("✅ **تمت إزالة المشرف بنجاح**")
+        await callback.message.edit_text("✅ <b>تمت إزالة المشرف بنجاح</b>", parse_mode="HTML")
     else:
         await callback.answer(f"❌ {msg}", show_alert=True)
 
@@ -187,19 +192,19 @@ async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.message.edit_text(
-        "👤 **أدخل آيدي المشرف للحصول على معلوماته:**\n\n"
+        "👤 <b>أدخل آيدي المشرف للحصول على معلوماته:</b>\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=None
+        parse_mode="HTML"
     )
     
     await callback.message.answer(
         "أدخل الآيدي الآن:",
         reply_markup=get_cancel_keyboard()
     )
-    await state.set_state(AdminManageStates.waiting_admin_info_id)  # ✅ حالة جديدة
+    await state.set_state(AdminManageStates.waiting_admin_info_id)
 
 
-@router.message(AdminManageStates.waiting_admin_info_id)  # ✅ حالة جديدة
+@router.message(AdminManageStates.waiting_admin_info_id)
 async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
     """عرض معلومات المشرف"""
     if not is_admin(message.from_user.id):
@@ -212,29 +217,29 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
         info = await get_admin_info(db_pool, admin_id)
         
         if not info:
-            await message.answer("❌ المشرف غير موجود أو ليس لديه صلاحيات")
+            await message.answer("❌ المشرف غير موجود أو ليس لديه صلاحيات", parse_mode="HTML")
             await state.clear()
             return
         
         user = info['user']
         stats = info['stats']
-        role_icon = "👑" if info['role'] == 'owner' else "🛡️"
+        role_icon = "👑" if info['role'] == 'owner' else "🛡️'
         
         # تنسيق آخر النشاطات
         recent_text = ""
         if info['recent_actions']:
-            recent_text = "\n📋 **آخر النشاطات:**\n"
+            recent_text = "\n📋 <b>آخر النشاطات:</b>\n"
             for action in info['recent_actions'][:5]:
                 date = format_datetime(action['created_at'], "%Y-%m-%d %H:%M")
                 recent_text += f"• {action['action']} - {date}\n"
         
         text = (
-            f"{role_icon} **معلومات المشرف**\n\n"
-            f"🆔 **الآيدي:** `{user['user_id']}`\n"
-            f"👤 **اليوزر:** @{user['username'] or 'غير معروف'}\n"
-            f"📝 **الاسم:** {user.get('first_name', '')} {user.get('last_name', '')}\n"
-            f"👑 **الصلاحية:** {info['role']}\n\n"
-            f"📊 **إحصائيات:**\n"
+            f"{role_icon} <b>معلومات المشرف</b>\n\n"
+            f"🆔 <b>الآيدي:</b> <code>{user['user_id']}</code>\n"
+            f"👤 <b>اليوزر:</b> @{user['username'] or 'غير معروف'}\n"
+            f"📝 <b>الاسم:</b> {user.get('first_name', '')} {user.get('last_name', '')}\n"
+            f"👑 <b>الصلاحية:</b> {info['role']}\n\n"
+            f"📊 <b>إحصائيات:</b>\n"
             f"• عدد الموافقات: {stats.get('approvals', 0)}\n"
             f"• عدد الرفض: {stats.get('rejections', 0)}\n"
             f"• مشرفين أضافهم: {stats.get('admins_added', 0)}\n"
@@ -243,15 +248,15 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
             f"{recent_text}"
         )
         
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="HTML")
         await state.clear()
         
     except ValueError:
-        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط)")
+        await message.answer("❌ يرجى إدخال آيدي صحيح (أرقام فقط)", parse_mode="HTML")
         await state.clear()
     except Exception as e:
-        logger.error(f"خطأ في معلومات المشرف: {e}")
-        await message.answer(f"❌ حدث خطأ: {str(e)}")
+        logger.error(f"خطأ في معلومات المشرف: {e}')
+        await message.answer(f"❌ حدث خطأ: {str(e)}", parse_mode="HTML")
         await state.clear()
 
 
@@ -270,7 +275,7 @@ async def admin_logs_show(callback: types.CallbackQuery, db_pool):
         await callback.answer("📭 لا توجد نشاطات مسجلة", show_alert=True)
         return
     
-    text = "📊 **سجل نشاطات المشرفين**\n\n"
+    text = "📊 <b>سجل نشاطات المشرفين</b>\n\n"
     
     for log in logs[:20]:  # عرض أول 20 فقط
         date = format_datetime(log['created_at'], "%Y-%m-%d %H:%M")
@@ -297,7 +302,7 @@ async def admin_logs_show(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_admins"))
     
-    await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 # ============= معالج المدخلات الخاطئة =============
