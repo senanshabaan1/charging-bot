@@ -6,16 +6,15 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from config import TOKEN, ADMIN_ID
-from database import (
-    init_db, get_pool, fix_points_history_table, 
-    set_database_timezone, update_old_records_timezone, 
-    get_report_settings, DAMASCUS_TZ
-)
-# ✅ تغيير import handlers إلى المجلد الجديد
+from database.connection import get_pool, set_database_timezone, update_old_records_timezone, DAMASCUS_TZ
+from database import init_db  # init_db موجود في __init__.py
+from database.points import fix_points_history_table
+from database.stats import get_report_settings
+
 from handlers import (
     start, deposit, services, reports, profile_handlers
 )
-from admin import router as admin_router  # ✅ import من المجلد الجديد
+from admin import router as admin_router  
 from handlers.middleware import BotStatusMiddleware, refresh_bot_status_cache
 import pytz
 from datetime import datetime

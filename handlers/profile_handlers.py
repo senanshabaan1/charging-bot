@@ -5,10 +5,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from handlers.time_utils import get_damascus_time_now
 from handlers.keyboards import get_main_menu_keyboard
-from database import (
-    get_redemption_rate, get_exchange_rate, get_next_vip_level,
-    generate_referral_code, create_redemption_request
-)
+from database.points import get_redemption_rate, create_redemption_request
+from database.core import get_exchange_rate
+from database.vip import get_next_vip_level
+from database.referrals import generate_referral_code
+from database.users import get_user_profile, get_user_points 
 from utils import format_datetime, is_admin
 
 logger = logging.getLogger(__name__)

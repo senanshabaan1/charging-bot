@@ -3,7 +3,8 @@ from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin, format_amount
-from database import get_bot_stats, get_bot_status, get_exchange_rate
+from database.stats import get_bot_stats
+from database.core import get_bot_status, get_exchange_rate
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_stats")

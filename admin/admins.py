@@ -6,7 +6,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin, format_datetime
 from handlers.keyboards import get_cancel_keyboard
-
+from database.admin import get_all_admins, add_admin, remove_admin, get_admin_info, get_admin_logs
+from database.users import get_user_by_id
 logger = logging.getLogger(__name__)
 router = Router(name="admin_admins")
 
@@ -20,7 +21,8 @@ async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_all_admins
+    from database.admin import get_all_admins, add_admin, remove_admin, get_admin_info, get_admin_logs
+    from database.users import get_user_by_id
     admins = await get_all_admins(db_pool)
     
     admins_text = "👑 <b>قائمة المشرفين</b>\n\n"

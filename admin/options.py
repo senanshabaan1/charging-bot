@@ -8,7 +8,8 @@ import logging
 # التعديل: استخدام is_admin من utils في المجلد الرئيسي
 from utils import is_admin, format_amount, get_formatted_damascus_time
 from handlers.keyboards import get_cancel_keyboard
-from database import get_product_option, get_exchange_rate
+from database.products import get_product_option
+from database.core import get_exchange_rate
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_options")

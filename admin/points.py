@@ -118,7 +118,8 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
     try:
         req_id = int(callback.data.split("_")[2])
         
-        from database import approve_redemption, get_exchange_rate
+        from database.points import approve_redemption, reject_redemption
+        from database.core import get_exchange_rate
         current_rate = await get_exchange_rate(db_pool)
         success, error = await approve_redemption(db_pool, req_id, callback.from_user.id)
         

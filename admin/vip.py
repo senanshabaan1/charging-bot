@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin
 from handlers.keyboards import get_cancel_keyboard
-
+from database.vip import get_user_vip, update_user_vip
 logger = logging.getLogger(__name__)
 router = Router(name="admin_vip")
 

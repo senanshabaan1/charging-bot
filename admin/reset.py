@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin
 from handlers.keyboards import get_cancel_keyboard
-
+from database.core import get_bot_status, set_bot_status
 logger = logging.getLogger(__name__)
 router = Router(name="admin_reset")
 

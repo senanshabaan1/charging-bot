@@ -9,7 +9,8 @@ import logging
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from datetime import datetime
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
-from database import is_admin_user
+from database.users import is_admin_user
+from database.core import get_exchange_rate, get_syriatel_numbers
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number, parse_number 
 logger = logging.getLogger(__name__)
 router = Router()

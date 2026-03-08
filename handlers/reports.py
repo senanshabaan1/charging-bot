@@ -16,7 +16,8 @@ from io import BytesIO
 from config import ADMIN_ID, MODERATORS
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
 from handlers.keyboards import get_back_inline_keyboard
-from database import get_report_settings, update_report_setting, get_exchange_rate
+from database.stats import get_report_settings, update_report_setting
+from database.core import get_exchange_rate
 from utils import is_admin
 logger = logging.getLogger(__name__)
 router = Router()

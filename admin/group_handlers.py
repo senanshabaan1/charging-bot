@@ -5,7 +5,9 @@ import logging
 import asyncio
 from handlers.time_utils import get_damascus_time_now
 from utils import get_formatted_damascus_time, format_amount
-from database import invalidate_user_cache  # ✅ إضافة مسح الكاش
+from database.cache_utils import invalidate_user_cache
+from database.points import get_points_per_order
+from database.vip import update_user_vip
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_group")
@@ -456,7 +458,7 @@ async def process_order_completion(order_id: int, callback: types.CallbackQuery,
                 await callback.message.answer("❌ الطلب غير موجود")
                 return
             
-            from database import get_points_per_order
+            from database.points import get_points_per_order
             points = await get_points_per_order(db_pool)
             
             # تحديث حالة الطلب
@@ -483,7 +485,7 @@ async def process_order_completion(order_id: int, callback: types.CallbackQuery,
             ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
             
             # تحديث VIP
-            from database import update_user_vip
+            ffrom database.vip import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
             
             if vip_info:
