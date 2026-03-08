@@ -86,6 +86,12 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, db_pool):
     """معالج أمر /start مع دعم الإحالات والتحقق من اشتراك القناة"""
+    
+    # ✅ تجاهل البوت نفسه
+    BOT_ID = 8384048684
+    if message.from_user.id == BOT_ID:
+        return
+    
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name or ""
