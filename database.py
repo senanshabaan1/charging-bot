@@ -891,7 +891,7 @@ async def process_referral(pool, referred_user_id, referrer_code):
             }, None
             
     except Exception as e:
-        logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
+        logging.error(f"❌ خطأ في معالجة الإحالة: {e}")
         return None, str(e)
 
 async def get_user_points(pool, user_id):
