@@ -126,3 +126,17 @@ async def is_admin_user(pool, user_id):
     except Exception as e:
         logging.error(f"❌ خطأ في التحقق من المشرف: {e}")
         return False
+        # database/users.py - Add this function
+
+async def get_user_points(pool, user_id):
+    """جلب عدد نقاط المستخدم"""
+    try:
+        async with pool.acquire() as conn:
+            points = await conn.fetchval(
+                "SELECT total_points FROM users WHERE user_id = $1",
+                user_id
+            )
+            return points or 0
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب نقاط المستخدم {user_id}: {e}")
+        return 0
