@@ -485,7 +485,7 @@ async def process_order_completion(order_id: int, callback: types.CallbackQuery,
             ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
             
             # تحديث VIP
-            ffrom database.vip import update_user_vip
+            from database.vip import update_user_vip
             vip_info = await update_user_vip(db_pool, order['user_id'])
             
             if vip_info:
