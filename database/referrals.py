@@ -234,3 +234,24 @@ async def get_user_referral_info(pool, user_id):
     except Exception as e:
         logging.error(f"❌ خطأ في جلب معلومات الإحالة للمستخدم {user_id}: {e}")
         return None
+async def update_referrer_stats(pool, referrer_id, points, referred_id):
+    """تحديث إحصائيات المُحيل بعد إحالة ناجحة"""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE users 
+                SET referral_count = referral_count + 1,
+                    total_points = total_points + $1,
+                    referral_earnings = referral_earnings + $1
+                WHERE user_id = $2
+            ''', points, referrer_id)
+            
+            await conn.execute('''
+                INSERT INTO points_history (user_id, points, action, description, created_at)
+                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+            ''', referrer_id, points, 'referral', f'إحالة المستخدم {referred_id}')
+            
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في تحديث إحصائيات المُحيل: {e}")
+        return False
