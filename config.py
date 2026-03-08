@@ -24,6 +24,10 @@ if moderators_str:
     except ValueError:
         print("⚠️ تحذير: MODERATORS تحتوي على قيم غير صالحة")
 
+# ✅ إضافة ADMIN_ID إلى MODERATORS إذا ما كان موجود
+if ADMIN_ID and ADMIN_ID not in MODERATORS:
+    MODERATORS.append(ADMIN_ID)
+
 # ====== قسم قاعدة البيانات - آمن ومبسط ======
 # الأولوية لـ DATABASE_URL من متغيرات البيئة
 DATABASE_URL = os.getenv("DATABASE_URL")
