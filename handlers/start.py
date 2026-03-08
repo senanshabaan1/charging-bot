@@ -203,14 +203,21 @@ async def cmd_start(message: types.Message, db_pool):
                         
                         if referrer['user_id'] == user_id:
                             logger.warning("⚠️ المستخدم يحاول إحالة نفسه!")
+                            welcome_text += "\n\n⚠️ **لا يمكنك استخدام رابط الإحالة الخاص بك!**"
                         else:
-                            # 1. تسجيل من أحال المستخدم الجديد
+                            from database.referrals import check_existing_referral
+                            exists, msg = await check_existing_referral(db_pool, referrer['user_id'], user_id)
+                            if exists:
+                                ogger.warning(f"⚠️ إحالة مكررة: {msg}")
+                                welcome_text += f"\n\n⚠️ **{msg}**"
+                        else:
                             await conn.execute(
                                 "UPDATE users SET referred_by = $1 WHERE user_id = $2",
                                 referrer['user_id'], user_id
                             )
                             logger.info(f"✅ تم تسجيل referred_by للمستخدم الجديد")
-                            
+          
+                  
                             # 2. جلب عدد النقاط من الإعدادات
                             points = await conn.fetchval(
                                 "SELECT value::integer FROM bot_settings WHERE key = 'points_per_referral'"
@@ -260,7 +267,7 @@ async def cmd_start(message: types.Message, db_pool):
                     
                     else:
                         logger.warning(f"⚠️ لم يتم العثور على مُحيل للكود: {referral_code}")
-                        
+                        welcome_text += f"\n\n⚠️ **كود الإحالة غير صالح!**"
                 except Exception as e:
                     logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
                     import traceback
