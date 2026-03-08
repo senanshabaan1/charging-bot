@@ -179,6 +179,7 @@ async def cmd_start(message: types.Message, db_pool):
             
             # ========== معالجة الإحالة ==========
             if referral_code:
+                logging.info(f"🔍 تم استلام كود إحالة: {referral_code}")
                 logger.info(f"🔍 محاولة معالجة إحالة بكود: {referral_code}")
                 
                 try:
