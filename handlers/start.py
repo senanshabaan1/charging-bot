@@ -91,7 +91,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
 
 # ========== أمر البدء الرئيسي ==========
 @router.message(CommandStart())
-async def cmd_start(message: types.Message, db_pool):
+async def cmd_start(message: types.Message, state: FSMContext, db_pool):
     """معالج أمر /start مع دعم الإحالات والتحقق من اشتراك القناة"""
     
     # ✅ تجاهل البوت نفسه
@@ -207,67 +207,68 @@ async def cmd_start(message: types.Message, db_pool):
                         else:
                             from database.referrals import check_existing_referral
                             exists, msg = await check_existing_referral(db_pool, referrer['user_id'], user_id)
+                            
                             if exists:
-                                ogger.warning(f"⚠️ إحالة مكررة: {msg}")
+                                logger.warning(f"⚠️ إحالة مكررة: {msg}")
                                 welcome_text += f"\n\n⚠️ **{msg}**"
-                        else:
-                            await conn.execute(
-                                "UPDATE users SET referred_by = $1 WHERE user_id = $2",
-                                referrer['user_id'], user_id
-                            )
-                            logger.info(f"✅ تم تسجيل referred_by للمستخدم الجديد")
-          
-                  
-                            # 2. جلب عدد النقاط من الإعدادات
-                            points = await conn.fetchval(
-                                "SELECT value::integer FROM bot_settings WHERE key = 'points_per_referral'"
-                            ) or 1
-                            
-                            # 3. تحديث بيانات المُحيل (نقاط + عدد الإحالات)
-                            await conn.execute('''
-                                UPDATE users 
-                                SET referral_count = referral_count + 1,
-                                    total_points = total_points + $1,
-                                    referral_earnings = referral_earnings + $1
-                                WHERE user_id = $2
-                            ''', points, referrer['user_id'])
-                            
-                            logger.info(f"✅ تم إضافة {points} نقاط للمُحيل")
-                            
-                            # 4. تسجيل في سجل النقاط
-                            try:
+                            else:
+                                await conn.execute(
+                                    "UPDATE users SET referred_by = $1 WHERE user_id = $2",
+                                    referrer['user_id'], user_id
+                                )
+                                logger.info(f"✅ تم تسجيل referred_by للمستخدم الجديد")
+                                
+                                # جلب عدد النقاط من الإعدادات
+                                points = await conn.fetchval(
+                                    "SELECT value::integer FROM bot_settings WHERE key = 'points_per_referral'"
+                                ) or 1
+                                
+                                # تحديث بيانات المُحيل (نقاط + عدد الإحالات)
                                 await conn.execute('''
-                                    INSERT INTO points_history (user_id, points, action, description, created_at)
-                                    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-                                ''', referrer['user_id'], points, 'referral', f'إحالة المستخدم {user_id}')
-                                logger.info(f"✅ تم تسجيل النقاط في سجل النقاط")
-                            except Exception as e:
-                                logger.error(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
-                            
-                            # 5. إرسال إشعار للمُحيل
-                            try:
-                                new_points = await conn.fetchval(
-                                    "SELECT total_points FROM users WHERE user_id = $1",
-                                    referrer['user_id']
-                                )
-                                await message.bot.send_message(
-                                    referrer['user_id'],
-                                    f"🎉 **مبروك! لديك إحالة جديدة**\n\n"
-                                    f"👤 المستخدم: @{username or first_name or 'مستخدم جديد'}\n"
-                                    f"⭐ نقاط مكتسبة: +{points}\n"
-                                    f"💰 رصيد النقاط الحالي: {new_points}",
-                                    parse_mode="Markdown"
-                                )
-                                logger.info(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
-                            except Exception as e:
-                                logger.error(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
-                            
-                            # 6. تحديث نص الترحيب للمستخدم الجديد
-                            welcome_text += f"\n\n🎁 تم تسجيل دخولك عن طريق رابط إحالة! صديقك حصل على {points} نقاط إضافية."
+                                    UPDATE users 
+                                    SET referral_count = referral_count + 1,
+                                        total_points = total_points + $1,
+                                        referral_earnings = referral_earnings + $1
+                                    WHERE user_id = $2
+                                ''', points, referrer['user_id'])
+                                
+                                logger.info(f"✅ تم إضافة {points} نقاط للمُحيل")
+                                
+                                # تسجيل في سجل النقاط
+                                try:
+                                    await conn.execute('''
+                                        INSERT INTO points_history (user_id, points, action, description, created_at)
+                                        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                                    ''', referrer['user_id'], points, 'referral', f'إحالة المستخدم {user_id}')
+                                    logger.info(f"✅ تم تسجيل النقاط في سجل النقاط")
+                                except Exception as e:
+                                    logger.error(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
+                                
+                                # إرسال إشعار للمُحيل
+                                try:
+                                    new_points = await conn.fetchval(
+                                        "SELECT total_points FROM users WHERE user_id = $1",
+                                        referrer['user_id']
+                                    )
+                                    await message.bot.send_message(
+                                        referrer['user_id'],
+                                        f"🎉 **مبروك! لديك إحالة جديدة**\n\n"
+                                        f"👤 المستخدم: @{username or first_name or 'مستخدم جديد'}\n"
+                                        f"⭐ نقاط مكتسبة: +{points}\n"
+                                        f"💰 رصيد النقاط الحالي: {new_points}",
+                                        parse_mode="Markdown"
+                                    )
+                                    logger.info(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
+                                except Exception as e:
+                                    logger.error(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
+                                
+                                # تحديث نص الترحيب للمستخدم الجديد
+                                welcome_text += f"\n\n🎁 **تم تسجيل دخولك عن طريق رابط إحالة!** صديقك حصل على {points} نقاط إضافية."
                     
                     else:
                         logger.warning(f"⚠️ لم يتم العثور على مُحيل للكود: {referral_code}")
                         welcome_text += f"\n\n⚠️ **كود الإحالة غير صالح!**"
+                        
                 except Exception as e:
                     logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
                     import traceback
