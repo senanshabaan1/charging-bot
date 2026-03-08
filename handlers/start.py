@@ -94,6 +94,12 @@ async def cmd_start(message: types.Message, db_pool):
     args = message.text.split()
     referral_code = args[1] if len(args) > 1 else None
     
+    # ✅ تعريف المتغيرات في البداية
+    balance = 0
+    is_banned = False
+    total_points = 0
+    is_new_user = False
+    
     # التحقق من اشتراك القناة أولاً
     channel_username = "@LINKcharger22"
     try:
