@@ -367,27 +367,23 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
     if is_member:
         await callback.message.delete()
         
-        # ✅ استرجاع كود الإحالة من state
+        # ✅ كود الإحالة محفوظ في state ولا نحتاج لتعديل الرسالة
         data = await state.get_data()
         referral_code = data.get('referral_code')
         
-        # إنشاء رسالة جديدة بنفس كود الإحالة
-        new_message = callback.message
-        new_message.text = f"/start {referral_code}" if referral_code else "/start"
+        logger.info(f"✅ تم التحقق من الاشتراك، كود الإحالة: {referral_code}")
         
-        # مسح الحالة
-        await state.clear()
-        
-        # استدعاء cmd_start مع الرسالة المعدلة
-        await cmd_start(new_message, state, db_pool)
+        # استدعاء cmd_start مع نفس الرسالة (لا تغيير)
+        # الإحالة ستؤخذ من state داخل cmd_start
+        await cmd_start(callback.message, state, db_pool)
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
 
 # ========== العودة للقائمة الرئيسية ==========
 @router.message(F.text == "🔙 رجوع للقائمة")
-async def back_to_main_menu(message: types.Message, db_pool):
+async def back_to_main_menu(message: types.Message, state: FSMContext, db_pool):
     """معالجة زر الرجوع للقائمة الرئيسية"""
-    await cmd_start(message, db_pool)
+    await cmd_start(message, state, db_pool)
 
 # ========== لوحة تحكم المشرفين ==========
 @router.message(F.text == "🛠 لوحة التحكم")
