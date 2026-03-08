@@ -425,7 +425,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
 # ========== التحقق من اشتراك القناة ==========
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """التحقق من اشتراك المستخدم بعد الانضمام للقناة"""
+    """التحقق من اشتراك المستخدم بعد الانضمام للقناة ومعالجة الإحالة مباشرة"""
     user_id = callback.from_user.id
     channel_username = "@LINKcharger22"
     
@@ -439,25 +439,161 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
     if is_member:
         await callback.message.delete()
         
-        # ✅ استرجاع كود الإحالة من state
+        # استرجاع كود الإحالة من state
         data = await state.get_data()
         referral_code = data.get('referral_code')
         
         logger.info(f"✅ تم التحقق من الاشتراك، كود الإحالة: {referral_code}")
         
-        # إنشاء رسالة جديدة بنفس كود الإحالة
-        new_message = callback.message
-        # ❌ لا تحاول تعديل new_message.text - هذا يسبب خطأ frozen
-        
-        # مسح الحالة
+        # مسح الحالة (لأننا خلصنا منها)
         await state.clear()
         
-        # استدعاء cmd_start مع الرسالة المعدلة (بدون تعديل النص)
-        # الكود في cmd_start سيتحقق من state إذا لم يجد referral_code في النص
-        await cmd_start(callback.message, state, db_pool)
+        # ✅ معالجة إنشاء المستخدم والإحالة مباشرة
+        async with db_pool.acquire() as conn:
+            # التحقق إذا كان المستخدم موجود مسبقاً
+            user = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+            
+            if user:
+                # مستخدم موجود مسبقاً (نادر)
+                welcome_text = f"👋 أهلاً بعودتك {callback.from_user.first_name or ''}!\n\n"
+                welcome_text += (
+                    f"📊 ملخص حسابك:\n"
+                    f"💰 الرصيد: {user['balance'] or 0:,.0f} ل.س\n"
+                    f"⭐ النقاط: {user['total_points'] or 0}\n\n"
+                    "🔸 اختر ما تريد من القائمة."
+                )
+                await callback.message.answer(
+                    welcome_text,
+                    reply_markup=get_main_menu_keyboard(is_admin(user_id))
+                )
+                return
+            
+            # ===== مستخدم جديد =====
+            # إنشاء كود إحالة فريد للمستخدم الجديد
+            new_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            while True:
+                check = await conn.fetchval(
+                    "SELECT user_id FROM users WHERE referral_code = $1",
+                    new_code
+                )
+                if not check:
+                    break
+                new_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            
+            # إنشاء المستخدم في قاعدة البيانات
+            try:
+                await conn.execute('''
+                    INSERT INTO users 
+                    (user_id, username, first_name, last_name, balance, referral_code, created_at, is_banned)
+                    VALUES ($1, $2, $3, $4, 0, $5, CURRENT_TIMESTAMP, FALSE)
+                ''', user_id, callback.from_user.username, callback.from_user.first_name or "", callback.from_user.last_name or "", new_code)
+                logger.info(f"✅ تم إنشاء مستخدم جديد: {user_id} بكود إحالة {new_code}")
+            except Exception as e:
+                logger.error(f"خطأ في إنشاء مستخدم: {e}")
+                await callback.message.answer("❌ حدث خطأ في إنشاء حسابك. حاول مرة أخرى لاحقاً.")
+                return
+            
+            welcome_text = (
+                "🎉 أهلاً بك في LINK 🔗 BOT لخدمات الشحن!\n\n"
+                "🌟 تم إنشاء حسابك بنجاح\n\n"
+                "🔸 ماذا يمكنك أن تفعل؟\n"
+                "• 💰 شحن رصيد المحفظة\n"
+                "• 📱 شراء خدمات وتطبيقات\n"
+                "• ⭐ كسب نقاط من عملياتك\n"
+                "• 🔗 دعوة أصدقائك وكسب نقاط إضافية\n\n"
+            )
+            
+            # معالجة الإحالة إذا وجدت
+            if referral_code:
+                logger.info(f"🔍 محاولة معالجة إحالة بكود: {referral_code}")
+                
+                try:
+                    referrer = await conn.fetchrow(
+                        "SELECT user_id, username, total_points FROM users WHERE referral_code = $1",
+                        referral_code
+                    )
+                    
+                    if referrer:
+                        logger.info(f"✅ تم العثور على المُحيل: {referrer['user_id']}")
+                        
+                        if referrer['user_id'] == user_id:
+                            logger.warning("⚠️ المستخدم يحاول إحالة نفسه!")
+                            welcome_text += "\n\n⚠️ **لا يمكنك استخدام رابط الإحالة الخاص بك!**"
+                        else:
+                            from database.referrals import check_existing_referral
+                            exists, msg = await check_existing_referral(db_pool, referrer['user_id'], user_id)
+                            
+                            if exists:
+                                logger.warning(f"⚠️ إحالة مكررة: {msg}")
+                                welcome_text += f"\n\n⚠️ **{msg}**"
+                            else:
+                                # تسجيل الإحالة
+                                await conn.execute(
+                                    "UPDATE users SET referred_by = $1 WHERE user_id = $2",
+                                    referrer['user_id'], user_id
+                                )
+                                logger.info(f"✅ تم تسجيل referred_by للمستخدم الجديد")
+                                
+                                points = await conn.fetchval(
+                                    "SELECT value::integer FROM bot_settings WHERE key = 'points_per_referral'"
+                                ) or 1
+                                
+                                await conn.execute('''
+                                    UPDATE users 
+                                    SET referral_count = referral_count + 1,
+                                        total_points = total_points + $1,
+                                        referral_earnings = referral_earnings + $1
+                                    WHERE user_id = $2
+                                ''', points, referrer['user_id'])
+                                
+                                logger.info(f"✅ تم إضافة {points} نقاط للمُحيل")
+                                
+                                try:
+                                    await conn.execute('''
+                                        INSERT INTO points_history (user_id, points, action, description, created_at)
+                                        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                                    ''', referrer['user_id'], points, 'referral', f'إحالة المستخدم {user_id}')
+                                    logger.info(f"✅ تم تسجيل النقاط في سجل النقاط")
+                                except Exception as e:
+                                    logger.error(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
+                                
+                                try:
+                                    new_points = await conn.fetchval(
+                                        "SELECT total_points FROM users WHERE user_id = $1",
+                                        referrer['user_id']
+                                    )
+                                    await callback.bot.send_message(
+                                        referrer['user_id'],
+                                        f"🎉 **مبروك! لديك إحالة جديدة**\n\n"
+                                        f"👤 المستخدم: @{callback.from_user.username or callback.from_user.first_name or 'مستخدم جديد'}\n"
+                                        f"⭐ نقاط مكتسبة: +{points}\n"
+                                        f"💰 رصيد النقاط الحالي: {new_points}",
+                                        parse_mode="Markdown"
+                                    )
+                                    logger.info(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
+                                except Exception as e:
+                                    logger.error(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
+                                
+                                welcome_text += f"\n\n🎁 **تم تسجيل دخولك عن طريق رابط إحالة!** صديقك حصل على {points} نقاط إضافية."
+                    
+                    else:
+                        logger.warning(f"⚠️ لم يتم العثور على مُحيل للكود: {referral_code}")
+                        welcome_text += f"\n\n⚠️ **كود الإحالة غير صالح!**"
+                        
+                except Exception as e:
+                    logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            welcome_text += "🔹 لبدء الاستخدام، اختر من القائمة أدناه."
+            
+            # إرسال رسالة الترحيب
+            await callback.message.answer(
+                welcome_text,
+                reply_markup=get_main_menu_keyboard(is_admin(user_id))
+            )
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
-
 # ========== العودة للقائمة الرئيسية ==========
 @router.message(F.text == "🔙 رجوع للقائمة")
 async def back_to_main_menu(message: types.Message, state: FSMContext, db_pool):
