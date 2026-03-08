@@ -309,3 +309,32 @@ async def get_redemption_rate(pool):
 
 # لتجنب circular import
 from .core import get_exchange_rate
+
+async def fix_points_history_table(pool):
+    """إصلاح جدول النقاط للتأكد من وجود الأعمدة المطلوبة"""
+    try:
+        async with pool.acquire() as conn:
+            # التحقق من وجود الأعمدة وإضافتها إذا لزم الأمر
+            await conn.execute('ALTER TABLE points_history ADD COLUMN IF NOT EXISTS action TEXT')
+            await conn.execute('ALTER TABLE points_history ADD COLUMN IF NOT EXISTS description TEXT')
+            logging.info("✅ تم التأكد من وجود أعمدة points_history")
+            
+            # إضافة إعدادات النقاط إذا لم تكن موجودة
+            settings = [
+                ('points_per_referral', '1'),
+                ('points_per_order', '1'),
+                ('redemption_rate', '100'),
+            ]
+            
+            for key, value in settings:
+                await conn.execute('''
+                    INSERT INTO bot_settings (key, value, description) 
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (key) DO UPDATE SET value = $2
+                ''', key, value, f'نقاط {key}')
+            
+            logging.info("✅ تم التأكد من وجود إعدادات النقاط")
+            return True
+    except Exception as e:
+        logging.error(f"❌ خطأ في إصلاح جدول النقاط: {e}")
+        return False
