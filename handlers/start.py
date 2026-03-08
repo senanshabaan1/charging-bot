@@ -13,8 +13,6 @@ from handlers.time_utils import format_damascus_time, get_damascus_time_now
 from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
 from utils import is_admin
 from .profile_handlers import router as profile_router
-
-logger = logging.getLogger(__name__)
 router = Router()
 router.include_router(profile_router)  # دمج راوتر الملف الشخصي
 
@@ -34,9 +32,9 @@ async def notify_admins(bot, message_text, db_pool=None):
             await bot.send_message(admin_id, message_text, parse_mode="Markdown")
             sent_count += 1
         except Exception as e:
-            logger.error(f"فشل إرسال إشعار للمشرف {admin_id}: {e}")
+            logging.error(f"فشل إرسال إشعار للمشرف {admin_id}: {e}")
     
-    logger.info(f"✅ تم إرسال إشعار لـ {sent_count} مشرف")
+    logging.info(f"✅ تم إرسال إشعار لـ {sent_count} مشرف")
     return sent_count
 
 # ========== دوال الإلغاء ==========
@@ -53,7 +51,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
         current_time = datetime.now(damascus_tz).strftime('%H:%M:%S')
         
         current_state = await state.get_state()
-        logger.info(f"حالة FSM الحالية: {current_state}")
+        logging.info(f"حالة FSM الحالية: {current_state}")
         
         await state.clear()
         
@@ -77,7 +75,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
             reply_markup=get_main_menu_keyboard(is_admin_user)
         )
     except Exception as e:
-        logger.error(f"خطأ في دالة الإلغاء: {e}")
+        logging.error(f"خطأ في دالة الإلغاء: {e}")
         await message.answer("حدث خطأ، حاول مرة أخرى.")
 
 # ========== أمر البدء الرئيسي ==========
@@ -103,7 +101,7 @@ async def cmd_start(message: types.Message, db_pool):
         member = await message.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
         is_member = member.status in ["member", "administrator", "creator"]
     except Exception as e:
-        logger.warning(f"⚠️ خطأ في التحقق من القناة: {e}")
+        logging.warning(f"⚠️ خطأ في التحقق من القناة: {e}")
         is_member = False
     
     if not is_member:
@@ -130,7 +128,7 @@ async def cmd_start(message: types.Message, db_pool):
         try:
             user = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
         except Exception as e:
-            logger.error(f"خطأ في جلب المستخدم: {e}")
+            logging.error(f"خطأ في جلب المستخدم: {e}")
             user = None
         
         if not user:
@@ -154,9 +152,9 @@ async def cmd_start(message: types.Message, db_pool):
                     (user_id, username, first_name, last_name, balance, referral_code, created_at, is_banned)
                     VALUES ($1, $2, $3, $4, 0, $5, CURRENT_TIMESTAMP, FALSE)
                 ''', user_id, username, first_name, last_name, new_code)
-                logger.info(f"✅ تم إنشاء مستخدم جديد: {user_id} بكود إحالة {new_code}")
+                logging.info(f"✅ تم إنشاء مستخدم جديد: {user_id} بكود إحالة {new_code}")
             except Exception as e:
-                logger.error(f"خطأ في إنشاء مستخدم: {e}")
+                logging.error(f"خطأ في إنشاء مستخدم: {e}")
             
             welcome_text = (
                 "🎉 أهلاً بك في LINK 🔗 BOT لخدمات الشحن!\n\n"
@@ -171,7 +169,7 @@ async def cmd_start(message: types.Message, db_pool):
             
             # ========== معالجة الإحالة ==========
             if referral_code:
-                logger.info(f"🔍 محاولة معالجة إحالة بكود: {referral_code}")
+                logging.info(f"🔍 محاولة معالجة إحالة بكود: {referral_code}")
                 
                 try:
                     referrer = await conn.fetchrow(
@@ -180,17 +178,17 @@ async def cmd_start(message: types.Message, db_pool):
                     )
                     
                     if referrer:
-                        logger.info(f"✅ تم العثور على المُحيل: {referrer['user_id']}")
+                        logging.info(f"✅ تم العثور على المُحيل: {referrer['user_id']}")
                         
                         if referrer['user_id'] == user_id:
-                            logger.warning("⚠️ المستخدم يحاول إحالة نفسه!")
+                            logging.warning("⚠️ المستخدم يحاول إحالة نفسه!")
                         else:
                             # ✅ تسجيل من أحال المستخدم
                             await conn.execute(
                                 "UPDATE users SET referred_by = $1 WHERE user_id = $2",
                                 referrer['user_id'], user_id
                             )
-                            logger.info(f"✅ تم تسجيل referred_by للمستخدم الجديد")
+                            logging.info(f"✅ تم تسجيل referred_by للمستخدم الجديد")
                             
                             # جلب عدد النقاط من الإعدادات
                             points = await conn.fetchval(
@@ -206,7 +204,7 @@ async def cmd_start(message: types.Message, db_pool):
                                 WHERE user_id = $2
                             ''', points, referrer['user_id'])
                             
-                            logger.info(f"✅ تم إضافة {points} نقاط للمُحيل")
+                            logging.info(f"✅ تم إضافة {points} نقاط للمُحيل")
                             
                             # تسجيل في سجل النقاط
                             try:
@@ -214,9 +212,9 @@ async def cmd_start(message: types.Message, db_pool):
                                     INSERT INTO points_history (user_id, points, action, description, created_at)
                                     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
                                 ''', referrer['user_id'], points, 'referral', f'إحالة المستخدم {user_id}')
-                                logger.info(f"✅ تم تسجيل النقاط في سجل النقاط")
+                                logging.info(f"✅ تم تسجيل النقاط في سجل النقاط")
                             except Exception as e:
-                                logger.error(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
+                                logging.error(f"⚠️ فشل تسجيل النقاط في السجل: {e}")
                             
                             # تحديث نص الترحيب
                             welcome_text += f"\n\n🎁 تم تسجيل دخولك عن طريق رابط إحالة! صديقك حصل على {points} نقاط إضافية."
@@ -235,15 +233,15 @@ async def cmd_start(message: types.Message, db_pool):
                                     f"💰 رصيد النقاط الحالي: {new_points}",
                                     parse_mode="Markdown"
                                 )
-                                logger.info(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
+                                logging.info(f"✅ تم إرسال إشعار للمُحيل: {referrer['user_id']}")
                             except Exception as e:
-                                logger.error(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
+                                logging.error(f"⚠️ فشل إرسال إشعار للمحيل: {e}")
                     
                     else:
-                        logger.warning(f"⚠️ لم يتم العثور على مُحيل للكود: {referral_code}")
+                        logging.warning(f"⚠️ لم يتم العثور على مُحيل للكود: {referral_code}")
                         
                 except Exception as e:
-                    logger.error(f"❌ خطأ في معالجة الإحالة: {e}")
+                    logging.error(f"❌ خطأ في معالجة الإحالة: {e}")
                     import traceback
                     traceback.print_exc()
             # =============================================
@@ -257,7 +255,7 @@ async def cmd_start(message: types.Message, db_pool):
                     WHERE user_id = $2
                 ''', username, user_id)
             except Exception as e:
-                logger.error(f"خطأ في تحديث المستخدم: {e}")
+                logging.error(f"خطأ في تحديث المستخدم: {e}")
             
             try:
                 await conn.execute(
@@ -265,7 +263,7 @@ async def cmd_start(message: types.Message, db_pool):
                     first_name, last_name, user_id
                 )
             except Exception as e:
-                logger.error(f"خطأ في تحديث الاسم: {e}")
+                logging.error(f"خطأ في تحديث الاسم: {e}")
             
             try:
                 balance_row = await conn.fetchrow(
@@ -275,9 +273,9 @@ async def cmd_start(message: types.Message, db_pool):
                 if balance_row:
                     balance = balance_row['balance'] or 0
                     is_banned = balance_row['is_banned'] or False
-                logger.info(f"📊 المستخدم {user_id}: الرصيد={balance}, محظور={is_banned}")
+                logging.info(f"📊 المستخدم {user_id}: الرصيد={balance}, محظور={is_banned}")
             except Exception as e:
-                logger.error(f"خطأ في جلب الرصيد: {e}")
+                logging.error(f"خطأ في جلب الرصيد: {e}")
                 balance = 0
                 is_banned = False
             
@@ -287,7 +285,7 @@ async def cmd_start(message: types.Message, db_pool):
                     user_id
                 ) or 0
             except Exception as e:
-                logger.error(f"خطأ في جلب النقاط: {e}")
+                logging.error(f"خطأ في جلب النقاط: {e}")
                 total_points = 0
             
             welcome_text = (
@@ -299,7 +297,7 @@ async def cmd_start(message: types.Message, db_pool):
             )
     
     if is_banned:
-        logger.warning(f"🚫 محاولة دخول من مستخدم محظور: {user_id}")
+        logging.warning(f"🚫 محاولة دخول من مستخدم محظور: {user_id}")
         return await message.answer(
             "🚫 عذراً، حسابك محظور من استخدام البوت.\n\n"
             "📞 للتواصل مع الدعم: @support"
@@ -321,7 +319,7 @@ async def check_subscription(callback: types.CallbackQuery, db_pool):
         member = await callback.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
         is_member = member.status in ["member", "administrator", "creator"]
     except Exception as e:
-        logger.error(f"⚠️ خطأ في التحقق من القناة: {e}")
+        logging.error(f"⚠️ خطأ في التحقق من القناة: {e}")
         is_member = False
     
     if is_member:
