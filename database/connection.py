@@ -103,3 +103,425 @@ async def update_old_records_timezone(pool):
     except Exception as e:
         logging.error(f"❌ خطأ في تحديث السجلات القديمة: {e}")
         return False
+
+async def init_db(pool=None):
+    """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
+    try:
+        if pool:
+            conn = await pool.acquire()
+            need_release = True
+        else:
+            conn = await asyncpg.connect(**DB_CONFIG)
+            need_release = False
+            
+        # جدول المستخدمين
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                balance FLOAT DEFAULT 0,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                is_banned BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_deposits FLOAT DEFAULT 0,
+                total_orders FLOAT DEFAULT 0,
+                total_points INTEGER DEFAULT 0,
+                referral_code TEXT UNIQUE,
+                referred_by BIGINT,
+                referral_count INTEGER DEFAULT 0,
+                referral_earnings FLOAT DEFAULT 0,
+                total_points_earned INTEGER DEFAULT 0,
+                total_points_redeemed INTEGER DEFAULT 0,
+                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                vip_level INTEGER DEFAULT 0,
+                total_spent FLOAT DEFAULT 0,
+                discount_percent INTEGER DEFAULT 0
+            );
+        ''')
+
+        # جدول الأقسام
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE,
+                display_name TEXT,
+                icon TEXT DEFAULT '📁',
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # جدول التطبيقات
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS applications (
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE,
+                unit_price_usd FLOAT,
+                min_units INTEGER,
+                profit_percentage FLOAT DEFAULT 10,
+                category_id INTEGER REFERENCES categories(id),
+                type VARCHAR(50) DEFAULT 'service',
+                api_service_id TEXT,
+                api_url TEXT,
+                api_token TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # جدول الفئات الفرعية (للألعاب والاشتراكات)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS app_variants (
+                id SERIAL PRIMARY KEY,
+                app_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                quantity INTEGER,
+                duration_days INTEGER,
+                price_usd DECIMAL(10, 6) NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+        
+        # جدول خيارات المنتجات
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS product_options (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                quantity INTEGER,
+                price_usd DECIMAL(10, 6) NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+        logging.info("✅ تم التأكد من وجود جدول product_options")
+
+        # جدول أنواع الخدمات
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS service_types (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(50) UNIQUE,
+                display_name VARCHAR(100),
+                description TEXT
+            );
+        ''')
+        logging.info("✅ تم التأكد من وجود جدول service_types")
+
+        # إضافة أنواع الخدمات الأساسية
+        await conn.execute('''
+            INSERT INTO service_types (name, display_name, description) 
+            VALUES 
+                ('regular', 'رشق عادي', 'متابعين عاديين'),
+                ('high_quality', 'جودة عالية', 'متابعين بجودة عالية'),
+                ('telegram_stars', 'نجوم تليجرام', 'شراء نجوم تيليجرام')
+            ON CONFLICT (name) DO NOTHING;
+        ''')
+        logging.info("✅ تم إضافة أنواع الخدمات الأساسية")
+        
+        # جدول طلبات الشحن
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS deposit_requests (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                username TEXT,
+                method TEXT,
+                amount FLOAT,
+                amount_syp FLOAT,
+                tx_info TEXT,
+                status TEXT DEFAULT 'pending',
+                admin_notes TEXT,
+                photo_file_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                group_message_id BIGINT
+            );
+        ''')
+
+        # جدول طلبات التطبيقات
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS orders (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                username TEXT,
+                app_id INTEGER,
+                app_name TEXT,
+                variant_id INTEGER,
+                variant_name TEXT,
+                quantity INTEGER,
+                duration_days INTEGER,
+                unit_price_usd FLOAT,
+                total_amount_syp FLOAT,
+                target_id TEXT,
+                status TEXT DEFAULT 'pending',
+                points_earned INTEGER DEFAULT 0,
+                api_response TEXT,
+                admin_notes TEXT,
+                group_message_id BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # جدول سجل النقاط
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS points_history (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                points INTEGER,
+                action TEXT,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # جدول طلبات استرداد النقاط
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS redemption_requests (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                username TEXT,
+                points INTEGER,
+                amount_usd FLOAT,
+                amount_syp FLOAT,
+                status TEXT DEFAULT 'pending',
+                admin_notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # جدول إعدادات البوت
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                description TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # جدول مستويات VIP
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS vip_levels (
+                level INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                min_spent FLOAT NOT NULL,
+                discount_percent INTEGER NOT NULL,
+                icon TEXT DEFAULT '⭐'
+            );
+        ''')
+
+        # إضافة المستويات الافتراضية
+        await conn.execute('''
+            INSERT INTO vip_levels (level, name, min_spent, discount_percent, icon) 
+                VALUES 
+                    (0, 'VIP 0', 0, 0, '⚪'),
+                    (1, 'VIP 1', 3500, 1, '🔵'),
+                    (2, 'VIP 2', 6500, 2, '🟣'),
+                    (3, 'VIP 3', 12000, 3, '🟡')
+                ON CONFLICT (level) DO UPDATE SET
+                    min_spent = EXCLUDED.min_spent,
+                    discount_percent = EXCLUDED.discount_percent,
+                    icon = EXCLUDED.icon;
+        ''')
+
+        # جدول السجلات
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS logs (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                action TEXT,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+        
+        # جدول إعدادات التقارير
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS report_settings (
+                id SERIAL PRIMARY KEY,
+                setting_key TEXT UNIQUE,
+                setting_value TEXT,
+                description TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # إضافة الإعدادات الافتراضية
+        await conn.execute('''
+            INSERT INTO report_settings (setting_key, setting_value, description) 
+            VALUES 
+                ('daily_report_enabled', 'true', 'تفعيل التقرير اليومي'),
+                ('report_time', '00:00', 'وقت إرسال التقرير'),
+                ('report_recipients', 'owner_only', 'مستلمو التقرير (all_admins/owner_only)')
+            ON CONFLICT (setting_key) DO NOTHING;
+        ''')
+
+        # إضافة قسم تطبيقات الدردشة فقط إذا لم تكن هناك أقسام
+        existing_cats = await conn.fetchval("SELECT COUNT(*) FROM categories")
+        if existing_cats == 0:
+            await conn.execute('''
+                INSERT INTO categories (name, display_name, icon, sort_order) 
+                VALUES ('chat_apps', '💬 تطبيقات دردشة', '💬', 1)
+                ON CONFLICT (name) DO NOTHING;
+            ''')
+            logging.info("✅ تم إضافة قسم تطبيقات الدردشة")
+
+        # إضافة إعدادات البوت الأساسية
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value, description) 
+            VALUES 
+                ('bot_status', 'running', 'حالة البوت (running/stopped)'),
+                ('maintenance_message', 'البوت قيد الصيانة حالياً، يرجى المحاولة لاحقاً', 'رسالة الصيانة'),
+                ('points_per_order', '1', 'نقاط لكل عملية شراء'),
+                ('points_per_referral', '1', 'نقاط لكل عملية من خلال الإحالة'),
+                ('redemption_rate', '100', 'عدد النقاط مقابل 1 دولار'),
+                ('last_restart', CURRENT_TIMESTAMP::TEXT, 'آخر تشغيل للبوت')
+            ON CONFLICT (key) DO NOTHING;
+        ''')
+       
+        # ===== إضافة مفتاح أرقام سيرياتل =====
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value, description) 
+            VALUES ('syriatel_nums', '74091109,63826779', 'أرقام سيرياتل كاش')
+            ON CONFLICT (key) DO NOTHING;
+        ''')
+        
+        # إضافة الأعمدة إذا لم تكن موجودة (للتحديثات)
+        tables_columns = {
+            'applications': [
+                ('api_url', 'TEXT'),
+                ('api_token', 'TEXT'),
+                ('profit_percentage', 'FLOAT DEFAULT 10'),
+                ('category_id', 'INTEGER REFERENCES categories(id)'),
+                ('type', "VARCHAR(50) DEFAULT 'service'"),
+                ('is_active', 'BOOLEAN DEFAULT TRUE')
+            ],
+            'deposit_requests': [
+                ('group_message_id', 'BIGINT'),
+                ('photo_file_id', 'TEXT'),
+                ('admin_notes', 'TEXT')
+            ],
+            'orders': [
+                ('group_message_id', 'BIGINT'),
+                ('api_response', 'TEXT'),
+                ('admin_notes', 'TEXT'),
+                ('variant_id', 'INTEGER'),
+                ('variant_name', 'TEXT'),
+                ('duration_days', 'INTEGER'),
+                ('points_earned', 'INTEGER DEFAULT 0')
+            ],
+            'users': [
+                ('total_deposits', 'FLOAT DEFAULT 0'),
+                ('total_orders', 'FLOAT DEFAULT 0'),
+                ('total_points', 'INTEGER DEFAULT 0'),
+                ('referral_code', 'TEXT'),
+                ('referred_by', 'BIGINT'),
+                ('referral_count', 'INTEGER DEFAULT 0'),
+                ('referral_earnings', 'FLOAT DEFAULT 0'),
+                ('first_name', 'TEXT'),
+                ('last_name', 'TEXT'),
+                ('total_points_earned', 'INTEGER DEFAULT 0'),
+                ('total_points_redeemed', 'INTEGER DEFAULT 0'),
+                ('last_activity', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            ]
+        }
+
+        for table, columns in tables_columns.items():
+            for column_name, column_type in columns:
+                try:
+                    check_query = f'''
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name='{table}' AND column_name='{column_name}'
+                    '''
+                    exists = await conn.fetchval(check_query)
+                    
+                    if not exists:
+                        await conn.execute(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column_name} {column_type};')
+                        logging.info(f"✅ تم إضافة العمود {column_name} إلى جدول {table}")
+                except Exception as e:
+                    logging.warning(f"⚠️ لم يتم إضافة العمود {column_name} لـ {table}: {e}")
+
+        # إنشاء كود إحالة فريد لكل مستخدم موجود
+        try:
+            users = await conn.fetch("SELECT user_id FROM users WHERE referral_code IS NULL")
+            for user in users:
+                import random
+                import string
+                code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                await conn.execute(
+                    "UPDATE users SET referral_code = $1 WHERE user_id = $2",
+                    code, user['user_id']
+                )
+        except Exception as e:
+            logging.warning(f"⚠️ لم يتم إنشاء أكواد الإحالة للمستخدمين الحاليين: {e}")
+
+        # إضافة أعمدة VIP
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS vip_level INTEGER DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود vip_level")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود vip_level: {e}")
+
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS total_spent FLOAT DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود total_spent")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود total_spent: {e}")
+
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS discount_percent INTEGER DEFAULT 0')
+            logging.info("✅ تم التأكد من وجود عمود discount_percent")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود discount_percent: {e}")
+            
+        # إضافة عمود manual_vip
+        try:
+            await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_vip BOOLEAN DEFAULT FALSE')
+            logging.info("✅ تم إضافة عمود manual_vip")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود manual_vip: {e}")
+            
+        # إضافة عمود description
+        try:
+            await conn.execute('ALTER TABLE applications ADD COLUMN IF NOT EXISTS description TEXT')
+            logging.info("✅ تم إضافة عمود description إلى جدول applications")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة عمود description: {e}")
+            
+        # إصلاح الأعمدة المفقودة
+        try:
+            await conn.execute('ALTER TABLE app_variants ADD COLUMN IF NOT EXISTS display_name TEXT')
+            logging.info("✅ تم إضافة عمود display_name إلى app_variants")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة display_name إلى app_variants: {e}")
+            
+        try:
+            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            logging.info("✅ تم إضافة عمود updated_at إلى product_options")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة updated_at إلى product_options: {e}")
+            
+        try:
+            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            logging.info("✅ تم التأكد من وجود created_at في product_options")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة created_at إلى product_options: {e}")
+            
+        if need_release:
+            await pool.release(conn)
+        else:
+            await conn.close()
+            
+        logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
+        return True
+    except Exception as e:
+        logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
+        return False
