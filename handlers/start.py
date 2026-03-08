@@ -439,14 +439,21 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
     if is_member:
         await callback.message.delete()
         
-        # ✅ كود الإحالة محفوظ في state ولا نحتاج لتعديل الرسالة
+        # ✅ استرجاع كود الإحالة من state
         data = await state.get_data()
         referral_code = data.get('referral_code')
         
         logger.info(f"✅ تم التحقق من الاشتراك، كود الإحالة: {referral_code}")
         
-        # استدعاء cmd_start مع نفس الرسالة (لا تغيير)
-        # الإحالة ستؤخذ من state داخل cmd_start
+        # إنشاء رسالة جديدة بنفس كود الإحالة
+        new_message = callback.message
+        # ❌ لا تحاول تعديل new_message.text - هذا يسبب خطأ frozen
+        
+        # مسح الحالة
+        await state.clear()
+        
+        # استدعاء cmd_start مع الرسالة المعدلة (بدون تعديل النص)
+        # الكود في cmd_start سيتحقق من state إذا لم يجد referral_code في النص
         await cmd_start(callback.message, state, db_pool)
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
