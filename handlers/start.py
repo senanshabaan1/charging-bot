@@ -18,7 +18,9 @@ from database.core import get_exchange_rate
 from database.vip import get_next_vip_level
 from database.referrals import generate_referral_code
 from database.users import is_admin_user 
-
+from aiogram.fsm.state import State, StatesGroup
+class ReferralStates(StatesGroup):
+    waiting_subscription = State()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,9 @@ async def cmd_start(message: types.Message, db_pool):
         is_member = False
     
     if not is_member:
+        if referral_code:
+            await state.update_data(referral_code=referral_code)
+            await state.set_state(ReferralStates.waiting_subscription)
         join_button = InlineKeyboardBuilder()
         join_button.row(types.InlineKeyboardButton(
             text="📢 انضم إلى القناة",
@@ -339,7 +344,7 @@ async def cmd_start(message: types.Message, db_pool):
 
 # ========== التحقق من اشتراك القناة ==========
 @router.callback_query(F.data == "check_subscription")
-async def check_subscription(callback: types.CallbackQuery, db_pool):
+async def check_subscription(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """التحقق من اشتراك المستخدم بعد الانضمام للقناة"""
     user_id = callback.from_user.id
     channel_username = "@LINKcharger22"
@@ -353,8 +358,20 @@ async def check_subscription(callback: types.CallbackQuery, db_pool):
     
     if is_member:
         await callback.message.delete()
-        # استدعاء cmd_start مرة أخرى - سيتم إنشاء المستخدم ومعالجة الإحالة
-        await cmd_start(callback.message, db_pool)
+        
+        # ✅ استرجاع كود الإحالة من state
+        data = await state.get_data()
+        referral_code = data.get('referral_code')
+        
+        # إنشاء رسالة جديدة بنفس كود الإحالة
+        new_message = callback.message
+        new_message.text = f"/start {referral_code}" if referral_code else "/start"
+        
+        # مسح الحالة
+        await state.clear()
+        
+        # استدعاء cmd_start مع الرسالة المعدلة
+        await cmd_start(new_message, state, db_pool)
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
 
