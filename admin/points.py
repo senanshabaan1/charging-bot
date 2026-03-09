@@ -226,28 +226,40 @@ async def view_redemptions(callback: types.CallbackQuery, db_pool):
         await callback.answer("📭 لا توجد طلبات استرداد معلقة", show_alert=True)
         return
     
-    # ✅ حذف الرسالة الحالية وإرسال الطلبات
-    await callback.message.delete()
+    # ✅ نص موحد لجميع الطلبات
+    text = "📋 **طلبات الاسترداد المعلقة**\n\n"
+    text += f"إجمالي الطلبات: {len(redemptions)}\n"
+    text += "═" * 30 + "\n\n"
     
-    for r in redemptions:
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(text="✅ موافقة", callback_data=f"appr_red_{r['id']}"),
-            types.InlineKeyboardButton(text="❌ رفض", callback_data=f"reje_red_{r['id']}")
-        )
-        
+    # ✅ بناء الكيبورد بكل الأزرار
+    builder = InlineKeyboardBuilder()
+    
+    for i, r in enumerate(redemptions, 1):
         created_at = r['created_at'].strftime('%Y-%m-%d %H:%M') if r['created_at'] else "غير معروف"
         
-        await callback.message.answer(
-            f"🆔 **طلب استرداد #{r['id']}**\n\n"
+        # إضافة تفاصيل الطلب للنص
+        text += (
+            f"**الطلب #{i}** (رقم: {r['id']})\n"
             f"👤 **المستخدم:** @{r['username'] or 'غير معروف'}\n"
             f"🆔 **الآيدي:** `{r['user_id']}`\n"
             f"⭐ **النقاط:** {r['points']}\n"
             f"💰 **المبلغ:** ${r['amount_usd']:.2f} ({r['amount_syp']:,.0f} ل.س)\n"
-            f"📅 **التاريخ:** {created_at}\n\n"
-            f"**الإجراء:**",
-            reply_markup=builder.as_markup()
+            f"📅 **التاريخ:** {created_at}\n"
         )
+        
+        # إضافة أزرار لهذا الطلب
+        builder.row(
+            types.InlineKeyboardButton(text=f"✅ موافقة {i}", callback_data=f"appr_red_{r['id']}"),
+            types.InlineKeyboardButton(text=f"❌ رفض {i}", callback_data=f"reje_red_{r['id']}")
+        )
+        
+        text += "─" * 30 + "\n\n"
+    
+    # ✅ إضافة زر الرجوع في النهاية
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_points"))
+    
+    # ✅ تعديل الرسالة الحالية (بدون حذف)
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("appr_red_"))
 async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
