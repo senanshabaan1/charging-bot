@@ -223,6 +223,36 @@ async def handle_disabled_app(callback: types.CallbackQuery):
         show_alert=True
     )
 
+# ============= معالجات العناصر المقفلة =============
+
+@router.callback_query(F.data.startswith("disabled_app_"))
+async def handle_disabled_app(callback: types.CallbackQuery):
+    """معالج للتطبيقات المعطلة"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    app_id = int(callback.data.split("_")[2])
+    
+    # ✅ إرسال رسالة منبثقة للمستخدم
+    await callback.answer(
+        "🔒 هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+        show_alert=True
+    )
+
+@router.callback_query(F.data.startswith("disabled_option_"))
+async def handle_disabled_option(callback: types.CallbackQuery):
+    """معالج للخيارات المعطلة"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    option_id = int(callback.data.split("_")[2])
+    
+    # ✅ إرسال رسالة منبثقة للمستخدم
+    await callback.answer(
+        "🔒 هذا الخيار متوقف حالياً، يرجى المحاولة لاحقاً أو اختيار خيار آخر",
+        show_alert=True
+    )
+    
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     """عرض التطبيقات في قسم معين - مع تمييز التطبيقات المعطلة"""
