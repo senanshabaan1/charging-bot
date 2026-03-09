@@ -6,25 +6,25 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
 def get_main_menu_keyboard(is_admin_user: bool = False):
     """القائمة الرئيسية للمستخدمين مع زر المشرفين إذا كانوا مشرفين"""
-    builder = ReplyKeyboardBuilder()
+    builder = InlineKeyboardBuilder()
     
     # الصف الأول
-    builder.row(types.KeyboardButton(text="📱 خدمات الشحن"))
+    builder.row(types.InlineKeyboardButton(text="📱 خدمات الشحن"))
     
     # الصف الثاني
     builder.row(
-        types.KeyboardButton(text="💰 شحن المحفظة"), 
-        types.KeyboardButton(text="👤 حسابي")
+        types.InlineKeyboardButton(text="💰 شحن المحفظة"), 
+        types.InlineKeyboardButton(text="👤 حسابي")
     )
     
     # الصف الثالث (للمشرفين فقط)
     if is_admin_user:
-        builder.row(types.KeyboardButton(text="🛠 لوحة التحكم"))
+        builder.row(types.InlineKeyboardButton(text="🛠 لوحة التحكم"))
     
     # الصف الرابع (مساعدة)
-    builder.row(types.KeyboardButton(text="❓ مساعدة"))
+    builder.row(types.InlineKeyboardButton(text="❓ مساعدة"))
     
-    return builder.as_markup(resize_keyboard=True)
+    return builder.as_markup()
 
 def get_cancel_keyboard():
     """زر إلغاء موحد للمشرفين والمستخدمين"""
@@ -34,15 +34,15 @@ def get_cancel_keyboard():
 
 def get_back_keyboard():
     """زر رجوع للقائمة السابقة"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🔙 رجوع للقائمة"))
-    return builder.as_markup(resize_keyboard=True)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة"))
+    return builder.as_markup()
 
 def get_main_menu_only_keyboard():
     """العودة للقائمة الرئيسية فقط"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🏠 القائمة الرئيسية"))
-    return builder.as_markup(resize_keyboard=True)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🏠 القائمة الرئيسية"))
+    return builder.as_markup()
 
 def get_back_and_cancel_keyboard():
     """أزرار رجوع وإلغاء معاً"""
