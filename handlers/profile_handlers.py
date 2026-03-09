@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from handlers.time_utils import get_damascus_time_now
-from handlers.keyboards import get_main_menu_inline_keyboard
+from handlers.keyboards import get_main_menu_keyboard
 from database.points import get_redemption_rate, create_redemption_request
 from database.core import get_exchange_rate
 from database.vip import get_next_vip_level
