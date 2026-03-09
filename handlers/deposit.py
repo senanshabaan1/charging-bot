@@ -499,7 +499,7 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
     )
     
     await state.clear()
-    @router.callback_query(F.data == "cancel_deposit")
+@router.callback_query(F.data == "cancel_deposit")
 async def cancel_deposit(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """إلغاء طلب الشحن"""
     await callback.answer()
