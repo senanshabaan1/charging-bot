@@ -25,9 +25,27 @@ class DepStates(StatesGroup):
 # ============= معالج الكولباك للقائمة الرئيسية =============
 @router.callback_query(F.data == "show_deposit_methods")
 async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
-    """عرض طرق الشحن من القائمة الإنلاين"""
+    """عرض طرق الشحن من القائمة الإنلاين - تعدل الرسالة الحالية"""
     await callback.answer()
-    await choose_meth(callback.message, db_pool)
+    
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    
+    # ✅ استخدام الكاش لطرق الدفع
+    methods = await get_cached_payment_methods()
+    
+    kb = []
+    for method in methods:
+        kb.append([types.InlineKeyboardButton(
+            text=method["name"], 
+            callback_data=method["callback"]
+        )])
+    kb.append([types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")])
+    
+    # ✅ تعديل الرسالة الحالية
+    await callback.message.edit_text(
+        "💳 **اختر وسيلة الدفع المناسبة:**", 
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
+    )
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_callback(callback: types.CallbackQuery, db_pool):
@@ -78,9 +96,11 @@ async def deposit_back_handler(message: types.Message, state: FSMContext, db_poo
 
 # ============= قائمة طرق الدفع =============
 
+# handlers/deposit.py
+
 @router.message(F.text == "💰 شحن المحفظة")
 async def choose_meth(message: types.Message, db_pool):
-    """عرض قائمة طرق الدفع"""
+    """عرض قائمة طرق الدفع - تعدل الرسالة الحالية"""
     is_admin = await is_admin_user(db_pool, message.from_user.id)
     
     # ✅ استخدام الكاش لطرق الدفع
@@ -94,10 +114,18 @@ async def choose_meth(message: types.Message, db_pool):
         )])
     kb.append([types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")])
     
-    await message.answer(
-        "💳 **اختر وسيلة الدفع المناسبة:**", 
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
-    )
+    # ✅ تعديل الرسالة الحالية بدلاً من إرسال جديدة
+    try:
+        await message.edit_text(
+            "💳 **اختر وسيلة الدفع المناسبة:**", 
+            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
+        )
+    except:
+        # إذا فشل التعديل (مثلاً لأنها أول رسالة)، نرسل رسالة جديدة
+        await message.answer(
+            "💳 **اختر وسيلة الدفع المناسبة:**", 
+            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
+        )
 
 # ============= بدء عملية الشحن =============
 
