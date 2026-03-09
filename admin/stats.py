@@ -140,6 +140,11 @@ async def show_bot_stats(callback: types.CallbackQuery, db_pool):
     builder.row(
         types.InlineKeyboardButton(text="🔄 تحديث", callback_data="refresh_stats"),
         types.InlineKeyboardButton(text="📊 تفاصيل", callback_data="stats_details")
+        types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits")
+        types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders")
+        types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals")
+        types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points")
+        types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats")
     )
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
     
