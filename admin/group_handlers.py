@@ -479,31 +479,26 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
     try:
         order_id = int(callback.data.split("_")[2])
         
-        # ✅ استجابة فورية - هذا يوقف التوهج فوراً
+        # ✅ استجابة فورية
         await callback.answer("✅ جاري تأكيد التنفيذ...", show_alert=False)
         
-        # ✅ إرسال رسالة فورية تفيد ببدء المعالجة
-        processing_msg = await callback.message.answer(
-            f"⏳ **جاري تأكيد تنفيذ الطلب #{order_id}...**\n"
-            f"سيتم إعلامك عند الانتهاء.",
+        # إرسال رسالة فورية تفيد ببدء المعالجة
+        await callback.message.answer(
+            f"⏳ **جاري تأكيد تنفيذ الطلب #{order_id}...**\nسيتم إعلامك عند الانتهاء.",
             parse_mode="Markdown"
         )
         
-        # ✅ تنفيذ العملية في الخلفية
-        asyncio.create_task(process_order_completion_background(
-            order_id, callback.message.chat.id, processing_msg.message_id, db_pool, bot
-        ))
+        # تنفيذ في الخلفية
+        asyncio.create_task(process_order_completion(order_id, callback, db_pool, bot))
         
     except Exception as e:
         logger.error(f"❌ خطأ في تأكيد التنفيذ: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 
-async def process_order_completion_background(order_id: int, chat_id: int, processing_msg_id: int, db_pool, bot: Bot):
+async def process_order_completion(order_id: int, callback: types.CallbackQuery, db_pool, bot: Bot):
     """معالجة تأكيد تنفيذ الطلب في الخلفية"""
     try:
-        start_time = time.time()
-        
         async with db_pool.acquire() as conn:
             async with conn.transaction():
                 order = await conn.fetchrow('''
@@ -514,7 +509,7 @@ async def process_order_completion_background(order_id: int, chat_id: int, proce
                 ''', order_id)
                 
                 if not order:
-                    await bot.send_message(chat_id, "❌ الطلب غير موجود")
+                    await callback.message.answer("❌ الطلب غير موجود")
                     return
                 
                 points = await get_points_per_order(db_pool)
@@ -564,36 +559,21 @@ async def process_order_completion_background(order_id: int, chat_id: int, proce
                 await invalidate_user_cache(order['user_id'])
                 clear_cache(f"order_info:{order_id}")
         
-        elapsed_time = time.time() - start_time
-        
-        # ✅ إرسال إشعار للمستخدم
+        # إرسال إشعار للمستخدم
         await notify_user_order_completed(
             bot, order, points, user_points, vip_icon, vip_level, vip_discount
         )
         
-        # ✅ تحديث رسالة "جاري المعالجة" إلى "تم التنفيذ"
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=processing_msg_id,
-            text=f"✅ **تم تأكيد تنفيذ الطلب #{order_id} بنجاح!**\n\n"
-                 f"⏱️ وقت المعالجة: {elapsed_time:.2f} ثانية",
-            parse_mode="Markdown"
-        )
+        # ✅ تحديث رسالة المجموعة - إزالة الأزرار وإضافة تأكيد التنفيذ
+        new_text = callback.message.text.replace("🔄 **جاري التنفيذ...**", "").replace("⚡ **وقت المعالجة:**", "") + "\n\n✅ **تم التنفيذ بنجاح**"
+        await update_group_message(callback.message, new_text, None)  # None لإزالة الأزرار
         
-        # ✅ إرسال رسالة جديدة في المجموعة (بدلاً من تعديل القديمة)
-        await bot.send_message(
-            chat_id,
-            f"✅ **تم تنفيذ الطلب #{order_id}**\n"
-            f"📱 التطبيق: {order['app_name']}\n"
-            f"⭐ نقاط مضافة: +{points}",
-            parse_mode="Markdown"
-        )
-        
-        logger.info(f"✅ تم تأكيد تنفيذ الطلب #{order_id} في {elapsed_time:.2f} ثانية")
+        logger.info(f"✅ تم تأكيد تنفيذ الطلب #{order_id}")
         
     except Exception as e:
         logger.error(f"❌ خطأ في معالجة تأكيد التنفيذ: {e}")
-        await bot.send_message(chat_id, f"❌ حدث خطأ: {str(e)}")
+        await callback.message.answer(f"❌ حدث خطأ: {str(e)}")
+
 
 async def notify_user_order_completed(bot, order, points, user_points, vip_icon, vip_level, vip_discount):
     """إرسال إشعار للمستخدم بإتمام الطلب"""
@@ -665,7 +645,7 @@ async def process_order_failure(order_id: int, callback: types.CallbackQuery, db
         
         # ✅ تحديث رسالة المجموعة - نص وكيبورد بطلب واحد
         new_text = callback.message.text.replace("⏳ **جاري معالجة الفشل...**", "") + "\n\n❌ **تعذر التنفيذ وتم إعادة الرصيد**"
-        await update_group_message(callback.message, new_text)
+        await update_group_message(callback.message, new_text, None)  # None لإزالة الأزرار
         
         await callback.answer("❌ تم تحديث حالة الطلب")
         
