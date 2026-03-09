@@ -22,6 +22,26 @@ class DepStates(StatesGroup):
     waiting_tx = State()
     waiting_photo = State()
 
+# ============= معالج الكولباك للقائمة الرئيسية =============
+@router.callback_query(F.data == "show_deposit_methods")
+async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
+    """عرض طرق الشحن من القائمة الإنلاين"""
+    await callback.answer()
+    await choose_meth(callback.message, db_pool)
+
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(callback: types.CallbackQuery, db_pool):
+    """العودة للقائمة الرئيسية"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    
+    await callback.message.edit_text(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+
 # ✅ كاش لطرق الدفع (تتغير نادراً)
 @cached(ttl=300, key_prefix="payment_methods")  # 5 دقائق كاش
 async def get_cached_payment_methods():
@@ -77,21 +97,6 @@ async def choose_meth(message: types.Message, db_pool):
     await message.answer(
         "💳 **اختر وسيلة الدفع المناسبة:**", 
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
-    )
-
-@router.callback_query(F.data == "back_to_main")
-async def back_from_deposit(callback: types.CallbackQuery, db_pool):
-    """العودة للقائمة الرئيسية"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    await callback.message.delete()
-    
-    is_admin = await is_admin_user(db_pool, callback.from_user.id)
-    
-    await callback.message.answer(
-        "تم العودة للقائمة الرئيسية.",
-        reply_markup=get_main_menu_keyboard(is_admin)
     )
 
 # ============= بدء عملية الشحن =============
