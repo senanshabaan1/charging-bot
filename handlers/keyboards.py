@@ -4,7 +4,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
 # ============= دوال الكيبورد العادية (Reply Keyboard) =============
 
-def get_main_menu_keyboard(is_admin_user: bool = False):
+def get_main_menu_inline_keyboard(is_admin_user: bool = False):
     """القائمة الرئيسية للمستخدمين مع زر المشرفين إذا كانوا مشرفين"""
     builder = InlineKeyboardBuilder()
     
