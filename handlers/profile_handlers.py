@@ -193,6 +193,7 @@ async def my_account(message: types.Message, db_pool):
     builder.row(
         types.InlineKeyboardButton(text="📊 سجل العمليات", callback_data="transactions_history"),
         types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
+        types.InlineKeyboardButton(text="🔙 رجوع للقائمة")
     )
     
     # رسالة الملف الشخصي مع تفاصيل VIP - بصيغة HTML
