@@ -933,7 +933,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
         f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}\n\n"
         f"👋 يمكنك العودة للقائمة الرئيسية من الأزرار أدناه:",
-        reply_markup=get_main_menu_keyboard(is_admin),  # ✅ إضافة الكيبورد هنا
+        reply_markup=get_main_menu_inline_keyboard(is_admin),  # ✅ إضافة الكيبورد هنا
         parse_mode="Markdown"
     )
     
