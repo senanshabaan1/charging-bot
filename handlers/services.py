@@ -48,7 +48,34 @@ async def get_cached_apps_by_category(db_pool, category_id):
 async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     """عرض الأقسام من القائمة الإنلاين"""
     await callback.answer()
-    await show_categories(callback.message, db_pool)
+    
+    categories = await get_cached_categories(db_pool)
+    
+    if not categories:
+        is_admin = await is_admin_user(db_pool, callback.from_user.id)
+        await callback.message.edit_text(
+            "⚠️ لا توجد أقسام متاحة حالياً.",
+            reply_markup=get_main_menu_keyboard(is_admin)
+        )
+        return
+    
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        builder.row(types.InlineKeyboardButton(
+            text=f"{cat['icon']} {cat['display_name']}", 
+            callback_data=f"cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data="back_to_main"
+    ))
+    
+    await callback.message.edit_text(
+        "🌟 **اختر القسم:**\n\n"
+        "🔸 اختر الفئة التي تريدها:", 
+        reply_markup=builder.as_markup()
+    )
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_callback(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -140,7 +167,7 @@ async def global_back_handler(message: types.Message, state: FSMContext, db_pool
 
 @router.message(F.text == "📱 خدمات الشحن")
 async def show_categories(message: types.Message, db_pool):
-    """عرض الأقسام أولاً"""
+    """عرض الأقسام أولاً - تعدل الرسالة الحالية"""
     # ✅ استخدام الكاش
     categories = await get_cached_categories(db_pool)
     
@@ -164,11 +191,20 @@ async def show_categories(message: types.Message, db_pool):
         callback_data="back_to_main"
     ))
     
-    await message.answer(
-        "🌟 **اختر القسم:**\n\n"
-        "🔸 اختر الفئة التي تريدها:", 
-        reply_markup=builder.as_markup()
-    )
+    # ✅ تعديل الرسالة الحالية بدلاً من إرسال جديدة
+    try:
+        await message.edit_text(
+            "🌟 **اختر القسم:**\n\n"
+            "🔸 اختر الفئة التي تريدها:", 
+            reply_markup=builder.as_markup()
+        )
+    except:
+        # إذا فشل التعديل (مثلاً لأنها أول رسالة)، نرسل رسالة جديدة
+        await message.answer(
+            "🌟 **اختر القسم:**\n\n"
+            "🔸 اختر الفئة التي تريدها:", 
+            reply_markup=builder.as_markup()
+        )
 
 @router.callback_query(F.data.startswith("disabled_app_"))
 async def handle_disabled_app(callback: types.CallbackQuery):
