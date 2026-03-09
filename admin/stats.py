@@ -206,7 +206,8 @@ async def stats_details(callback: types.CallbackQuery, db_pool):
     if yesterday_stats and yesterday_stats['new_users'] > 0:
         users_change = ((today_stats['new_users'] - yesterday_stats['new_users']) / yesterday_stats['new_users']) * 100
     
-    text = (
+    # بناء النص الجديد
+    new_text = (
         f"📈 **تفاصيل إضافية**\n\n"
         f"**إحصائيات اليوم ({today.strftime('%Y-%m-%d')}):**\n"
         f"• 👤 مستخدمين جدد: {today_stats['new_users']} "
@@ -220,7 +221,15 @@ async def stats_details(callback: types.CallbackQuery, db_pool):
     )
     
     for i, app in enumerate(top_apps, 1):
-        text += f"{i}. {app['name']}: {app['order_count']} طلب ({app['total_revenue']:,.0f} ل.س)\n"
+        new_text += f"{i}. {app['name']}: {app['order_count']} طلب ({app['total_revenue']:,.0f} ل.س)\n"
+    
+    # ✅ التحقق من أن النص تغير قبل التعديل
+    current_text = callback.message.text or callback.message.caption or ""
+    
+    if current_text == new_text:
+        # النص نفسه، نرسل إشعار صغير فقط
+        await callback.answer("✅ البيانات محدثة بالفعل", show_alert=False)
+        return
     
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -228,7 +237,7 @@ async def stats_details(callback: types.CallbackQuery, db_pool):
         types.InlineKeyboardButton(text="🔙 رجوع", callback_data="bot_stats")
     )
     
-    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
+    await safe_edit_message(callback.message, new_text, reply_markup=builder.as_markup())
 
 # أكثر المستخدمين إيداعاً
 @router.callback_query(F.data == "top_deposits")
