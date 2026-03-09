@@ -8,7 +8,7 @@ import time
 from typing import Optional, Dict, Any
 
 from utils import is_admin, format_amount, get_formatted_damascus_time, safe_edit_message
-from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
+from handlers.keyboards import get_confirmation_keyboard
 from database.products import get_product_option, get_product_options
 from database.core import get_exchange_rate
 from cache import cached, clear_cache  # ✅ استيراد الكاش
