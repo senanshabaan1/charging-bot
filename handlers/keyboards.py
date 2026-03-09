@@ -4,28 +4,6 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
 # ============= دوال الكيبورد العادية (Reply Keyboard) =============
 
-def get_main_menu_inline_keyboard(is_admin_user: bool = False):
-    """القائمة الرئيسية للمستخدمين مع زر المشرفين إذا كانوا مشرفين"""
-    builder = InlineKeyboardBuilder()
-    
-    # الصف الأول
-    builder.row(types.InlineKeyboardButton(text="📱 خدمات الشحن"))
-    
-    # الصف الثاني
-    builder.row(
-        types.InlineKeyboardButton(text="💰 شحن المحفظة"), 
-        types.InlineKeyboardButton(text="👤 حسابي")
-    )
-    
-    # الصف الثالث (للمشرفين فقط)
-    if is_admin_user:
-        builder.row(types.InlineKeyboardButton(text="🛠 لوحة التحكم"))
-    
-    # الصف الرابع (مساعدة)
-    builder.row(types.InlineKeyboardButton(text="❓ مساعدة"))
-    
-    return builder.as_markup()
-
 def get_cancel_keyboard():
     """زر إلغاء موحد للمشرفين والمستخدمين"""
     builder = ReplyKeyboardBuilder()
@@ -55,6 +33,34 @@ def get_back_and_cancel_keyboard():
 
 
 # ============= دوال الكيبورد الإنلاين (Inline Keyboard) =============
+
+def get_main_menu_keyboard(is_admin_user: bool = False):
+    """القائمة الرئيسية للمستخدمين - كيبورد إنلاين"""
+    builder = InlineKeyboardBuilder()
+    
+    # الصف الأول
+    builder.row(
+        types.InlineKeyboardButton(text="📱 خدمات الشحن", callback_data="show_categories")
+    )
+    
+    # الصف الثاني
+    builder.row(
+        types.InlineKeyboardButton(text="💰 شحن المحفظة", callback_data="show_deposit_methods"),
+        types.InlineKeyboardButton(text="👤 حسابي", callback_data="show_profile")
+    )
+    
+    # الصف الثالث (للمشرفين فقط)
+    if is_admin_user:
+        builder.row(
+            types.InlineKeyboardButton(text="🛠 لوحة التحكم", callback_data="back_to_admin")
+        )
+    
+    # الصف الرابع (مساعدة)
+    builder.row(
+        types.InlineKeyboardButton(text="❓ مساعدة", callback_data="show_help")
+    )
+    
+    return builder.as_markup()
 
 def get_back_inline_keyboard(callback_data: str = "back_to_main"):
     """زر رجوع إنلاين واحد"""
@@ -103,8 +109,6 @@ def get_points_keyboard():
         types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="referral_link")
     )
     return builder.as_markup()
-
-# ✅ دوال إضافية محسنة
 
 def get_admin_main_menu_keyboard():
     """كيبورد إنلاين للقائمة الرئيسية للمشرفين"""
@@ -184,18 +188,8 @@ async def send_message_with_cancel_keyboard(bot, chat_id: int, text: str, parse_
         parse_mode=parse_mode
     )
 
-async def send_message_with_main_menu_keyboard(bot, chat_id: int, text: str, is_admin: bool = False, parse_mode: str = None):
-    """إرسال رسالة مع القائمة الرئيسية"""
-    await bot.send_message(
-        chat_id,
-        text,
-        reply_markup=get_main_menu_keyboard(is_admin),
-        parse_mode=parse_mode
-    )
-
 async def edit_message_with_new_keyboard(message: types.Message, new_text: str = None, new_keyboard = None):
-    """تعديل رسالة مع كيبورد جديد (طل
-    واحد)"""
+    """تعديل رسالة مع كيبورد جديد (طلب واحد)"""
     try:
         if new_text:
             await message.edit_text(
