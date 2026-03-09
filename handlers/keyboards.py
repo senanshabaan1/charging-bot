@@ -162,7 +162,29 @@ def get_action_keyboard(actions: list):
     for text, callback in actions:
         builder.row(types.InlineKeyboardButton(text=text, callback_data=callback))
     return builder.as_markup()
+# handlers/keyboards.py - أضف هذه الدالة في قسم Inline Keyboard
 
+def get_main_menu_inline_keyboard(is_admin_user: bool = False):
+    """القائمة الرئيسية ككيبورد إنلاين (للاستخدام مع تعديل الرسائل)"""
+    builder = InlineKeyboardBuilder()
+    
+    # الصف الأول - زرين
+    builder.row(
+        types.InlineKeyboardButton(text="📱 خدمات الشحن", callback_data="show_categories"),
+        types.InlineKeyboardButton(text="💰 شحن المحفظة", callback_data="show_deposit_methods")
+    )
+    
+    # الصف الثاني - زرين
+    builder.row(
+        types.InlineKeyboardButton(text="👤 حسابي", callback_data="show_profile"),
+        types.InlineKeyboardButton(text="❓ مساعدة", callback_data="show_help")
+    )
+    
+    # الصف الثالث (للمشرفين فقط)
+    if is_admin_user:
+        builder.row(types.InlineKeyboardButton(text="🛠 لوحة التحكم", callback_data="back_to_admin"))
+    
+    return builder.as_markup()
 
 # ============= دوال مساعدة =============
 
