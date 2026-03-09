@@ -5,10 +5,10 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 # ============= دوال الكيبورد العادية (Reply Keyboard) =============
 
 def get_main_menu_only_keyboard():
-    """العودة للقائمة الرئيسية فقط"""
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🏠 القائمة الرئيسية"))
-    return builder.as_markup()
+    """العودة للقائمة الرئيسية فقط - كيبورد عادي"""
+    builder = ReplyKeyboardBuilder()
+    builder.row(types.KeyboardButton(text="🏠 القائمة الرئيسية"))
+    return builder.as_markup(resize_keyboard=True)
 
 # ============= دوال الكيبورد الإنلاين (Inline Keyboard) =============
 
