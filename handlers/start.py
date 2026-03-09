@@ -708,5 +708,5 @@ async def show_help_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(
         help_text,
         parse_mode="Markdown",
-        reply_markup=get_back_to_main_inline_keyboard()  # زر رجوع للقائمة الرئيسية
+        reply_markup=get_back_inline_keyboard("back_to_main")  # زر رجوع للقائمة الرئيسية
     )
