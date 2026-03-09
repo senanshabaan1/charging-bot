@@ -306,37 +306,4 @@ async def cancel_action(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await safe_edit_message(callback.message, "✅ تم إلغاء عملية التصفير.")
 
-# ✅ دالة مساعدة لإنشاء نسخة احتياطية قبل التصفير
-@router.callback_query(F.data == "backup_before_reset")
-async def backup_before_reset(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """إنشاء نسخة احتياطية قبل التصفير"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer("📦 جاري إنشاء النسخة الاحتياطية...")
-    
-    try:
-        # استدعاء دالة النسخ الاحتياطي من reports.py
-        from .reports import generate_excel_report
-        
-        excel_file = await generate_excel_report(db_pool, 'all')
-        
-        if excel_file:
-            filename = f"backup_before_reset_{get_formatted_damascus_time().replace(':', '-')}.xlsx"
-            
-            await callback.message.answer_document(
-                types.BufferedInputFile(file=excel_file.getvalue(), filename=filename),
-                caption="✅ **نسخة احتياطية قبل التصفير**\n\n"
-                        f"🕐 {get_formatted_damascus_time()}\n"
-                        "يمكنك الرجوع لهذه النسخة لاحقاً."
-            )
-            
-            # ✅ العودة لخطوات التصفير - لاحظ أننا لا نمرر db_pool
-            await reset_bot_start(callback, state)
-        else:
-            await callback.answer("❌ فشل إنشاء النسخة الاحتياطية", show_alert=True)
-            
-    except Exception as e:
-        logger.error(f"❌ خطأ في إنشاء النسخة الاحتياطية: {e}")
-        await callback.answer("❌ فشل إنشاء النسخة الاحتياطية", show_alert=True)
+
