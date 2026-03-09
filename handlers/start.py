@@ -19,30 +19,13 @@ from database.vip import get_next_vip_level
 from database.referrals import generate_referral_code
 from database.users import is_admin_user 
 from aiogram.fsm.state import State, StatesGroup
-from cache import cached, clear_cache  # ✅ استيراد الكاش
-
 class ReferralStates(StatesGroup):
     waiting_subscription = State()
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = Router()
 router.include_router(profile_router)
-
-# ✅ كاش للمستخدمين - يمنع جلب نفس المستخدم عدة مرات
-@cached(ttl=30, key_prefix="user")
-async def get_cached_user(db_pool, user_id):
-    """جلب المستخدم مع كاش 30 ثانية"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
-
-# ✅ كاش لحالة الحظر
-@cached(ttl=15, key_prefix="user_ban")
-async def get_cached_user_ban_status(db_pool, user_id):
-    """جلب حالة حظر المستخدم مع كاش 15 ثانية"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetchval("SELECT is_banned FROM users WHERE user_id = $1", user_id)
 
 async def notify_admins(bot, message_text, db_pool=None):
     """إرسال إشعار لجميع المشرفين"""
@@ -177,8 +160,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
     # ========== المستخدم مشترك في القناة ==========
     async with db_pool.acquire() as conn:
         try:
-            # ✅ استخدام الكاش
-            user = await get_cached_user(db_pool, user_id)
+            user = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
         except Exception as e:
             logger.error(f"خطأ في جلب المستخدم: {e}")
             user = None
@@ -204,10 +186,6 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
                     VALUES ($1, $2, $3, $4, 0, $5, CURRENT_TIMESTAMP, FALSE)
                 ''', user_id, username, first_name, last_name, new_code)
                 logger.info(f"✅ تم إنشاء مستخدم جديد: {user_id} بكود إحالة {new_code}")
-                
-                # ✅ مسح كاش المستخدم بعد الإنشاء
-                clear_cache(f"user:{user_id}")
-                clear_cache(f"user_ban:{user_id}")
             except Exception as e:
                 logger.error(f"خطأ في إنشاء مستخدم: {e}")
             
@@ -269,10 +247,6 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
                                 ''', points, referrer['user_id'])
                                 
                                 logger.info(f"✅ تم إضافة {points} نقاط للمُحيل")
-                                
-                                # مسح كاش المُحيل
-                                clear_cache(f"user:{referrer['user_id']}")
-                                clear_cache(f"user_points:{referrer['user_id']}")
                                 
                                 # تسجيل في سجل النقاط
                                 try:
@@ -358,10 +332,6 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
                                     WHERE user_id = $2
                                 ''', points, referrer['user_id'])
                                 
-                                # مسح كاش المُحيل
-                                clear_cache(f"user:{referrer['user_id']}")
-                                clear_cache(f"user_points:{referrer['user_id']}")
-                                
                                 await conn.execute('''
                                     INSERT INTO points_history (user_id, points, action, description, created_at)
                                     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
@@ -397,8 +367,6 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
                     SET username = $1, last_activity = CURRENT_TIMESTAMP
                     WHERE user_id = $2
                 ''', username, user_id)
-                # مسح كاش المستخدم بعد التحديث
-                clear_cache(f"user:{user_id}")
             except Exception as e:
                 logger.error(f"خطأ في تحديث المستخدم: {e}")
             
@@ -407,21 +375,17 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
                     "UPDATE users SET first_name = $1, last_name = $2 WHERE user_id = $3",
                     first_name, last_name, user_id
                 )
-                clear_cache(f"user:{user_id}")
             except Exception as e:
                 logger.error(f"خطأ في تحديث الاسم: {e}")
             
             try:
-                # ✅ استخدام الكاش لجلب حالة الحظر
-                is_banned = await get_cached_user_ban_status(db_pool, user_id) or False
-                
-                # جلب الرصيد مباشرة (متغير)
                 balance_row = await conn.fetchrow(
-                    "SELECT balance FROM users WHERE user_id = $1",
+                    "SELECT balance, is_banned FROM users WHERE user_id = $1",
                     user_id
                 )
-                balance = balance_row['balance'] or 0 if balance_row else 0
-                
+                if balance_row:
+                    balance = balance_row['balance'] or 0
+                    is_banned = balance_row['is_banned'] or False
                 logger.info(f"📊 المستخدم {user_id}: الرصيد={balance}, محظور={is_banned}")
             except Exception as e:
                 logger.error(f"خطأ في جلب الرصيد: {e}")
@@ -458,14 +422,10 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
         welcome_text,
         reply_markup=get_main_menu_keyboard(is_admin(user_id))
     )
-
 # ========== التحقق من اشتراك القناة ==========
 @router.callback_query(F.data == "check_subscription")
 async def check_subscription(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """التحقق من اشتراك المستخدم بعد الانضمام للقناة ومعالجة الإحالة مباشرة"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     user_id = callback.from_user.id
     channel_username = "@LINKcharger22"
     
@@ -528,10 +488,6 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
                     VALUES ($1, $2, $3, $4, 0, $5, CURRENT_TIMESTAMP, FALSE)
                 ''', user_id, callback.from_user.username, callback.from_user.first_name or "", callback.from_user.last_name or "", new_code)
                 logger.info(f"✅ تم إنشاء مستخدم جديد: {user_id} بكود إحالة {new_code}")
-                
-                # ✅ مسح كاش المستخدم بعد الإنشاء
-                clear_cache(f"user:{user_id}")
-                clear_cache(f"user_ban:{user_id}")
             except Exception as e:
                 logger.error(f"خطأ في إنشاء مستخدم: {e}")
                 await callback.message.answer("❌ حدث خطأ في إنشاء حسابك. حاول مرة أخرى لاحقاً.")
@@ -592,10 +548,6 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
                                 
                                 logger.info(f"✅ تم إضافة {points} نقاط للمُحيل")
                                 
-                                # مسح كاش المُحيل
-                                clear_cache(f"user:{referrer['user_id']}")
-                                clear_cache(f"user_points:{referrer['user_id']}")
-                                
                                 try:
                                     await conn.execute('''
                                         INSERT INTO points_history (user_id, points, action, description, created_at)
@@ -642,7 +594,6 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
             )
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
-
 # ========== العودة للقائمة الرئيسية ==========
 @router.message(F.text == "🔙 رجوع للقائمة")
 async def back_to_main_menu(message: types.Message, state: FSMContext, db_pool):

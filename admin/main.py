@@ -4,64 +4,22 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
-import time
-from typing import List, Tuple
 from config import ADMIN_ID, MODERATORS
 from handlers.keyboards import get_main_menu_keyboard, get_cancel_keyboard
 from utils import is_admin, safe_edit_message, get_formatted_damascus_time
-from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_main")
 
-# ✅ ثوابت للأداء
-ADMIN_BUTTONS_PER_ROW = 3
-CACHE_TTL_BOT_STATUS = 30  # 30 ثانية
+# ✅ تم نقل is_admin إلى utils.py
 
-# ✅ قائمة أزرار لوحة التحكم (ثابتة)
-ADMIN_BUTTONS: List[Tuple[str, str]] = [
-    ("📈 سعر الصرف", "edit_rate"),
-    ("📊 الإحصائيات", "bot_stats"),
-    ("📢 رسالة للكل", "broadcast"),
-    ("👤 معلومات مستخدم", "user_info"),
-    ("⭐ إدارة النقاط", "manage_points"),
-    ("💳 الأكثر إيداعاً", "top_deposits"),
-    ("🛒 الأكثر طلبات", "top_orders"),
-    ("🔗 الأكثر إحالة", "top_referrals"),
-    ("⭐ الأكثر نقاط", "top_points"),
-    ("👥 إحصائيات VIP", "vip_stats"),
-    ("📊 تقارير ونسخ", "reports_menu"),
-    ("➕ إضافة منتج", "add_product"),
-    ("✏️ تعديل منتج", "edit_product"),
-    ("🗑️ حذف منتج", "delete_product"),
-    ("📱 عرض المنتجات", "list_products"),
-    ("📞 أرقام سيرياتل", "edit_syriatel"),
-    ("🔄 تشغيل/إيقاف", "toggle_bot"),
-    ("⚠️ تصفير البوت", "reset_bot"),
-    ("👑 إدارة المشرفين", "manage_admins"),
-    ("✏️ رسالة الصيانة", "edit_maintenance"),
-    ("✉️ رسالة لمستخدم", "send_custom_message"),
-    ("🔄 تفعيل/إيقاف التطبيقات", "manage_apps_status"),
-    ("🎮 إدارة خيارات الألعاب", "manage_options"),
-    ("📁 إدارة الأقسام", "manage_categories"),
-    ("➕ إضافة قسم", "add_category"),
-]
 
-# ✅ كاش لحالة البوت
-@cached(ttl=CACHE_TTL_BOT_STATUS, key_prefix="bot_status")
-async def get_cached_bot_status(db_pool) -> Tuple[bool, str]:
-    """جلب حالة البوت مع كاش 30 ثانية"""
-    from database import get_bot_status
-    status = await get_bot_status(db_pool)
-    return status, "🟢 يعمل" if status else "🔴 متوقف"
 
 # معالج الإلغاء العام
 @router.message(F.text.in_(["❌ إلغاء", "/cancel", "/الغاء", "/رجوع"]))
 async def global_cancel_handler(message: types.Message, state: FSMContext, db_pool):
-    """معالج الإلغاء الموحد"""
     current_state = await state.get_state()
     if current_state is not None:
-        logger.info(f"🔄 إلغاء الحالة {current_state} للمستخدم {message.from_user.id}")
         await state.clear()
     
     from database import is_admin_user
@@ -75,186 +33,102 @@ async def global_cancel_handler(message: types.Message, state: FSMContext, db_po
 # لوحة التحكم الرئيسية
 @router.message(Command("admin"))
 async def admin_panel(message: types.Message, db_pool):
-    """عرض لوحة تحكم المشرفين"""
     if not is_admin(message.from_user.id):
-        logger.warning(f"⚠️ محاولة وصول غير مصرح بها من {message.from_user.id}")
         return
 
-    start_time = time.time()
+    from database import get_bot_status
+    bot_status = await get_bot_status(db_pool)
+    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
+
+    buttons_data = [
+        ("📈 سعر الصرف", "edit_rate"),
+        ("📊 الإحصائيات", "bot_stats"),
+        ("📢 رسالة للكل", "broadcast"),
+        ("👤 معلومات مستخدم", "user_info"),
+        ("⭐ إدارة النقاط", "manage_points"),
+        ("💳 الأكثر إيداعاً", "top_deposits"),
+        ("🛒 الأكثر طلبات", "top_orders"),
+        ("🔗 الأكثر إحالة", "top_referrals"),
+        ("⭐ الأكثر نقاط", "top_points"),
+        ("👥 إحصائيات VIP", "vip_stats"),
+        ("📊 تقارير ونسخ", "reports_menu"),
+        ("➕ إضافة منتج", "add_product"),
+        ("✏️ تعديل منتج", "edit_product"),
+        ("🗑️ حذف منتج", "delete_product"),
+        ("📱 عرض المنتجات", "list_products"),
+        ("📞 أرقام سيرياتل", "edit_syriatel"),
+        ("🔄 تشغيل/إيقاف", "toggle_bot"),
+        ("⚠️ تصفير البوت", "reset_bot"),
+        ("👑 إدارة المشرفين", "manage_admins"),
+        ("✏️ رسالة الصيانة", "edit_maintenance"),
+        ("✉️ رسالة لمستخدم", "send_custom_message"),
+        ("🔄 تفعيل/إيقاف التطبيقات", "manage_apps_status"),
+        ("🎮 إدارة خيارات الألعاب", "manage_options"),
+        ("📁 إدارة الأقسام", "manage_categories"),
+        ("➕ إضافة قسم", "add_category"),
+    ]
     
-    # ✅ استخدام الكاش لحالة البوت
-    bot_status, status_text = await get_cached_bot_status(db_pool)
-    
-    # ✅ إنشاء الكيبورد
     builder = InlineKeyboardBuilder()
-    for text, callback in ADMIN_BUTTONS:
+    for text, callback in buttons_data:
         builder.add(types.InlineKeyboardButton(text=text, callback_data=callback))
-    builder.adjust(ADMIN_BUTTONS_PER_ROW)
-    
-    elapsed_time = time.time() - start_time
-    logger.info(f"✅ عرض لوحة التحكم للمشرف {message.from_user.id} في {elapsed_time:.3f} ثانية")
+    builder.adjust(3)
     
     await message.answer(
         f"🛠 **لوحة تحكم الإدارة**\n\n"
-        f"حالة البوت: {status_text}\n"
-        f"👤 المشرف: @{message.from_user.username or 'مشرف'}\n"
-        f"🕐 {get_formatted_damascus_time()}\n\n"
+        f"حالة البوت: {status_text}\n\n"
         f"🔸 **اختر الإجراء المطلوب:**",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
 
-# العودة للوحة التحكم
+# ============= العودة للوحة التحكم =============
 @router.callback_query(F.data == "back_to_admin")
 @router.callback_query(F.data == "back_to_admin_panel")
 async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
     """العودة للوحة التحكم الرئيسية"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
+    from database import get_bot_status
     
-    start_time = time.time()
-    
-    # ✅ استخدام الكاش لحالة البوت
-    bot_status, status_text = await get_cached_bot_status(db_pool)
-    
-    # ✅ إنشاء الكيبورد
+    bot_status = await get_bot_status(db_pool)
+    status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
+
     builder = InlineKeyboardBuilder()
-    for text, callback_data in ADMIN_BUTTONS:
-        builder.add(types.InlineKeyboardButton(text=text, callback_data=callback_data))
-    builder.adjust(ADMIN_BUTTONS_PER_ROW)
     
-    elapsed_time = time.time() - start_time
+    # نفس الأزرار
+    builder.add(
+        types.InlineKeyboardButton(text="📈 سعر الصرف", callback_data="edit_rate"),
+        types.InlineKeyboardButton(text="📊 الإحصائيات", callback_data="bot_stats"),
+        types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast"),
+        types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info"),
+        types.InlineKeyboardButton(text="⭐ إدارة النقاط", callback_data="manage_points"),
+        types.InlineKeyboardButton(text="💳 الأكثر إيداعاً", callback_data="top_deposits"),
+        types.InlineKeyboardButton(text="🛒 الأكثر طلبات", callback_data="top_orders"),
+        types.InlineKeyboardButton(text="🔗 الأكثر إحالة", callback_data="top_referrals"),
+        types.InlineKeyboardButton(text="⭐ الأكثر نقاط", callback_data="top_points"),
+        types.InlineKeyboardButton(text="👥 إحصائيات VIP", callback_data="vip_stats"),
+        types.InlineKeyboardButton(text="📊 تقارير ونسخ", callback_data="reports_menu"),
+        types.InlineKeyboardButton(text="➕ إضافة منتج", callback_data="add_product"),
+        types.InlineKeyboardButton(text="✏️ تعديل منتج", callback_data="edit_product"),
+        types.InlineKeyboardButton(text="🗑️ حذف منتج", callback_data="delete_product"),
+        types.InlineKeyboardButton(text="📱 عرض المنتجات", callback_data="list_products"),
+        types.InlineKeyboardButton(text="📞 أرقام سيرياتل", callback_data="edit_syriatel"),
+        types.InlineKeyboardButton(text="🔄 تشغيل/إيقاف", callback_data="toggle_bot"),
+        types.InlineKeyboardButton(text="⚠️ تصفير البوت", callback_data="reset_bot"),
+        types.InlineKeyboardButton(text="👑 إدارة المشرفين", callback_data="manage_admins"),
+        types.InlineKeyboardButton(text="✏️ رسالة الصيانة", callback_data="edit_maintenance"),
+        types.InlineKeyboardButton(text="✉️ رسالة لمستخدم", callback_data="send_custom_message"),
+        types.InlineKeyboardButton(text="🔄 تفعيل/إيقاف التطبيقات", callback_data="manage_apps_status"),
+        types.InlineKeyboardButton(text="🎮 إدارة خيارات الألعاب", callback_data="manage_options"),
+        types.InlineKeyboardButton(text="📁 إدارة الأقسام", callback_data="manage_categories"),
+        types.InlineKeyboardButton(text="➕ إضافة قسم", callback_data="add_category"),
+    )
     
-    # ✅ تعديل النص والكيبورد بطلب واحد
-    await safe_edit_message(
-        callback.message,
+    # توزيع 3 أزرار في كل صف
+    builder.adjust(3)
+    
+    await callback.message.edit_text(
         f"🛠 **لوحة تحكم الإدارة**\n\n"
-        f"حالة البوت: {status_text}\n"
-        f"👤 المشرف: @{callback.from_user.username or 'مشرف'}\n"
-        f"🕐 {get_formatted_damascus_time()}\n\n"
+        f"حالة البوت: {status_text}\n\n"
         f"🔸 **اختر الإجراء المطلوب:**",
-        reply_markup=builder.as_markup()
-    )
-    
-    logger.info(f"✅ عودة للوحة التحكم للمشرف {callback.from_user.id} في {elapsed_time:.3f} ثانية")
-
-# تحديث لوحة التحكم يدوياً (إضافة زر اختياري)
-@router.callback_query(F.data == "refresh_admin_panel")
-async def refresh_admin_panel(callback: types.CallbackQuery, db_pool):
-    """تحديث لوحة التحكم يدوياً"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer("🔄 جاري التحديث...")
-    
-    # ✅ مسح كاش حالة البوت
-    clear_cache("bot_status")
-    
-    # ✅ العودة للوحة التحكم
-    await back_to_admin_panel(callback, db_pool)
-
-# إحصائيات سريعة للمشرفين
-@router.callback_query(F.data == "admin_quick_stats")
-async def admin_quick_stats(callback: types.CallbackQuery, db_pool):
-    """عرض إحصائيات سريعة للمشرفين"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    from database import get_bot_stats
-    stats = await get_bot_stats(db_pool)
-    
-    if not stats:
-        await callback.answer("❌ خطأ في جلب الإحصائيات", show_alert=True)
-        return
-    
-    text = (
-        f"📊 **إحصائيات سريعة**\n\n"
-        f"👥 المستخدمين: {stats['users'].get('total_users', 0)}\n"
-        f"💰 إجمالي الأرصدة: {stats['users'].get('total_balance', 0):,.0f} ل.س\n"
-        f"⭐ إجمالي النقاط: {stats['users'].get('total_points', 0)}\n"
-        f"📦 طلبات اليوم: {stats['orders'].get('today_orders', 0)}\n"
-        f"💳 إيداعات اليوم: {stats['deposits'].get('today_deposits', 0)}\n"
-        f"🕐 {get_formatted_damascus_time()}"
-    )
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🔄 تحديث", callback_data="admin_quick_stats"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
-    
-    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
-
-# إضافة زر المساعدة السريعة
-@router.callback_query(F.data == "admin_help")
-async def admin_help(callback: types.CallbackQuery):
-    """عرض مساعدة سريعة للمشرفين"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    help_text = (
-        "📚 **مساعدة سريعة للمشرفين**\n\n"
-        "• **إدارة المنتجات**: إضافة وتعديل وحذف المنتجات\n"
-        "• **إدارة الأقسام**: تنظيم الأقسام وترتيبها\n"
-        "• **إدارة الخيارات**: إضافة خيارات للألعاب والاشتراكات\n"
-        "• **إدارة المستخدمين**: بحث، تعديل رصيد، حظر\n"
-        "• **إدارة النقاط**: تعديل إعدادات النقاط والموافقة على الاسترداد\n"
-        "• **التقارير**: تقارير Excel وتقارير الأرباح\n"
-        "• **الرسائل**: إرسال رسائل جماعية أو خاصة\n\n"
-        "للمساعدة الإضافية، تواصل مع المطور @developer"
-    )
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
-    
-    await safe_edit_message(callback.message, help_text, reply_markup=builder.as_markup())
-
-# إدارة الجلسات النشطة (اختياري)
-@router.callback_query(F.data == "admin_sessions")
-async def admin_sessions(callback: types.CallbackQuery, db_pool):
-    """عرض الجلسات النشطة للمشرفين"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    # يمكن إضافة منطق لعرض الجلسات النشطة هنا
-    await callback.message.answer("🚧 هذه الميزة قيد التطوير")
-
-# معالج للأوامر غير المعروفة في وضع المشرف
-@router.message(F.text.startswith("/admin"))
-async def unknown_admin_command(message: types.Message):
-    """معالج للأوامر غير المعروفة"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    await message.answer(
-        "❌ أمر غير معروف\n"
-        "استخدم /admin للعودة للوحة التحكم"
-    )
-
-# إضافة زر لتغيير لغة الواجهة (اختياري)
-@router.callback_query(F.data == "admin_change_language")
-async def admin_change_language(callback: types.CallbackQuery):
-    """تغيير لغة واجهة المشرف"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="🇸🇦 العربية", callback_data="set_lang_ar"),
-        types.InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang_en")
-    )
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
-    
-    await safe_edit_message(
-        callback.message,
-        "🌐 **اختر اللغة المفضلة**\n\nChoose your preferred language:",
-        reply_markup=builder.as_markup()
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
     )

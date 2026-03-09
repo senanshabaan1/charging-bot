@@ -11,9 +11,7 @@ from datetime import datetime
 from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
 from database.users import is_admin_user
 from database.core import get_exchange_rate, get_syriatel_numbers
-from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number, parse_number
-from cache import cached, clear_cache  # ✅ استيراد الكاش
-
+from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number, parse_number 
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -22,22 +20,6 @@ class DepStates(StatesGroup):
     waiting_tx = State()
     waiting_photo = State()
 
-# ✅ كاش لطرق الدفع (تتغير نادراً)
-@cached(ttl=300, key_prefix="payment_methods")  # 5 دقائق كاش
-async def get_cached_payment_methods():
-    """جلب طرق الدفع المتاحة"""
-    return [
-        {"name": "Syriatel Cash (ل.س)", "callback": "m_syr"},
-        {"name": "Sham Cash (ل.س)", "callback": "m_sham_syp"},
-        {"name": "Sham Cash ($)", "callback": "m_sham_usd"},
-        {"name": "USDT BEP20 ($)", "callback": "m_usdt"},
-    ]
-
-# ✅ كاش لأرقام سيرياتل
-@cached(ttl=120, key_prefix="syriatel_nums")  # دقيقتين كاش
-async def get_cached_syriatel_numbers(db_pool):
-    """جلب أرقام سيرياتل مع كاش"""
-    return await get_syriatel_numbers(db_pool)
 
 # ============= معالج الرجوع الموحد =============
 
@@ -63,16 +45,13 @@ async def choose_meth(message: types.Message, db_pool):
     """عرض قائمة طرق الدفع"""
     is_admin = await is_admin_user(db_pool, message.from_user.id)
     
-    # ✅ استخدام الكاش لطرق الدفع
-    methods = await get_cached_payment_methods()
-    
-    kb = []
-    for method in methods:
-        kb.append([types.InlineKeyboardButton(
-            text=method["name"], 
-            callback_data=method["callback"]
-        )])
-    kb.append([types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")])
+    kb = [
+        [types.InlineKeyboardButton(text="Syriatel Cash (ل.س)", callback_data="m_syr")],
+        [types.InlineKeyboardButton(text="Sham Cash (ل.س)", callback_data="m_sham_syp")],
+        [types.InlineKeyboardButton(text="Sham Cash ($)", callback_data="m_sham_usd")],
+        [types.InlineKeyboardButton(text="USDT BEP20 ($)", callback_data="m_usdt")],
+        [types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")]
+    ]
     
     await message.answer(
         "💳 **اختر وسيلة الدفع المناسبة:**", 
@@ -82,9 +61,6 @@ async def choose_meth(message: types.Message, db_pool):
 @router.callback_query(F.data == "back_to_main")
 async def back_from_deposit(callback: types.CallbackQuery, db_pool):
     """العودة للقائمة الرئيسية"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     await callback.message.delete()
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
@@ -101,15 +77,13 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء عملية الشحن - مع جلب سعر الصرف من قاعدة البيانات"""
     method = callback.data
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    # جلب سعر الصرف الحالي من قاعدة البيانات (عنده كاش 30 ثانية)
+    # جلب سعر الصرف الحالي من قاعدة البيانات
+    from database import get_exchange_rate, get_syriatel_numbers
     current_rate = await get_exchange_rate(db_pool)
     logger.info(f"💰 سعر الصرف الحالي للشحن: {current_rate}")
     
-    # جلب أرقام سيرياتل من قاعدة البيانات (مع كاش)
-    syriatel_nums = await get_cached_syriatel_numbers(db_pool)
+    # جلب أرقام سيرياتل من قاعدة البيانات
+    syriatel_nums = await get_syriatel_numbers(db_pool)
     
     # تحديد اسم المحفظة حسب الطريقة
     if method == "m_sham_syp":
@@ -404,18 +378,21 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
                 group_msg_id, deposit_id
             )
     
-    # ✅ دمج الرسالتين في رسالة واحدة
-    is_admin = await is_admin_user(db_pool, message.from_user.id)
-    
     await message.answer(
         f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
         f"🆔 **رقم الطلب:** #{deposit_id}\n"
         f"⏳ **بانتظار موافقة الإدارة.**\n"
-        f"📋 **الوقت المتوقع: 5-10 دقائق.**\n\n"
-        f"👋 يمكنك العودة للقائمة الرئيسية من الأزرار أدناه:",
-        reply_markup=get_main_menu_keyboard(is_admin),
+        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
+        reply_markup=None,
         parse_mode="Markdown"
+    )
+    
+    # إرسال رسالة تأكيد مع العودة للقائمة
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    await message.answer(
+        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
     
     await state.clear()
@@ -484,18 +461,21 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
                 group_msg_id, deposit_id
             )
     
-    # ✅ دمج الرسالتين في رسالة واحدة
-    is_admin = await is_admin_user(db_pool, message.from_user.id)
-    
     await message.answer(
         f"✅ **تم إرسال لقطة الشاشة بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
         f"🆔 **رقم الطلب:** #{deposit_id}\n"
         f"⏳ **بانتظار موافقة الإدارة.**\n"
-        f"📋 **الوقت المتوقع: 5-10 دقائق.**\n\n"
-        f"👋 يمكنك العودة للقائمة الرئيسية من الأزرار أدناه:",
-        reply_markup=get_main_menu_keyboard(is_admin),
+        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
+        reply_markup=None,
         parse_mode="Markdown"
+    )
+    
+    # إرسال رسالة تأكيد مع العودة للقائمة
+    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    await message.answer(
+        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
     
     await state.clear()

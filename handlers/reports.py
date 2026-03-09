@@ -19,23 +19,12 @@ from handlers.keyboards import get_back_inline_keyboard
 from database.stats import get_report_settings, update_report_setting
 from database.core import get_exchange_rate
 from utils import is_admin
-from cache import cached, clear_cache  # ✅ استيراد الكاش
-
 logger = logging.getLogger(__name__)
 router = Router()
 
 class ReportStates(StatesGroup):
     waiting_report_period = State()
     waiting_report_time = State()
-
-# ✅ كاش لتقارير الأرباح (لمدة 5 دقائق لأنها ثقيلة)
-_profits_report_cache = {}
-_profits_report_cache_time = {}
-
-@cached(ttl=120, key_prefix="report_settings")
-async def get_cached_report_settings(db_pool):
-    """جلب إعدادات التقارير مع كاش دقيقتين"""
-    return await get_report_settings(db_pool)
 
 def remove_timezone_from_df(df):
     """إزالة معلومات المنطقة الزمنية من أعمدة التاريخ في DataFrame"""
@@ -222,8 +211,7 @@ async def generate_excel_report(db_pool, period='all'):
 async def send_daily_report(bot: Bot, db_pool):
     """إرسال التقرير اليومي للمشرفين"""
     try:
-        # ✅ استخدام الكاش للإعدادات
-        settings = await get_cached_report_settings(db_pool)
+        settings = await get_report_settings(db_pool)
         
         if settings.get('daily_report_enabled') != 'true':
             logger.info("📊 التقرير اليومي معطل")
@@ -268,9 +256,6 @@ async def reports_menu(callback: types.CallbackQuery):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="📊 تقرير شامل", callback_data="full_report"),
@@ -306,9 +291,6 @@ async def full_report(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     await callback.message.edit_text("⏳ جاري توليد التقرير الشامل...")
     
     excel_file = await generate_excel_report(db_pool, 'all')
@@ -334,9 +316,6 @@ async def daily_report(callback: types.CallbackQuery, db_pool):
     """تقرير يومي"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
     
     await callback.message.edit_text("⏳ جاري توليد التقرير اليومي...")
     
@@ -367,9 +346,6 @@ async def profits_report(callback: types.CallbackQuery, db_pool):
     """تقرير الأرباح المفصل لكل تطبيق مع إجماليات (كملف)"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
     
     await callback.message.edit_text("⏳ جاري حساب الأرباح...")
     
@@ -541,9 +517,6 @@ async def users_report(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     async with db_pool.acquire() as conn:
         users_stats = await conn.fetchrow('''
             SELECT 
@@ -589,9 +562,6 @@ async def apps_report(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     async with db_pool.acquire() as conn:
         apps_stats = await conn.fetch('''
             SELECT 
@@ -621,9 +591,6 @@ async def points_report(callback: types.CallbackQuery, db_pool):
     """تقرير النقاط"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
     
     async with db_pool.acquire() as conn:
         points_stats = await conn.fetchrow('''
@@ -663,9 +630,6 @@ async def backup_database(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     await callback.message.edit_text("⏳ جاري إنشاء نسخة احتياطية...")
     
     excel_file = await generate_excel_report(db_pool, 'all')
@@ -695,11 +659,7 @@ async def report_settings(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    # ✅ استخدام الكاش للإعدادات
-    settings = await get_cached_report_settings(db_pool)
+    settings = await get_report_settings(db_pool)
     
     enabled_status = "✅ مفعل" if settings.get('daily_report_enabled') == 'true' else "❌ معطل"
     recipients_text = "👑 المالك فقط" if settings.get('report_recipients') == 'owner_only' else "👥 جميع المشرفين"
@@ -733,17 +693,11 @@ async def toggle_daily_report(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     settings = await get_report_settings(db_pool)
     current = settings.get('daily_report_enabled', 'true')
     new_value = 'false' if current == 'true' else 'true'
     
     await update_report_setting(db_pool, 'daily_report_enabled', new_value)
-    # مسح كاش الإعدادات
-    clear_cache("report_settings")
-    
     await report_settings(callback, db_pool)
 
 @router.callback_query(F.data == "change_report_time")
@@ -751,9 +705,6 @@ async def change_report_time_start(callback: types.CallbackQuery, state: FSMCont
     """بدء تغيير وقت التقرير"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
-    
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
     
     await callback.message.edit_text(
         "⏰ **تغيير وقت التقرير اليومي**\n\n"
@@ -780,8 +731,6 @@ async def change_report_time_final(message: types.Message, state: FSMContext, db
     
     new_time = message.text.strip()
     await update_report_setting(db_pool, 'report_time', new_time)
-    # مسح كاش الإعدادات
-    clear_cache("report_settings")
     
     await message.answer(f"✅ تم تحديث وقت التقرير إلى {new_time}\n"
                          f"⏳ سيتم إرسال التقرير يومياً الساعة {new_time}")
@@ -793,11 +742,7 @@ async def change_recipients(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    # ✅ استخدام الكاش للإعدادات
-    settings = await get_cached_report_settings(db_pool)
+    settings = await get_report_settings(db_pool)
     current = settings.get('report_recipients', 'owner_only')
     
     builder = InlineKeyboardBuilder()
@@ -830,13 +775,8 @@ async def set_recipients(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     recipient_type = callback.data.replace("set_recipients_", "")
     await update_report_setting(db_pool, 'report_recipients', recipient_type)
-    # مسح كاش الإعدادات
-    clear_cache("report_settings")
     
     await callback.answer("✅ تم تحديث المستلمين")
     await report_settings(callback, db_pool)

@@ -8,20 +8,15 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     """القائمة الرئيسية للمستخدمين مع زر المشرفين إذا كانوا مشرفين"""
     builder = ReplyKeyboardBuilder()
     
-    # الصف الأول
     builder.row(types.KeyboardButton(text="📱 خدمات الشحن"))
-    
-    # الصف الثاني
     builder.row(
         types.KeyboardButton(text="💰 شحن المحفظة"), 
         types.KeyboardButton(text="👤 حسابي")
     )
     
-    # الصف الثالث (للمشرفين فقط)
     if is_admin_user:
         builder.row(types.KeyboardButton(text="🛠 لوحة التحكم"))
     
-    # الصف الرابع (مساعدة)
     builder.row(types.KeyboardButton(text="❓ مساعدة"))
     
     return builder.as_markup(resize_keyboard=True)
@@ -69,8 +64,8 @@ def get_back_to_admin_inline_keyboard():
     """زر رجوع للوحة التحكم"""
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع للوحة التحكم", 
-        callback_data="back_to_admin"
+        text="🔙 رجوع ", 
+        callback_data="callback_data"
     ))
     return builder.as_markup()
 
@@ -104,65 +99,6 @@ def get_points_keyboard():
     )
     return builder.as_markup()
 
-# ✅ دوال إضافية محسنة
-
-def get_admin_main_menu_keyboard():
-    """كيبورد إنلاين للقائمة الرئيسية للمشرفين"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="📊 إحصائيات", callback_data="bot_stats"),
-        types.InlineKeyboardButton(text="📢 رسالة للكل", callback_data="broadcast")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="👤 معلومات مستخدم", callback_data="user_info"),
-        types.InlineKeyboardButton(text="💰 إدارة النقاط", callback_data="manage_points")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="📁 إدارة الأقسام", callback_data="manage_categories"),
-        types.InlineKeyboardButton(text="🎮 إدارة الخيارات", callback_data="manage_options")
-    )
-    return builder.as_markup()
-
-def get_pagination_keyboard(current_page: int, total_pages: int, prefix: str = "page"):
-    """كيبورد للتنقل بين الصفحات"""
-    builder = InlineKeyboardBuilder()
-    buttons = []
-    
-    if current_page > 1:
-        buttons.append(types.InlineKeyboardButton(
-            text="◀️ السابق", 
-            callback_data=f"{prefix}_prev_{current_page}"
-        ))
-    
-    buttons.append(types.InlineKeyboardButton(
-        text=f"📄 {current_page}/{total_pages}", 
-        callback_data="current_page"
-    ))
-    
-    if current_page < total_pages:
-        buttons.append(types.InlineKeyboardButton(
-            text="التالي ▶️", 
-            callback_data=f"{prefix}_next_{current_page}"
-        ))
-    
-    builder.row(*buttons)
-    return builder.as_markup()
-
-def get_products_per_row_keyboard(buttons: list, row_width: int = 2):
-    """كيبورد لعرض المنتجات مع عدد محدد في كل صف"""
-    builder = InlineKeyboardBuilder()
-    for i in range(0, len(buttons), row_width):
-        row_buttons = buttons[i:i + row_width]
-        builder.row(*row_buttons)
-    return builder.as_markup()
-
-def get_action_keyboard(actions: list):
-    """كيبورد ديناميكي لإنشاء أزرار من قائمة"""
-    builder = InlineKeyboardBuilder()
-    for text, callback in actions:
-        builder.row(types.InlineKeyboardButton(text=text, callback_data=callback))
-    return builder.as_markup()
-
 
 # ============= دوال مساعدة =============
 
@@ -192,19 +128,3 @@ async def send_message_with_main_menu_keyboard(bot, chat_id: int, text: str, is_
         reply_markup=get_main_menu_keyboard(is_admin),
         parse_mode=parse_mode
     )
-
-async def edit_message_with_new_keyboard(message: types.Message, new_text: str = None, new_keyboard = None):
-    """تعديل رسالة مع كيبورد جديد (طل
-    واحد)"""
-    try:
-        if new_text:
-            await message.edit_text(
-                text=new_text,
-                reply_markup=new_keyboard
-            )
-        else:
-            await message.edit_reply_markup(reply_markup=new_keyboard)
-        return True
-    except Exception as e:
-        logging.getLogger(__name__).error(f"خطأ في تعديل الرسالة: {e}")
-        return False
