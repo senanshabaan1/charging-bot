@@ -518,10 +518,9 @@ async def cancel_deposit(callback: types.CallbackQuery, state: FSMContext, db_po
         reply_markup=get_main_menu_keyboard(is_admin)
     )
 # ============= معالجة الصور =============
-
 @router.message(DepStates.waiting_photo, F.photo)
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_pool):
-    """معالجة لقطة الشاشة"""
+    """معالجة لقطة الشاشة وطلب التأكيد"""
     if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
         await state.clear()
         is_admin = await is_admin_user(db_pool, message.from_user.id)
@@ -536,6 +535,49 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
     # استخدام أعلى جودة للصورة
     photo_file_id = message.photo[-1].file_id
     
+    # حفظ معلومات الصورة في الـ state
+    await state.update_data(photo_file_id=photo_file_id)
+    
+    # تجهيز رسالة التأكيد
+    data = await state.get_data()
+    
+    text = (
+        f"📋 **تأكيد طلب الشحن**\n\n"
+        f"💰 **المبلغ:** {data['display_amount']}\n"
+        f"📱 **طريقة الدفع:** {data['method_name']}\n"
+        f"🖼️ **تم استلام لقطة الشاشة**\n\n"
+        f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
+    )
+    
+    # أزرار التأكيد والإلغاء
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ تأكيد وإرسال", callback_data="confirm_deposit_photo"),
+        types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_deposit")
+    )
+    
+    await message.answer(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+    await state.set_state(DepStates.confirm)
+
+@router.callback_query(F.data == "confirm_deposit_photo")
+async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
+    """تأكيد وإرسال طلب الشحن مع الصورة"""
+    await callback.answer()
+    
+    data = await state.get_data()
+    
+    if not data or 'photo_file_id' not in data:
+        await callback.message.edit_text("❌ انتهت صلاحية الطلب، يرجى البدء من جديد")
+        await state.clear()
+        return
+    
+    photo_file_id = data['photo_file_id']
+    
+    # حفظ الطلب في قاعدة البيانات
     async with db_pool.acquire() as conn:
         # إضافة أو تحديث المستخدم
         await conn.execute('''
@@ -544,7 +586,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
             ON CONFLICT (user_id) DO UPDATE SET 
                 username = EXCLUDED.username,
                 last_activity = CURRENT_TIMESTAMP
-        ''', message.from_user.id, message.from_user.username)
+        ''', callback.from_user.id, callback.from_user.username)
         
         # إنشاء طلب الشحن مع الصورة
         deposit_id = await conn.fetchval('''
@@ -553,8 +595,8 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', CURRENT_TIMESTAMP)
             RETURNING id
         ''', 
-        message.from_user.id, 
-        message.from_user.username,
+        callback.from_user.id, 
+        callback.from_user.username,
         data['method'],
         data['amt'],
         data['amount_syp'],
@@ -564,8 +606,8 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
         
         # تجهيز بيانات الإرسال للمجموعة
         channel_data = {
-            'user_id': message.from_user.id,
-            'username': message.from_user.username or 'غير معروف',
+            'user_id': callback.from_user.id,
+            'username': callback.from_user.username or 'غير معروف',
             'display_amount': data['display_amount'],
             'amount_syp': data['amount_syp'],
             'method_name': data['method_name'],
@@ -581,18 +623,101 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
                 group_msg_id, deposit_id
             )
     
-    # ✅ دمج الرسالتين في رسالة واحدة
-    is_admin = await is_admin_user(db_pool, message.from_user.id)
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    await message.answer(
-        f"✅ **تم إرسال لقطة الشاشة بنجاح!**\n\n"
+    # ✅ تعديل رسالة التأكيد
+    await callback.message.edit_text(
+        f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
         f"🆔 **رقم الطلب:** #{deposit_id}\n"
         f"⏳ **بانتظار موافقة الإدارة.**\n"
-        f"📋 **الوقت المتوقع: 5-10 دقائق.**\n\n"
-        f"👋 يمكنك العودة للقائمة الرئيسية من الأزرار أدناه:",
-        reply_markup=get_main_menu_keyboard(is_admin),
+        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
         parse_mode="Markdown"
+    )
+    
+    # إرسال رسالة منفصلة مع القائمة الرئيسية
+    await callback.message.answer(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+    
+    await state.clear()
+
+@router.callback_query(F.data == "confirm_deposit")
+async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
+    """تأكيد وإرسال طلب الشحن مع رقم العملية"""
+    await callback.answer()
+    
+    data = await state.get_data()
+    
+    if not data or 'tx_info' not in data:
+        await callback.message.edit_text("❌ انتهت صلاحية الطلب، يرجى البدء من جديد")
+        await state.clear()
+        return
+    
+    tx = data['tx_info']
+    
+    # حفظ الطلب في قاعدة البيانات
+    async with db_pool.acquire() as conn:
+        # إضافة أو تحديث المستخدم
+        await conn.execute('''
+            INSERT INTO users (user_id, username, balance, created_at) 
+            VALUES ($1, $2, 0, CURRENT_TIMESTAMP) 
+            ON CONFLICT (user_id) DO UPDATE SET 
+                username = EXCLUDED.username,
+                last_activity = CURRENT_TIMESTAMP
+        ''', callback.from_user.id, callback.from_user.username)
+        
+        # إنشاء طلب الشحن
+        deposit_id = await conn.fetchval('''
+            INSERT INTO deposit_requests 
+            (user_id, username, method, amount, amount_syp, tx_info, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending', CURRENT_TIMESTAMP)
+            RETURNING id
+        ''', 
+        callback.from_user.id, 
+        callback.from_user.username,
+        data['method'],
+        data['amt'],
+        data['amount_syp'],
+        tx
+        )
+        
+        # تجهيز بيانات الإرسال للمجموعة
+        channel_data = {
+            'user_id': callback.from_user.id,
+            'username': callback.from_user.username or 'غير معروف',
+            'display_amount': data['display_amount'],
+            'amount_syp': data['amount_syp'],
+            'method_name': data['method_name'],
+        }
+        
+        # إرسال للمجموعة
+        group_msg_id = await send_to_group(bot, channel_data, tx)
+        
+        # تحديث معرف رسالة المجموعة
+        if group_msg_id:
+            await conn.execute(
+                "UPDATE deposit_requests SET group_message_id = $1 WHERE id = $2",
+                group_msg_id, deposit_id
+            )
+    
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    
+    # ✅ تعديل رسالة التأكيد
+    await callback.message.edit_text(
+        f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
+        f"💰 **المبلغ:** {data['display_amount']}\n"
+        f"🆔 **رقم الطلب:** #{deposit_id}\n"
+        f"⏳ **بانتظار موافقة الإدارة.**\n"
+        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
+        parse_mode="Markdown"
+    )
+    
+    # إرسال رسالة منفصلة مع القائمة الرئيسية
+    await callback.message.answer(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
     
     await state.clear()
