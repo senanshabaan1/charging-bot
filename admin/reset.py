@@ -308,7 +308,7 @@ async def cancel_action(callback: types.CallbackQuery, state: FSMContext):
 
 # ✅ دالة مساعدة لإنشاء نسخة احتياطية قبل التصفير
 @router.callback_query(F.data == "backup_before_reset")
-async def backup_before_reset(callback: types.CallbackQuery, db_pool, bot: Bot):
+async def backup_before_reset(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
     """إنشاء نسخة احتياطية قبل التصفير"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
@@ -332,8 +332,8 @@ async def backup_before_reset(callback: types.CallbackQuery, db_pool, bot: Bot):
                         "يمكنك الرجوع لهذه النسخة لاحقاً."
             )
             
-            # العودة لخطوات التصفير
-            await reset_bot_start(callback, state, db_pool)
+            # ✅ العودة لخطوات التصفير - لاحظ أننا لا نمرر db_pool
+            await reset_bot_start(callback, state)
         else:
             await callback.answer("❌ فشل إنشاء النسخة الاحتياطية", show_alert=True)
             
