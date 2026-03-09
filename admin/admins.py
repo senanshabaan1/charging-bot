@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin, format_datetime, is_owner
-from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
+from handlers.keyboards import get_confirmation_keyboard
 from database.admin import get_all_admins, add_admin, remove_admin, get_admin_info, get_admin_logs
 from database.users import get_user_by_id
 from cache import cached, clear_cache  # ✅ استيراد الكاش
