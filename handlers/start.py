@@ -660,10 +660,12 @@ async def admin_control_panel(message: types.Message, db_pool):
     from admin.main import admin_panel
     await admin_panel(message, db_pool)
 
-# ========== المساعدة ==========
-@router.message(F.text == "❓ مساعدة")
-async def show_help(message: types.Message):
-    """عرض رسالة المساعدة"""
+# ========== المساعدة (للكيبورد الإنلاين) ==========
+@router.callback_query(F.data == "show_help")
+async def show_help_callback(callback: types.CallbackQuery):
+    """عرض رسالة المساعدة عند الضغط على الزر الإنلاين"""
+    await callback.answer()
+    
     help_text = (
         "📚 **دليل استخدام البوت**\n\n"
         "**📱 خدمات الشحن:**\n"
@@ -702,4 +704,9 @@ async def show_help(message: types.Message):
         "🔹 **لتحديث القائمة: أرسل /start**"
     )
     
-    await message.answer(help_text, parse_mode="Markdown")
+    # ✅ تعديل الرسالة الحالية بدلاً من إرسال رسالة جديدة
+    await callback.message.edit_text(
+        help_text,
+        parse_mode="Markdown",
+        reply_markup=get_back_to_main_inline_keyboard()  # زر رجوع للقائمة الرئيسية
+    )
