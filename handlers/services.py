@@ -11,7 +11,7 @@ from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAM
 from handlers.keyboards import get_main_menu_keyboard, get_main_menu_only_keyboard, get_cancel_keyboard
 from database.users import is_admin_user
 from database.core import get_exchange_rate
-from database.vip import get_user_vip
+from database.vip import get_user_vip[
 from database.points import get_points_per_order
 from database.products import get_product_options, get_product_option
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
@@ -223,8 +223,7 @@ async def handle_disabled_app(callback: types.CallbackQuery):
         show_alert=True
     )
 
-# ============= معالجات العناصر المقفلة =============
-
+# ============= معالج للتطبيقات المعطلة =============
 @router.callback_query(F.data.startswith("disabled_app_"))
 async def handle_disabled_app(callback: types.CallbackQuery):
     """معالج للتطبيقات المعطلة"""
@@ -239,6 +238,7 @@ async def handle_disabled_app(callback: types.CallbackQuery):
         show_alert=True
     )
 
+# ============= معالج للخيارات المعطلة =============
 @router.callback_query(F.data.startswith("disabled_option_"))
 async def handle_disabled_option(callback: types.CallbackQuery):
     """معالج للخيارات المعطلة"""
