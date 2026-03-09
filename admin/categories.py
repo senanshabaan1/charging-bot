@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin, safe_edit_message, get_state_data_field, is_owner
-from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
+from handlers.keyboards import get_confirmation_keyboard
 from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
