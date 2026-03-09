@@ -924,17 +924,21 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    # ✅ تعديل الرسالة الحالية فقط (بدون إرسال رسالة جديدة) - مع إضافة الكيبورد في نفس الأمر
+    # ✅ تعديل الرسالة الحالية فقط (بدون كيبورد)
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
         f"📋 **سيتم التنفيذ خلال 24 ساعة.**\n"
         f"⭐ **نقاط مضافة:** +{points}"
         f"{discount_text}\n\n"
-        f"🔸 **رقم طلبك:** #{order_id}\n\n"
-        f"👋 يمكنك العودة للقائمة الرئيسية من الأزرار أدناه:",
-        reply_markup=get_main_menu_keyboard(is_admin),  # ✅ إضافة الكيبورد هنا
+        f"🔸 **رقم طلبك:** #{order_id}",
         parse_mode="Markdown"
+    )
+    
+    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية
+    await callback.message.answer(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد:",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
     
     await state.clear()
@@ -949,9 +953,14 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    # ✅ تعديل الرسالة الحالية فقط (بدون إرسال رسالة جديدة) - مع إضافة الكيبورد في نفس الأمر
+    # ✅ تعديل رسالة الإلغاء بدون كيبورد
     await callback.message.edit_text(
-        "❌ **تم إلغاء الطلب.**\n\n"
-        "👋 تم العودة للقائمة الرئيسية",
-        reply_markup=get_main_menu_keyboard(is_admin)  # ✅ إضافة الكيبورد هنا
+        "❌ **تم إلغاء الطلب.**",
+        parse_mode="Markdown"
+    )
+    
+    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية
+    await callback.message.answer(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد:",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
