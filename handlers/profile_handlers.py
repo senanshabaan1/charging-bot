@@ -11,87 +11,153 @@ from database.vip import get_next_vip_level
 from database.referrals import generate_referral_code
 from database.users import get_user_profile, get_user_points 
 from utils import format_datetime, is_admin
+from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
 router = Router(name="profile")
 
-# ========== الملف الشخصي ==========
-# handlers/profile_handlers.py - دالة my_account كاملة مع HTML
+# ✅ كاش للملف الشخصي الكامل
+@cached(ttl=15, key_prefix="user_profile")
+async def get_cached_user_profile(db_pool, user_id):
+    """جلب الملف الشخصي مع كاش 15 ثانية"""
+    return await get_user_profile(db_pool, user_id)
 
+# ✅ كاش لرصيد النقاط
+@cached(ttl=10, key_prefix="user_points")
+async def get_cached_user_points(db_pool, user_id):
+    """جلب رصيد النقاط مع كاش 10 ثواني"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT total_points FROM users WHERE user_id = $1",
+            user_id
+        ) or 0
+
+# ✅ كاش لبيانات المستخدم الأساسية
+@cached(ttl=15, key_prefix="user_basic")
+async def get_cached_user_basic(db_pool, user_id):
+    """جلب البيانات الأساسية للمستخدم مع كاش 15 ثانية"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
+            user_id
+        )
+
+# ✅ كاش لإحصائيات النقاط
+@cached(ttl=20, key_prefix="points_stats")
+async def get_cached_points_stats(db_pool, user_id):
+    """جلب إحصائيات النقاط مع كاش 20 ثانية"""
+    async with db_pool.acquire() as conn:
+        points_from_referrals = await conn.fetchval(
+            "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'referral'",
+            user_id
+        ) or 0
+        
+        points_from_orders = await conn.fetchval(
+            "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'order_completed'",
+            user_id
+        ) or 0
+        
+        points_redeemed = await conn.fetchval(
+            "SELECT COALESCE(SUM(ABS(points)), 0) FROM points_history WHERE user_id = $1 AND points < 0",
+            user_id
+        ) or 0
+        
+        return {
+            'from_referrals': points_from_referrals,
+            'from_orders': points_from_orders,
+            'redeemed': points_redeemed
+        }
+
+# ✅ كاش لإحصائيات العمليات
+@cached(ttl=20, key_prefix="user_operations")
+async def get_cached_user_operations(db_pool, user_id):
+    """جلب إحصائيات العمليات مع كاش 20 ثانية"""
+    async with db_pool.acquire() as conn:
+        deposits_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
+            user_id
+        ) or 0
+        
+        orders_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
+            user_id
+        ) or 0
+        
+        deposits_total = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount_syp), 0) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
+            user_id
+        ) or 0
+        
+        orders_total = await conn.fetchval(
+            "SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE user_id = $1 AND status = 'completed'",
+            user_id
+        ) or 0
+        
+        return {
+            'deposits_count': deposits_count,
+            'orders_count': orders_count,
+            'deposits_total': deposits_total,
+            'orders_total': orders_total
+        }
+
+# ========== الملف الشخصي ==========
 @router.message(F.text == "👤 حسابي")
 async def my_account(message: types.Message, db_pool):
     """عرض الملف الشخصي مع أزرار النقاط وسجل العمليات وتفاصيل VIP"""
     user_id = message.from_user.id
     
+    # ✅ استخدام الكاش
+    user_data = await get_cached_user_basic(db_pool, user_id)
+    
+    if user_data and user_data['is_banned']:
+        return await message.answer("🚫 حسابك محظور من استخدام البوت.")
+    
+    if user_data:
+        balance = user_data['balance'] or 0
+        points = user_data['total_points'] or 0
+        referral_code = user_data['referral_code']
+        username = user_data['username']
+        first_name = user_data['first_name']
+        vip_level = user_data['vip_level'] or 0
+        vip_discount = user_data['discount_percent'] or 0
+        total_spent = user_data['total_spent'] or 0
+    else:
+        balance = 0
+        points = 0
+        referral_code = None
+        username = None
+        first_name = None
+        vip_level = 0
+        vip_discount = 0
+        total_spent = 0
+    
+    # حساب إجمالي المشتريات من الطلبات المكتملة
     async with db_pool.acquire() as conn:
-        try:
-            user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
-                user_id
+        total_spent_from_orders = await conn.fetchval('''
+            SELECT COALESCE(SUM(total_amount_syp), 0) 
+            FROM orders 
+            WHERE user_id = $1 AND status = 'completed'
+        ''', user_id) or 0
+        
+        # تحديث total_spent إذا كان مختلفاً
+        if total_spent != total_spent_from_orders:
+            await conn.execute(
+                "UPDATE users SET total_spent = $1 WHERE user_id = $2",
+                total_spent_from_orders, user_id
             )
-            if user_data and user_data['is_banned']:
-                return await message.answer("🚫 حسابك محظور من استخدام البوت.")
-            
-            balance = user_data['balance'] if user_data else 0
-            points = user_data['total_points'] if user_data else 0
-            referral_code = user_data['referral_code'] if user_data else None
-            username = user_data['username'] if user_data else None
-            first_name = user_data['first_name'] if user_data else None
-            vip_level = user_data['vip_level'] if user_data else 0
-            vip_discount = user_data['discount_percent'] if user_data else 0
-            total_spent = user_data['total_spent'] if user_data else 0
-            
-            # حساب إجمالي المشتريات من الطلبات المكتملة
-            total_spent_from_orders = await conn.fetchval('''
-                SELECT COALESCE(SUM(total_amount_syp), 0) 
-                FROM orders 
-                WHERE user_id = $1 AND status = 'completed'
-            ''', user_id) or 0
-            
-            # تحديث total_spent إذا كان مختلفاً
-            if total_spent != total_spent_from_orders:
-                await conn.execute(
-                    "UPDATE users SET total_spent = $1 WHERE user_id = $2",
-                    total_spent_from_orders, user_id
-                )
-                total_spent = total_spent_from_orders
-            
-            # جلب إحصائيات النقاط
-            points_from_referrals = await conn.fetchval(
-                "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'referral'",
-                user_id
-            ) or 0
-            
-            points_from_orders = await conn.fetchval(
-                "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'order_completed'",
-                user_id
-            ) or 0
-            
-            # جلب إحصائيات العمليات
-            deposits_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
-                user_id
-            ) or 0
-            
-            orders_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
-                user_id
-            ) or 0
-            
-        except Exception as e:
-            logger.error(f"خطأ في جلب بيانات المستخدم {user_id}: {e}")
-            balance = 0
-            points = 0
-            referral_code = None
-            username = None
-            first_name = None
-            vip_level = 0
-            vip_discount = 0
-            total_spent = 0
-            points_from_referrals = 0
-            points_from_orders = 0
-            deposits_count = 0
-            orders_count = 0
+            total_spent = total_spent_from_orders
+            # ✅ مسح الكاش بعد التحديث
+            clear_cache(f"user_basic:{user_id}")
+    
+    # ✅ استخدام الكاش لإحصائيات النقاط
+    points_stats = await get_cached_points_stats(db_pool, user_id)
+    points_from_referrals = points_stats['from_referrals']
+    points_from_orders = points_stats['from_orders']
+    
+    # ✅ استخدام الكاش لإحصائيات العمليات
+    operations_stats = await get_cached_user_operations(db_pool, user_id)
+    deposits_count = operations_stats['deposits_count']
+    orders_count = operations_stats['orders_count']
     
     # حساب قيمة النقاط بالسعر الحالي
     redemption_rate = await get_redemption_rate(db_pool)
@@ -148,12 +214,16 @@ async def my_account(message: types.Message, db_pool):
     await message.answer(
         profile_text,
         reply_markup=builder.as_markup(),
-        parse_mode="HTML"  # ✅ تغيير إلى HTML
+        parse_mode="HTML"
     )
+
 # ========== رابط الإحالة ==========
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
     """عرض رابط الإحالة مع سعر الصرف الحالي"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
@@ -167,10 +237,13 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
     
     if not code:
         code = await generate_referral_code(db_pool, callback.from_user.id)
+        # ✅ مسح الكاش بعد تحديث الكود
+        clear_cache(f"user_basic:{callback.from_user.id}")
     
     bot_username = (await callback.bot.me()).username
     link = f"https://t.me/{bot_username}?start={code}"
     
+    # ✅ استخدام الكاش لإحصائيات الإحالة
     async with db_pool.acquire() as conn:
         referrals_count = await conn.fetchval(
             "SELECT COUNT(*) FROM users WHERE referred_by = $1",
@@ -199,28 +272,27 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"شارك الرابط مع أصدقائك!"
     )
     
-    await callback.message.edit_text(text)
-    
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
-    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+    
+    # ✅ تعديل النص والكيبورد بطلب واحد
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup()
+    )
 
 # ========== قائمة استرداد النقاط ==========
 @router.callback_query(F.data == "redeem_points_menu")
 async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     """قائمة استرداد النقاط"""
-    async with db_pool.acquire() as conn:
-        points = await conn.fetchval(
-            "SELECT total_points FROM users WHERE user_id = $1",
-            callback.from_user.id
-        ) or 0
-        
-        redemption_rate = await conn.fetchval(
-            "SELECT value FROM bot_settings WHERE key = 'redemption_rate'"
-        ) or '100'
-        redemption_rate = int(redemption_rate)
-        
-        exchange_rate = await get_exchange_rate(db_pool)
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    # ✅ استخدام الكاش لرصيد النقاط
+    points = await get_cached_user_points(db_pool, callback.from_user.id)
+    
+    redemption_rate = await get_redemption_rate(db_pool)
+    exchange_rate = await get_exchange_rate(db_pool)
     
     if points < redemption_rate:
         return await callback.answer(
@@ -239,7 +311,7 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         
         builder.row(types.InlineKeyboardButton(
             text=f"{usd_amount}$ ({syp_amount:.0f} ل.س) - {points_needed} نقطة",
-            callback_data=f"redeem_{points_needed}_{syp_amount}_{exchange_rate}"
+            callback_data=f"redeem_{points_needed}_{syp_amount:.0f}_{exchange_rate}"
         ))
     
     builder.row(types.InlineKeyboardButton(
@@ -254,12 +326,19 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         f"اختر المبلغ الذي تريد استرداده:"
     )
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    # ✅ تعديل النص والكيبورد بطلب واحد
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup()
+    )
 
 # ========== معالجة طلب الاسترداد ==========
 @router.callback_query(F.data.startswith("redeem_"))
 async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
     """معالجة طلب الاسترداد"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     try:
         parts = callback.data.split("_")
         points = int(parts[1])
@@ -280,6 +359,10 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         if error:
             await callback.answer(f"❌ {error}", show_alert=True)
         else:
+            # ✅ مسح الكاش بعد إنشاء طلب استرداد
+            clear_cache(f"user_points:{callback.from_user.id}")
+            clear_cache(f"user_basic:{callback.from_user.id}")
+            
             current_time = get_damascus_time_now().strftime("%Y-%m-%d %H:%M:%S")
             
             await callback.message.edit_text(
@@ -319,62 +402,34 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
     """العودة إلى الملف الشخصي - مع سعر الصرف الحالي وتفاصيل VIP"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     user_id = callback.from_user.id
     
     # جلب سعر الصرف الحالي من قاعدة البيانات
-    from database import get_exchange_rate, get_redemption_rate, get_next_vip_level
     exchange_rate = await get_exchange_rate(db_pool)
     redemption_rate = await get_redemption_rate(db_pool)
     
-    async with db_pool.acquire() as conn:
-        try:
-            user_data = await conn.fetchrow(
-                "SELECT is_banned, balance, total_points, referral_code, username, first_name, vip_level, discount_percent, total_spent FROM users WHERE user_id = $1",
-                user_id
-            )
-            balance = user_data['balance'] if user_data else 0
-            points = user_data['total_points'] if user_data else 0
-            username = user_data['username'] if user_data else None
-            first_name = user_data['first_name'] if user_data else None
-            vip_level = user_data['vip_level'] if user_data else 0
-            vip_discount = user_data['discount_percent'] if user_data else 0
-            total_spent = user_data['total_spent'] if user_data else 0
-            
-            # جلب إحصائيات النقاط
-            points_from_referrals = await conn.fetchval(
-                "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'referral'",
-                user_id
-            ) or 0
-            
-            points_from_orders = await conn.fetchval(
-                "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'order_completed'",
-                user_id
-            ) or 0
-            
-            # جلب إحصائيات العمليات
-            deposits_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
-                user_id
-            ) or 0
-            
-            orders_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
-                user_id
-            ) or 0
-            
-        except Exception as e:
-            print(f"خطأ في جلب البيانات: {e}")
-            balance = 0
-            points = 0
-            username = None
-            first_name = None
-            vip_level = 0
-            vip_discount = 0
-            total_spent = 0
-            points_from_referrals = 0
-            points_from_orders = 0
-            deposits_count = 0
-            orders_count = 0
+    # ✅ استخدام الكاش
+    user_data = await get_cached_user_basic(db_pool, user_id)
+    
+    if user_data:
+        balance = user_data['balance'] or 0
+        points = user_data['total_points'] or 0
+        username = user_data['username']
+        first_name = user_data['first_name']
+        vip_level = user_data['vip_level'] or 0
+        vip_discount = user_data['discount_percent'] or 0
+        total_spent = user_data['total_spent'] or 0
+    else:
+        balance = 0
+        points = 0
+        username = None
+        first_name = None
+        vip_level = 0
+        vip_discount = 0
+        total_spent = 0
     
     # حساب قيمة النقاط بسعر الصرف الحالي
     points_value_usd = (points / redemption_rate) 
@@ -421,6 +476,7 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
         f"🔹 **اختر من الأزرار أدناه:**"
     )
     
+    # ✅ تعديل النص والكيبورد بطلب واحد
     await callback.message.edit_text(
         profile_text,
         reply_markup=builder.as_markup(),
@@ -431,29 +487,19 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "show_points_balance")
 async def show_points_balance(callback: types.CallbackQuery, db_pool):
     """عرض رصيد النقاط وتفاصيله"""
-    async with db_pool.acquire() as conn:
-        current_points = await conn.fetchval(
-            "SELECT total_points FROM users WHERE user_id = $1",
-            callback.from_user.id
-        ) or 0
-        
-        points_from_referrals = await conn.fetchval(
-            "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'referral'",
-            callback.from_user.id
-        ) or 0
-        
-        points_from_orders = await conn.fetchval(
-            "SELECT COALESCE(SUM(points), 0) FROM points_history WHERE user_id = $1 AND action = 'order_completed'",
-            callback.from_user.id
-        ) or 0
-        
-        points_redeemed = await conn.fetchval(
-            "SELECT COALESCE(SUM(ABS(points)), 0) FROM points_history WHERE user_id = $1 AND points < 0",
-            callback.from_user.id
-        ) or 0
-        
-        exchange_rate = await get_exchange_rate(db_pool)
-        redemption_rate = await get_redemption_rate(db_pool)
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    # ✅ استخدام الكاش
+    current_points = await get_cached_user_points(db_pool, callback.from_user.id)
+    points_stats = await get_cached_points_stats(db_pool, callback.from_user.id)
+    
+    points_from_referrals = points_stats['from_referrals']
+    points_from_orders = points_stats['from_orders']
+    points_redeemed = points_stats['redeemed']
+    
+    exchange_rate = await get_exchange_rate(db_pool)
+    redemption_rate = await get_redemption_rate(db_pool)
     
     points_value_usd = (current_points / redemption_rate) if redemption_rate > 0 else 0
     points_value_syp = points_value_usd * exchange_rate
@@ -471,16 +517,23 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
         f"🎁 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)"
     )
     
-    await callback.message.edit_text(text, parse_mode="Markdown")
-    
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
-    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+    
+    # ✅ تعديل النص والكيبورد بطلب واحد
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
 
 # ========== سجل العمليات ==========
 @router.callback_query(F.data == "transactions_history")
 async def transactions_history(callback: types.CallbackQuery, db_pool):
     """عرض سجل العمليات (آخر 3 شحن + آخر 3 شراء)"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     user_id = callback.from_user.id
     
     async with db_pool.acquire() as conn:
@@ -501,25 +554,12 @@ async def transactions_history(callback: types.CallbackQuery, db_pool):
             LIMIT 3
         ''', user_id)
         
-        deposits_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
-            user_id
-        ) or 0
-        
-        orders_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND status = 'completed'",
-            user_id
-        ) or 0
-        
-        deposits_total = await conn.fetchval(
-            "SELECT COALESCE(SUM(amount_syp), 0) FROM deposit_requests WHERE user_id = $1 AND status = 'approved'",
-            user_id
-        ) or 0
-        
-        orders_total = await conn.fetchval(
-            "SELECT COALESCE(SUM(total_amount_syp), 0) FROM orders WHERE user_id = $1 AND status = 'completed'",
-            user_id
-        ) or 0
+        # ✅ استخدام الكاش للإحصائيات
+        operations_stats = await get_cached_user_operations(db_pool, user_id)
+        deposits_count = operations_stats['deposits_count']
+        orders_count = operations_stats['orders_count']
+        deposits_total = operations_stats['deposits_total']
+        orders_total = operations_stats['orders_total']
     
     # ✅ استخدام HTML بدلاً من Markdown
     text = (
@@ -544,14 +584,17 @@ async def transactions_history(callback: types.CallbackQuery, db_pool):
         text += "<b>🔵 آخر عمليات الشراء:</b>\n"
         for o in orders:
             status_icon = "✅" if o['status'] == 'completed' else "⏳" if o['status'] == 'pending' else "❌"
-            # ✅ هنا التصحيح: o['created_at']
             date = format_datetime(o['created_at'], "%Y-%m-%d %H:%M")
             text += f"{status_icon} {o['app_name']} - {o['total_amount_syp']:,.0f} ل.س - {date}\n"
     else:
         text += "<b>🔵 آخر عمليات الشراء:</b>\nلا توجد عمليات شراء بعد.\n"
     
-    await callback.message.edit_text(text, parse_mode="HTML")
-    
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
-    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+    
+    # ✅ تعديل النص والكيبورد بطلب واحد
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )

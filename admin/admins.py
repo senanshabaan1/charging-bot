@@ -4,10 +4,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
-from utils import is_admin, format_datetime
-from handlers.keyboards import get_cancel_keyboard
+from utils import is_admin, format_datetime, is_owner
+from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
 from database.admin import get_all_admins, add_admin, remove_admin, get_admin_info, get_admin_logs
 from database.users import get_user_by_id
+from cache import cached, clear_cache  # ✅ استيراد الكاش
+
 logger = logging.getLogger(__name__)
 router = Router(name="admin_admins")
 
@@ -15,15 +17,36 @@ class AdminManageStates(StatesGroup):
     waiting_admin_id = State()           # للإضافة
     waiting_admin_info_id = State()      # للمعلومات
 
+# ✅ كاش لقائمة المشرفين (دقيقتين)
+@cached(ttl=120, key_prefix="admins_list")
+async def get_cached_admins(db_pool):
+    """جلب قائمة المشرفين مع كاش دقيقتين"""
+    return await get_all_admins(db_pool)
+
+# ✅ كاش لمعلومات مشرف محدد (دقيقة واحدة)
+@cached(ttl=60, key_prefix="admin_info")
+async def get_cached_admin_info(db_pool, admin_id):
+    """جلب معلومات مشرف معين مع كاش دقيقة"""
+    return await get_admin_info(db_pool, admin_id)
+
+# ✅ كاش لسجل النشاطات (3 دقائق)
+@cached(ttl=180, key_prefix="admin_logs")
+async def get_cached_admin_logs(db_pool, limit=30):
+    """جلب سجل النشاطات مع كاش 3 دقائق"""
+    return await get_admin_logs(db_pool, limit)
+
 # إدارة المشرفين
 @router.callback_query(F.data == "manage_admins")
 async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
+    """عرض قائمة المشرفين"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database.admin import get_all_admins, add_admin, remove_admin, get_admin_info, get_admin_logs
-    from database.users import get_user_by_id
-    admins = await get_all_admins(db_pool)
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    # ✅ استخدام الكاش
+    admins = await get_cached_admins(db_pool)
     
     admins_text = "👑 <b>قائمة المشرفين</b>\n\n"
     for admin in admins:
@@ -49,8 +72,16 @@ async def manage_admins_menu(callback: types.CallbackQuery, db_pool):
 
 @router.callback_query(F.data == "add_admin")
 async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
+    """بدء إضافة مشرف جديد"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
+    
+    # ✅ التحقق من أن المستخدم هو المالك (owner)
+    if not is_owner(callback.from_user.id):
+        return await callback.answer("⚠️ فقط المالك يمكنه إضافة مشرفين", show_alert=True)
+    
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
     
     await callback.message.edit_text(
         "👤 <b>إضافة مشرف جديد</b>\n\n"
@@ -63,13 +94,27 @@ async def add_admin_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminManageStates.waiting_admin_id)
 async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
+    """تأكيد إضافة مشرف"""
     if not is_admin(message.from_user.id):
+        return
+    
+    # ✅ التحقق من أن المستخدم هو المالك
+    if not is_owner(message.from_user.id):
+        await message.answer("⚠️ فقط المالك يمكنه إضافة مشرفين")
+        await state.clear()
         return
     
     try:
         new_admin_id = int(message.text.strip())
         
-        from database import add_admin, get_user_by_id
+        # ✅ التحقق من أن الآيدي ليس المالك نفسه
+        if new_admin_id == message.from_user.id:
+            return await message.answer(
+                "❌ <b>لا يمكنك إضافة نفسك كمشرف</b> (أنت المالك بالفعل)",
+                reply_markup=get_cancel_keyboard(),
+                parse_mode="HTML"
+            )
+        
         user = await get_user_by_id(db_pool, new_admin_id)
         
         if not user:
@@ -84,6 +129,10 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
         success, msg = await add_admin(db_pool, new_admin_id, message.from_user.id)
         
         if success:
+            # ✅ مسح الكاش بعد إضافة مشرف
+            clear_cache("admins_list")
+            clear_cache(f"admin_info:{new_admin_id}")
+            
             await message.answer(
                 f"✅ <b>تمت إضافة المشرف بنجاح!</b>\n\n"
                 f"👤 المستخدم: @{user['username'] or 'غير معروف'}\n"
@@ -120,8 +169,15 @@ async def remove_admin_list(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_all_admins
-    admins = await get_all_admins(db_pool)
+    # ✅ التحقق من أن المستخدم هو المالك
+    if not is_owner(callback.from_user.id):
+        return await callback.answer("⚠️ فقط المالك يمكنه إزالة مشرفين", show_alert=True)
+    
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    # ✅ استخدام الكاش
+    admins = await get_cached_admins(db_pool)
     
     # فلترة المشرفين: نعرض فقط المشرفين العاديين (admin) وليس المالك (owner)
     admins_to_show = [a for a in admins if a['role'] != 'owner']
@@ -151,9 +207,15 @@ async def remove_admin_list(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("remove_admin_"))
 async def remove_admin_confirm(callback: types.CallbackQuery, db_pool):
     """تأكيد إزالة مشرف"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     admin_id = int(callback.data.split("_")[2])
     
-    from database import get_user_by_id
+    # ✅ التحقق من أن المستخدم لا يحاول إزالة نفسه
+    if admin_id == callback.from_user.id:
+        return await callback.answer("❌ لا يمكنك إزالة نفسك من المشرفين", show_alert=True)
+    
     user = await get_user_by_id(db_pool, admin_id)
     username = user['username'] if user else str(admin_id)
     
@@ -174,14 +236,37 @@ async def remove_admin_confirm(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("confirm_remove_admin_"))
 async def remove_admin_execute(callback: types.CallbackQuery, db_pool):
     """تنفيذ إزالة المشرف"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     admin_id = int(callback.data.split("_")[3])
     
-    from database import remove_admin
+    # ✅ التحقق من أن المستخدم لا يحاول إزالة نفسه
+    if admin_id == callback.from_user.id:
+        return await callback.answer("❌ لا يمكنك إزالة نفسك من المشرفين", show_alert=True)
+    
     success, msg = await remove_admin(db_pool, admin_id, callback.from_user.id)
     
     if success:
+        # ✅ مسح الكاش بعد إزالة مشرف
+        clear_cache("admins_list")
+        clear_cache(f"admin_info:{admin_id}")
+        clear_cache("admin_logs")
+        
         await callback.answer("✅ تمت إزالة المشرف بنجاح")
         await callback.message.edit_text("✅ <b>تمت إزالة المشرف بنجاح</b>", parse_mode="HTML")
+        
+        # إشعار المشرف الذي تمت إزالته
+        try:
+            await callback.bot.send_message(
+                admin_id,
+                f"⚠️ <b>تمت إزالتك من قائمة المشرفين</b>\n\n"
+                f"👤 تمت الإزالة بواسطة: @{callback.from_user.username}\n"
+                f"📞 للاستفسار، تواصل مع المالك.",
+                parse_mode="HTML"
+            )
+        except:
+            pass
     else:
         await callback.answer(f"❌ {msg}", show_alert=True)
 
@@ -192,6 +277,9 @@ async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء البحث عن معلومات مشرف"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
+    
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
     
     await callback.message.edit_text(
         "👤 <b>أدخل آيدي المشرف للحصول على معلوماته:</b>\n\n"
@@ -215,8 +303,8 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
     try:
         admin_id = int(message.text.strip())
         
-        from database import get_admin_info
-        info = await get_admin_info(db_pool, admin_id)
+        # ✅ استخدام الكاش
+        info = await get_cached_admin_info(db_pool, admin_id)
         
         if not info:
             await message.answer("❌ المشرف غير موجود أو ليس لديه صلاحيات", parse_mode="HTML")
@@ -233,7 +321,16 @@ async def admin_info_show(message: types.Message, state: FSMContext, db_pool):
             recent_text = "\n📋 <b>آخر النشاطات:</b>\n"
             for action in info['recent_actions'][:5]:
                 date = format_datetime(action['created_at'], "%Y-%m-%d %H:%M")
-                recent_text += f"• {action['action']} - {date}\n"
+                action_name = {
+                    'add_admin': '➕ إضافة مشرف',
+                    'remove_admin': '➖ إزالة مشرف',
+                    'approve_deposit': '✅ موافقة شحن',
+                    'reject_deposit': '❌ رفض شحن',
+                    'approve_order': '✅ موافقة طلب',
+                    'reject_order': '❌ رفض طلب',
+                    'broadcast': '📢 رسالة جماعية'
+                }.get(action['action'], action['action'])
+                recent_text += f"• {action_name} - {date}\n"
         
         text = (
             f"{role_icon} <b>معلومات المشرف</b>\n\n"
@@ -270,8 +367,11 @@ async def admin_logs_show(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    from database import get_admin_logs
-    logs = await get_admin_logs(db_pool, 30)  # آخر 30 نشاط
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    # ✅ استخدام الكاش
+    logs = await get_cached_admin_logs(db_pool, 30)
     
     if not logs:
         await callback.answer("📭 لا توجد نشاطات مسجلة", show_alert=True)
@@ -302,9 +402,24 @@ async def admin_logs_show(callback: types.CallbackQuery, db_pool):
         text += f"  📝 {log['details']}\n\n"
     
     builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔄 تحديث", callback_data="refresh_admin_logs"))
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_admins"))
     
     await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "refresh_admin_logs")
+async def refresh_admin_logs(callback: types.CallbackQuery, db_pool):
+    """تحديث سجل النشاطات"""
+    if not is_admin(callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    # ✅ مسح الكاش وجلب بيانات جديدة
+    clear_cache("admin_logs")
+    await admin_logs_show(callback, db_pool)
 
 
 # ============= معالج المدخلات الخاطئة =============
