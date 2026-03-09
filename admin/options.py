@@ -90,13 +90,18 @@ async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
     # ✅ إطفاء الزر فوراً
     await callback.answer()
     
-    categories = await get_cached_categories(db_pool)
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
     
     builder = InlineKeyboardBuilder()
     
     for cat in categories:
+        # ✅ استخدام get مع قيمة افتراضية لمنع KeyError
+        icon = cat.get('icon', '📁')
+        display_name = cat.get('display_name', 'قسم')
+        
         builder.row(types.InlineKeyboardButton(
-            text=f"{cat['icon']} {cat['display_name']}",
+            text=f"{icon} {display_name}",
             callback_data=f"app_status_cat_{cat['id']}"
         ))
     
