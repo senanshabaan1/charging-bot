@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from datetime import datetime
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
-from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
+from handlers.keyboards import get_main_menu_keyboard
 from database.users import is_admin_user
 from database.core import get_exchange_rate
 from database.vip import get_user_vip
