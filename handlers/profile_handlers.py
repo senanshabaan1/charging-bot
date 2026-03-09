@@ -100,11 +100,22 @@ async def get_cached_user_operations(db_pool, user_id):
             'orders_total': orders_total
         }
 
-# ========== الملف الشخصي ==========
+# ========== الملف الشخصي (للرسائل العادية) ==========
 @router.message(F.text == "👤 حسابي")
-async def my_account(message: types.Message, db_pool):
+async def my_account_message(message: types.Message, db_pool):
+    """عرض الملف الشخصي عند الضغط على الزر العادي"""
+    await show_profile(message, message.from_user.id, db_pool)
+
+# ========== الملف الشخصي (للكيبورد الإنلاين) ==========
+@router.callback_query(F.data == "show_profile")
+async def my_account_callback(callback: types.CallbackQuery, db_pool):
+    """عرض الملف الشخصي عند الضغط على الزر الإنلاين"""
+    await callback.answer()
+    await show_profile(callback.message, callback.from_user.id, db_pool)
+
+# ========== الدالة الموحدة لعرض الملف الشخصي ==========
+async def show_profile(message: types.Message, user_id: int, db_pool):
     """عرض الملف الشخصي مع أزرار النقاط وسجل العمليات وتفاصيل VIP"""
-    user_id = message.from_user.id
     
     # ✅ استخدام الكاش
     user_data = await get_cached_user_basic(db_pool, user_id)
@@ -195,8 +206,9 @@ async def my_account(message: types.Message, db_pool):
         types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
     )
     builder.row(
-    types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="back_to_main")
+        types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="back_to_main")
     )
+    
     # رسالة الملف الشخصي مع تفاصيل VIP - بصيغة HTML
     profile_text = (
         f"👤 <b>الملف الشخصي</b>\n\n"
@@ -213,11 +225,19 @@ async def my_account(message: types.Message, db_pool):
         f"🔹 <b>اختر من الأزرار أدناه:</b>"
     )
     
-    await message.answer(
-        profile_text,
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    # محاولة تعديل الرسالة إذا كانت موجودة، أو إرسال رسالة جديدة
+    try:
+        await message.edit_text(
+            profile_text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    except:
+        await message.answer(
+            profile_text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
 
 # ========== رابط الإحالة ==========
 @router.callback_query(F.data == "show_referral")
@@ -403,87 +423,9 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
 # ========== العودة للملف الشخصي ==========
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
-    """العودة إلى الملف الشخصي - مع سعر الصرف الحالي وتفاصيل VIP"""
-    # ✅ إطفاء الزر فوراً
+    """العودة إلى الملف الشخصي"""
     await callback.answer()
-    
-    user_id = callback.from_user.id
-    
-    # جلب سعر الصرف الحالي من قاعدة البيانات
-    exchange_rate = await get_exchange_rate(db_pool)
-    redemption_rate = await get_redemption_rate(db_pool)
-    
-    # ✅ استخدام الكاش
-    user_data = await get_cached_user_basic(db_pool, user_id)
-    
-    if user_data:
-        balance = user_data['balance'] or 0
-        points = user_data['total_points'] or 0
-        username = user_data['username']
-        first_name = user_data['first_name']
-        vip_level = user_data['vip_level'] or 0
-        vip_discount = user_data['discount_percent'] or 0
-        total_spent = user_data['total_spent'] or 0
-    else:
-        balance = 0
-        points = 0
-        username = None
-        first_name = None
-        vip_level = 0
-        vip_discount = 0
-        total_spent = 0
-    
-    # حساب قيمة النقاط بسعر الصرف الحالي
-    points_value_usd = (points / redemption_rate) 
-    points_value_syp = points_value_usd * exchange_rate
-    base_syp = 1 * exchange_rate
-    
-    # تحديد أيقونة VIP
-    vip_icons = ["⚪", "🔵", "🟣", "🟡"]
-    vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
-    
-    # حساب التقدم للمستوى التالي
-    next_level_info = get_next_vip_level(total_spent)
-    
-    if next_level_info and next_level_info.get('remaining', 0) > 0:
-        remaining = next_level_info['remaining']
-        next_level_name = next_level_info['next_level_name']
-        progress_text = f"📊 {remaining:,.0f} ل.س للمستوى {next_level_name}"
-    else:
-        progress_text = "✨ وصلت لأعلى مستوى! (VIP 4)"
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="show_referral"),
-        types.InlineKeyboardButton(text="⭐ رصيد النقاط", callback_data="show_points_balance")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="📊 سجل العمليات", callback_data="transactions_history"),
-        types.InlineKeyboardButton(text="💰 استرداد نقاط", callback_data="redeem_points_menu")
-    )
-    
-    profile_text = (
-        f"👤 **الملف الشخصي**\n\n"
-        f"🆔 **الآيدي:** `{user_id}`\n"
-        f"👤 **الاسم:** {first_name or callback.from_user.full_name}\n"
-        f"📅 **اليوزر:** @{username or callback.from_user.username or 'غير متوفر'}\n"
-        f"💰 **الرصيد:** {balance:,.0f} ل.س\n"
-        f"⭐ **نقاطك:** {points}\n"
-        f"👑 **نظام VIP:**\n"
-        f"• مستواك: {vip_icon} VIP {vip_level}\n"
-        f"• خصمك الحالي: {vip_discount}%\n"
-        f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
-        f"{progress_text}\n\n"
-        f"🎁 **كل {redemption_rate} نقطة = 1$** ({base_syp:.0f} ل.س)\n\n"
-        f"🔹 **اختر من الأزرار أدناه:**"
-    )
-    
-    # ✅ تعديل النص والكيبورد بطلب واحد
-    await callback.message.edit_text(
-        profile_text,
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    await show_profile(callback.message, callback.from_user.id, db_pool)
 
 # ========== رصيد النقاط ==========
 @router.callback_query(F.data == "show_points_balance")
