@@ -100,7 +100,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext, db_pool):
         
         await message.answer(
             cancel_text,
-            reply_markup=get_main_menu_keyboard(is_admin_user)
+            reply_markup=get_main_menu_inline_keyboard(is_admin_user)
         )
     except Exception as e:
         logger.error(f"خطأ في دالة الإلغاء: {e}")
@@ -456,7 +456,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
     # إرسال رسالة الترحيب
     await message.answer(
         welcome_text,
-        reply_markup=get_main_menu_keyboard(is_admin(user_id))
+        reply_markup=get_main_menu_inline_keyboard(is_admin(user_id))
     )
 
 # ========== التحقق من اشتراك القناة ==========
@@ -504,7 +504,7 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
                 )
                 await callback.message.answer(
                     welcome_text,
-                    reply_markup=get_main_menu_keyboard(is_admin(user_id))
+                    reply_markup=get_main_menu_inline_keyboard(is_admin(user_id))
                 )
                 return
             
@@ -638,7 +638,7 @@ async def check_subscription(callback: types.CallbackQuery, state: FSMContext, d
             # إرسال رسالة الترحيب
             await callback.message.answer(
                 welcome_text,
-                reply_markup=get_main_menu_keyboard(is_admin(user_id))
+                reply_markup=get_main_menu_inline_keyboard(is_admin(user_id))
             )
     else:
         await callback.answer("❌ لم تشترك في القناة بعد! اشترك ثم حاول مرة أخرى.", show_alert=True)
