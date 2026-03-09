@@ -43,6 +43,26 @@ async def get_cached_apps_by_category(db_pool, category_id):
             category_id
         )
 
+# ============= معالج الكولباك للقائمة الرئيسية =============
+@router.callback_query(F.data == "show_categories")
+async def show_categories_callback(callback: types.CallbackQuery, db_pool):
+    """عرض الأقسام من القائمة الإنلاين"""
+    await callback.answer()
+    await show_categories(callback.message, db_pool)
+
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """العودة للقائمة الرئيسية"""
+    await callback.answer()
+    await state.clear()
+    
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    
+    await callback.message.edit_text(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
+
 async def send_order_to_group(bot: Bot, order_data: dict):
     """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
@@ -935,9 +955,9 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
         parse_mode="Markdown"
     )
     
-    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية
+    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية (إنلاين)
     await callback.message.answer(
-        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد:",
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
         reply_markup=get_main_menu_keyboard(is_admin)
     )
     
@@ -959,8 +979,8 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool
         parse_mode="Markdown"
     )
     
-    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية
+    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية (إنلاين)
     await callback.message.answer(
-        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد:",
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
         reply_markup=get_main_menu_keyboard(is_admin)
     )
