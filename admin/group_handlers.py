@@ -493,72 +493,73 @@ async def complete_order_from_group(callback: types.CallbackQuery, db_pool, bot:
 async def process_order_completion(order_id: int, callback: types.CallbackQuery, db_pool, bot: Bot):
     """معالجة تأكيد تنفيذ الطلب في الخلفية"""
     try:
+        # ✅ استخدم transaction واحدة فقط
         async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                order = await conn.fetchrow('''
-                    SELECT o.*, u.user_id, u.username
-                    FROM orders o
-                    JOIN users u ON o.user_id = u.user_id
-                    WHERE o.id = $1
-                ''', order_id)
-                
-                if not order:
-                    await callback.message.answer("❌ الطلب غير موجود")
-                    return
-                
-                points = await get_points_per_order(db_pool)
-                
-                # تحديث حالة الطلب
-                await conn.execute(
-                    "UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1", 
-                    order_id
+            # جلب معلومات الطلب أولاً
+            order = await conn.fetchrow('''
+                SELECT o.*, u.user_id, u.username, u.total_points, u.vip_level, u.discount_percent
+                FROM orders o
+                JOIN users u ON o.user_id = u.user_id
+                WHERE o.id = $1
+            ''', order_id)
+            
+            if not order:
+                await callback.message.answer("❌ الطلب غير موجود")
+                return
+            
+            points = await get_points_per_order(db_pool)
+            
+            # ✅ تنفيذ كل التحديثات في استعلام واحد
+            await conn.execute('''
+                WITH updated_order AS (
+                    UPDATE orders 
+                    SET status = 'completed', 
+                        points_earned = $2,
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = $1
                 )
-                
-                # إضافة النقاط
-                await conn.execute(
-                    "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
-                    points, order['user_id']
-                )
-                
-                await conn.execute(
-                    "UPDATE orders SET points_earned = $1 WHERE id = $2", 
-                    points, order_id
-                )
-                
-                # تسجيل في سجل النقاط
-                await conn.execute('''
-                    INSERT INTO points_history (user_id, points, action, description, created_at)
-                    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-                ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
-                
-                # تحديث VIP
-                vip_info = await update_user_vip(db_pool, order['user_id'])
-                
-                if vip_info:
-                    vip_discount = vip_info.get('discount', 0)
-                    vip_level = vip_info.get('level', 0)
-                else:
-                    vip_discount = 0
-                    vip_level = 0
-                    
-                vip_icons = ["⚪", "🔵", "🟣", "🟡"]
-                vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
-                
-                user_points = await conn.fetchval(
-                    "SELECT total_points FROM users WHERE user_id = $1", 
-                    order['user_id']
-                ) or 0
-                
-                # ✅ مسح كاش المستخدم والطلب
-                await invalidate_user_cache(order['user_id'])
-                clear_cache(f"order_info:{order_id}")
+                UPDATE users 
+                SET total_points = total_points + $2,
+                    total_points_earned = total_points_earned + $2
+                WHERE user_id = $3
+            ''', order_id, points, order['user_id'])
+            
+            # ✅ تسجيل في سجل النقاط (استعلام منفصل)
+            await conn.execute('''
+                INSERT INTO points_history (user_id, points, action, description, created_at)
+                VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+            ''', order['user_id'], points, 'order_completed', f'نقاط من طلب مكتمل #{order_id}')
+            
+            # ✅ تحديث VIP (استعلام منفصل)
+            vip_info = await update_user_vip(db_pool, order['user_id'])
+            
+            # جلب النقاط الجديدة
+            user_points = await conn.fetchval(
+                "SELECT total_points FROM users WHERE user_id = $1", 
+                order['user_id']
+            ) or 0
         
-        # إرسال إشعار للمستخدم
+        # ✅ إعداد بيانات VIP للرسالة
+        if vip_info:
+            vip_discount = vip_info.get('discount', 0)
+            vip_level = vip_info.get('level', 0)
+        else:
+            vip_discount = 0
+            vip_level = 0
+            
+        vip_icons = ["⚪", "🔵", "🟣", "🟡"]
+        vip_icon = vip_icons[vip_level] if vip_level < len(vip_icons) else "⚪"
+        
+        # ✅ مسح كاش المستخدم
+        await invalidate_user_cache(order['user_id'])
+        clear_cache(f"order_info:{order_id}")
+        
+        # ✅ إرسال إشعار للمستخدم
         await notify_user_order_completed(
             bot, order, points, user_points, vip_icon, vip_level, vip_discount
         )
         
-        # ✅ إرسال رسالة جديدة للمجموعة (بدلاً من تعديل القديمة)
+        # ✅ إرسال رسالة للمجموعة
         await callback.message.answer(
             f"✅ **تم تأكيد تنفيذ الطلب #{order_id} بنجاح!**\n\n"
             f"تم إضافة {points} نقاط للمستخدم.",
