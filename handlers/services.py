@@ -61,8 +61,10 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     for cat in categories:
+        icon = cat.get('icon', '📁')
+        display_name = cat.get('display_name', 'قسم')
         builder.row(types.InlineKeyboardButton(
-            text=f"{cat['icon']} {cat['display_name']}", 
+            text=f"{icon} {display_name}", 
             callback_data=f"cat_{cat['id']}"
         ))
     
@@ -181,8 +183,10 @@ async def show_categories(message: types.Message, db_pool):
     
     builder = InlineKeyboardBuilder()
     for cat in categories:
+        icon = cat.get('icon', '📁')
+        display_name = cat.get('display_name', 'قسم')
         builder.row(types.InlineKeyboardButton(
-            text=f"{cat['icon']} {cat['display_name']}", 
+            text=f"{icon} {display_name}", 
             callback_data=f"cat_{cat['id']}"
         ))
     
@@ -215,7 +219,7 @@ async def handle_disabled_app(callback: types.CallbackQuery):
     app_id = int(callback.data.split("_")[2])
     
     await callback.answer(
-        "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+        "🔒 هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
         show_alert=True
     )
 
@@ -232,7 +236,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     
     async with db_pool.acquire() as conn:
         category = await conn.fetchrow(
-            "SELECT display_name FROM categories WHERE id = $1",
+            "SELECT display_name, icon FROM categories WHERE id = $1",
             cat_id
         )
         
@@ -256,11 +260,11 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     for app in apps:
         is_active = app['is_active']
         
-        # تحديد الأيقونة حسب حالة التطبيق ونوعه
+        # ✅ تحديد الأيقونة حسب حالة التطبيق (كلها تظهر مع قفل للمعطل)
         if not is_active:
             icon = "🔒"  # قفل للتطبيقات المعطلة
             status_text = " (متوقف)"
-            callback_data = f"disabled_app_{app['id']}"
+            callback_data = f"disabled_app_{app['id']}"  # نفس الكولباك
         else:
             # تعيين الأيقونة حسب نوع التطبيق للمفعلة
             if app['type'] == 'game':
@@ -284,7 +288,6 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             
             # عرض السعر مع إشارة الخصم
             if discount > 0:
-                original_price = final_price_usd * current_rate
                 if app['type'] == 'game' and min_units > 1:
                     button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units}) (خصم {discount}%)"
                 else:
@@ -295,7 +298,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
                 else:
                     button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
         else:
-            # للتطبيقات المعطلة - عرض رسالة التوقف فقط
+            # ✅ للتطبيقات المعطلة - تظهر مع قفل
             button_text = f"{icon} {app['name']} (متوقف)"
         
         buttons.append(types.InlineKeyboardButton(
@@ -315,9 +318,12 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_categories"
     ))
     
+    cat_icon = category.get('icon', '📁') if category else '📁'
+    cat_name = category['display_name'] if category else 'القسم'
+    
     # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
-        f"📱 **{category['display_name']}**\n\n"
+        f"{cat_icon} **{cat_name}**\n\n"
         f"👤 مستواك: {vip_icon} {vip_name} (خصم {discount}%)\n"
         f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
         f"🔒 التطبيقات المقفلة متوقفة حالياً\n\n"
@@ -336,8 +342,10 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     for cat in categories:
+        icon = cat.get('icon', '📁')
+        display_name = cat.get('display_name', 'قسم')
         builder.row(types.InlineKeyboardButton(
-            text=f"{cat['icon']} {cat['display_name']}", 
+            text=f"{icon} {display_name}", 
             callback_data=f"cat_{cat['id']}"
         ))
     
@@ -374,7 +382,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         # التحقق من حالة تفعيل التطبيق نفسه
         if not app['is_active']:
             await callback.answer(
-                "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+                "🔒 هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
                 show_alert=True
             )
             return
@@ -399,7 +407,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     })
     
     # جلب جميع الخيارات (المفعلة والمعطلة) من product_options
-    # ✅ product_options عنده كاش من database/products.py
     options = await get_product_options(db_pool, app_id)
     
     # إذا كان هناك خيارات، اعرضها كلها مع تمييز المعطل
@@ -410,7 +417,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             is_active = opt['is_active']
             opt_price = float(opt['price_usd']) if opt['price_usd'] is not None else 0.0
             
-            # تحديد الأيقونة حسب الحالة
+            # ✅ تحديد الأيقونة حسب الحالة (كلها تظهر)
             if is_active:
                 # أيقونة مناسبة حسب نوع التطبيق للمفعلة
                 if app_type == 'game':
@@ -435,7 +442,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
                 else:
                     button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
             else:
-                # للخيارات المعطلة - عرض رسالة التوقف فقط
+                # ✅ للخيارات المعطلة - تظهر مع قفل
                 button_text = f"{icon} {opt['name']} (متوقف)"
             
             builder.row(types.InlineKeyboardButton(
@@ -512,6 +519,19 @@ async def handle_disabled_option(callback: types.CallbackQuery):
     
     await callback.answer(
         "🔒 هذا الخيار متوقف حالياً، يرجى المحاولة لاحقاً أو اختيار خيار آخر",
+        show_alert=True
+    )
+
+@router.callback_query(F.data.startswith("disabled_app_"))
+async def handle_disabled_app(callback: types.CallbackQuery):
+    """معالج للتطبيقات المعطلة"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    app_id = int(callback.data.split("_")[2])
+    
+    await callback.answer(
+        "🔒 هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
         show_alert=True
     )
 
@@ -665,7 +685,6 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     
     variant_id = int(callback.data.split("_")[1])
     
-    # ✅ get_product_option عنده كاش من database/products.py
     option = await get_product_option(db_pool, variant_id)
     
     if not option:
@@ -760,7 +779,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     if not target_id:
         await message.answer(
             "⚠️ يرجى إدخال ID الحساب.",
-            reply_markup=get_cancel_keyboard()  # هنا لسه بنستخدم كيبورد الإلغاء
+            reply_markup=get_cancel_keyboard()
         )
         return
     
@@ -851,10 +870,9 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
     )
     
-    # إرسال رسالة التأكيد بدون كيبورد سفلي (reply_markup=None)
     await message.answer(
         msg,
-        reply_markup=builder.as_markup(),  # فقط أزرار إنلاين
+        reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     await state.set_state(OrderStates.confirm)
@@ -931,7 +949,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'target_id': data['target_id'],
                 }
             else:
-                # للتوافق مع الخدمات القديمة
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, quantity, unit_price_usd, 
@@ -968,7 +985,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     group_msg_id, order_id
                 )
             
-            # ✅ مسح كاش المستخدم بعد تغيير الرصيد
             from database.cache_utils import invalidate_user_cache
             await invalidate_user_cache(callback.from_user.id)
     
@@ -980,7 +996,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    # ✅ تعديل الرسالة الحالية فقط (بدون كيبورد)
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
@@ -991,7 +1006,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
         parse_mode="Markdown"
     )
     
-    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية (إنلاين)
     await callback.message.answer(
         "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
         reply_markup=get_main_menu_keyboard(is_admin)
@@ -1002,20 +1016,17 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
 @router.callback_query(F.data == "cancel_order")
 async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """إلغاء الطلب"""
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     await state.clear()
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    # ✅ تعديل رسالة الإلغاء بدون كيبورد
     await callback.message.edit_text(
         "❌ **تم إلغاء الطلب.**",
         parse_mode="Markdown"
     )
     
-    # ✅ إرسال رسالة جديدة مع القائمة الرئيسية (إنلاين)
     await callback.message.answer(
         "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
         reply_markup=get_main_menu_keyboard(is_admin)
