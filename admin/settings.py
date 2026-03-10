@@ -62,33 +62,42 @@ async def get_cached_bot_status(db_pool) -> bool:
     return await get_bot_status(db_pool)  # ✅ مباشرة
 
 # تشغيل/إيقاف البوت
+# admin/settings.py - دالة toggle_bot
 @router.callback_query(F.data == "toggle_bot")
 async def toggle_bot(callback: types.CallbackQuery, db_pool):
     """تشغيل أو إيقاف البوت"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ التحقق من أن المستخدم هو المالك
     if not is_owner(callback.from_user.id):
         return await callback.answer("⚠️ فقط المالك يمكنه تشغيل/إيقاف البوت", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
-    
     start_time = time.time()
     
-    # ✅ استخدام الدوال المستوردة مباشرة
-    current_status = await get_cached_bot_status(db_pool)
+    # ⚠️ IMPORTANT: تجاهل الكاش تماماً وجلب القيمة الحقيقية من قاعدة البيانات
+    from database.core import get_bot_status, set_bot_status
+    from handlers.middleware import refresh_bot_status_cache
+    
+    # ✅ جلب القيمة الحقيقية من قاعدة البيانات مباشرة (بدون كاش)
+    async with db_pool.acquire() as conn:
+        db_status = await conn.fetchval(
+            "SELECT value FROM bot_settings WHERE key = 'bot_status'"
+        )
+        current_status = (db_status == 'running')
+    
     new_status = not current_status
     
-    # ✅ طباعة للتحقق
-    logger.info(f"🔄 تغيير حالة البوت: {current_status} -> {new_status}")
+    logger.info(f"🔄 تغيير حالة البوت: {current_status} ({'🟢' if current_status else '🔴'}) -> {new_status}")
     
+    # ✅ تحديث قاعدة البيانات
     await set_bot_status(db_pool, new_status)
-    await refresh_bot_status_cache(db_pool)
     
-    # ✅ مسح الكاش
+    # ✅ مسح الكاش نهائياً
     clear_cache("bot_status")
+    
+    # ✅ تحديث كاش الميدل وير
+    await refresh_bot_status_cache(db_pool)
     
     status_text = "🟢 يعمل" if new_status else "🔴 متوقف"
     action_text = "تشغيل" if new_status else "إيقاف"
