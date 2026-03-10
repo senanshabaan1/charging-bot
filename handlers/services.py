@@ -322,6 +322,8 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
 
 # ============= بدء الطلب =============
 
+# ============= بدء الطلب =============
+
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء طلب شراء مع تطبيق الخصم - عرض جميع الخيارات مع تمييز المعطل"""
@@ -411,9 +413,10 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
                 callback_data=callback_data
             ))
         
+        # ✅ زر الرجوع الصحيح - يرجع للقسم وليس إلغاء
         builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data=f"cat_{app_dict['category_id']}"
+            text="🔙 رجوع للقسم",
+            callback_data=f"cat_{app_dict['category_id']}"  # يرجع للقسم
         ))
         
         # رسالة مناسبة حسب نوع التطبيق
@@ -461,11 +464,11 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         await state.set_state(OrderStates.qty)
         
-        # استخدام callback.message.edit_text بدلاً من إرسال رسالة جديدة
+        # ✅ زر الرجوع الصحيح - يرجع للقسم
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data="cancel_order"
+            text="🔙 رجوع للقسم",
+            callback_data=f"cat_{app_dict['category_id']}"  # يرجع للقسم
         ))
         
         await callback.message.edit_text(
