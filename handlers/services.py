@@ -1,4 +1,5 @@
-# handlers/services.py
+# handlers/services.py - التعديلات النهائية
+
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -8,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from datetime import datetime
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
-from handlers.keyboards import get_back_keyboard, get_main_menu_keyboard, get_cancel_keyboard
+from handlers.keyboards import get_main_menu_keyboard, get_cancel_keyboard, get_back_keyboard
 from database.users import is_admin_user
 from database.core import get_exchange_rate
 from database.vip import get_user_vip
@@ -25,7 +26,7 @@ class OrderStates(StatesGroup):
     confirm = State()
     choosing_variant = State()
 
-# دالة مساعدة للتخزين المؤقت (يمكن تطويرها لاحقاً)
+# دالة مساعدة للتخزين المؤقت
 async def get_cached_categories(db_pool):
     """جلب الأقسام مع إمكانية التخزين المؤقت"""
     async with db_pool.acquire() as conn:
@@ -40,8 +41,6 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     categories = await get_cached_categories(db_pool)
     
     if not categories:
-        is_admin = await is_admin_user(db_pool, callback.from_user.id)
-        # تعديل هنا: استخدام edit_text بدلاً من إرسال رسالة جديدة
         await callback.message.edit_text(
             "⚠️ لا توجد أقسام متاحة حالياً."
         )
@@ -865,10 +864,10 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
     )
     
-    # إرسال رسالة التأكيد بدون كيبورد سفلي (reply_markup=None)
+    # إرسال رسالة التأكيد بدون كيبورد سفلي
     await message.answer(
         msg,
-        reply_markup=builder.as_markup(),  # فقط أزرار إنلاين
+        reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     await state.set_state(OrderStates.confirm)
