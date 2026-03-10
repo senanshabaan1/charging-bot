@@ -26,7 +26,6 @@ ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("👤 معلومات مستخدم", "user_info"),
     ("⭐ إدارة النقاط", "manage_points"),
     ("📊 تقارير ونسخ", "reports_menu"),
-    ("➕ إضافة منتج", "add_product"),
     ("✏️ تعديل منتج", "edit_product"),
     ("🗑️ حذف منتج", "delete_product"),
     ("📱 عرض المنتجات", "list_products"),
@@ -39,7 +38,6 @@ ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("🔄 تفعيل/إيقاف التطبيقات", "manage_apps_status"),
     ("🎮 إدارة خيارات الألعاب", "manage_options"),
     ("📁 إدارة الأقسام", "manage_categories"),
-    ("➕ إضافة قسم", "add_category"),
     ("🏠 القائمة الرئيسية", "back_to_main"),
 ]
 
