@@ -40,6 +40,7 @@ ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("🎮 إدارة خيارات الألعاب", "manage_options"),
     ("📁 إدارة الأقسام", "manage_categories"),
     ("➕ إضافة قسم", "add_category"),
+    ("🏠 القائمة الرئيسية", "back_to_main"),
 ]
 
 # ✅ كاش لحالة البوت
