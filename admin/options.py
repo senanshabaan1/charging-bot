@@ -558,7 +558,7 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
         types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="manage_options")
     )
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 # ============= تعديل خيار =============
 
