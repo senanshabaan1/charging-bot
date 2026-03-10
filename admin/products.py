@@ -532,6 +532,7 @@ async def execute_delete_product(callback: types.CallbackQuery, db_pool):
     )
 
 # عرض المنتجات
+# عرض المنتجات
 @router.callback_query(F.data == "list_products")
 async def list_products(callback: types.CallbackQuery, db_pool):
     """عرض جميع المنتجات"""
@@ -553,7 +554,19 @@ async def list_products(callback: types.CallbackQuery, db_pool):
         ''')
     
     if not products:
-        return await callback.answer("❌ لا توجد منتجات", show_alert=True)
+        # ✅ إذا ما في منتجات، عرض رسالة مع زر رجوع
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(
+            text="🔙 رجوع للوحة التحكم", 
+            callback_data="back_to_admin"
+        ))
+        
+        await safe_edit_message(
+            callback.message,
+            "❌ لا توجد منتجات",
+            reply_markup=builder.as_markup()
+        )
+        return
     
     # تجميع المنتجات حسب القسم
     products_by_category = {}
@@ -580,17 +593,27 @@ async def list_products(callback: types.CallbackQuery, db_pool):
     elapsed_time = time.time() - start_time
     text += f"\n⚡ وقت التحميل: {elapsed_time:.2f} ثانية"
     
+    # ✅ إضافة زر الرجوع للوحة التحكم
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للوحة التحكم", 
+        callback_data="back_to_admin"
+    ))
+    
     # تقسيم النص إذا كان طويلاً
     if len(text) > 4000:
         parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
         for i, part in enumerate(parts):
             if i == 0:
-                await safe_edit_message(callback.message, part)
+                await safe_edit_message(callback.message, part, reply_markup=builder.as_markup() if i == len(parts)-1 else None)
             else:
-                await callback.message.answer(part)
+                await callback.message.answer(part, reply_markup=builder.as_markup() if i == len(parts)-1 else None)
     else:
-        await safe_edit_message(callback.message, text)
-
+        await safe_edit_message(
+            callback.message, 
+            text, 
+            reply_markup=builder.as_markup()
+        )
 @router.callback_query(F.data == "cancel_del")
 async def cancel_action(callback: types.CallbackQuery):
     """إلغاء عملية الحذف"""
