@@ -174,6 +174,7 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
     await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_cancel_keyboard())
     await state.set_state(SettingsStates.waiting_new_syriatel_numbers)
 
+# admin/settings.py - تحديث دالة save_syriatel_numbers
 @router.message(SettingsStates.waiting_new_syriatel_numbers)
 async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
     """حفظ أرقام سيرياتل الجديدة"""
@@ -187,7 +188,6 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
     invalid_numbers = []
     
     for num in numbers:
-        # إزالة أي مسافات أو شرطات
         clean_num = num.replace(' ', '').replace('-', '').replace('+', '')
         if clean_num.isdigit() and len(clean_num) >= 8:
             valid_numbers.append(clean_num)
@@ -201,15 +201,21 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
             reply_markup=get_cancel_keyboard()
         )
     
+    # ✅ تحديث قاعدة البيانات
     success = await set_syriatel_numbers(db_pool, valid_numbers)
     
     if success:
         import config
+        # ✅ تحديث config فوراً
         config.SYRIATEL_NUMS = valid_numbers
+        
+        # ✅ طباعة للتحقق
+        logger.info(f"📞 تم تحديث أرقام سيرياتل في config: {config.SYRIATEL_NUMS}")
         
         text = "✅ **تم تحديث أرقام سيرياتل كاش بنجاح!**\n\nالأرقام الجديدة:\n"
         for i, num in enumerate(valid_numbers, 1):
             text += f"{i}. `{num}`\n"
+        text += "\n🔄 التحديث فوري في جميع أنحاء البوت!"
     else:
         text = "❌ **فشل تحديث الأرقام**"
     
