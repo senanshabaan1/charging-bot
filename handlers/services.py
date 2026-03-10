@@ -666,6 +666,8 @@ async def handle_confirm_state(message: types.Message, state: FSMContext):
 
 # ============= اختيار الفئة =============
 
+# ============= اختيار الفئة =============
+
 @router.callback_query(F.data.startswith("var_"))
 async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """اختيار خيار (لجميع أنواع المنتجات) مع عرض الوصف"""
@@ -688,6 +690,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     discount = data['discount']
     vip_level = data['vip_level']
     app_type = data.get('app_type', 'service')
+    app_id = app['id']  # معرف التطبيق
     
     app_profit = float(app.get('profit_percentage', 0) or 0)
     opt_price = float(option['price_usd']) if option['price_usd'] is not None else 0.0
@@ -738,11 +741,11 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     else:
         instructions = "🎯 **يرجى إرسال الحساب المستهدف:**"
     
-    # استخدام builder للرجوع
+    # ✅ زر الرجوع للخيارات السابقة
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
-        callback_data="cancel_order"
+        text="🔙 رجوع للخيارات",
+        callback_data=f"back_to_options_{app_id}_{app_type}"  # يرجع للخيارات
     ))
     
     await callback.message.edit_text(
@@ -750,6 +753,103 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
         reply_markup=builder.as_markup()
     )
     await state.set_state(OrderStates.target_id)
+
+@router.callback_query(F.data.startswith("back_to_options_"))
+async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """الرجوع إلى شاشة اختيار الخيارات"""
+    await callback.answer()
+    
+    parts = callback.data.split("_")
+    app_id = int(parts[3])
+    app_type = parts[4]
+    
+    # إعادة عرض خيارات التطبيق
+    async with db_pool.acquire() as conn:
+        app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", app_id)
+        options = await conn.fetch(
+            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
+            app_id
+        )
+        
+        current_rate = await get_exchange_rate(db_pool)
+        user_vip = await get_user_vip(db_pool, callback.from_user.id)
+        discount = user_vip.get('discount_percent', 0)
+        vip_level = user_vip.get('vip_level', 0)
+    
+    if not app:
+        await callback.answer("التطبيق غير موجود", show_alert=True)
+        return
+    
+    app_dict = dict(app)
+    app_dict['unit_price_usd'] = float(app_dict['unit_price_usd']) if app_dict['unit_price_usd'] is not None else 0.0
+    app_dict['profit_percentage'] = float(app_dict.get('profit_percentage', 0) or 0)
+    
+    # تحديث الـ state
+    await state.update_data({
+        'app': app_dict,
+        'app_type': app_type,
+        'current_rate': current_rate,
+        'discount': discount,
+        'vip_level': vip_level
+    })
+    
+    # بناء كيبورد الخيارات
+    builder = InlineKeyboardBuilder()
+    
+    for opt in options:
+        is_active = opt['is_active']
+        opt_price = float(opt['price_usd']) if opt['price_usd'] is not None else 0.0
+        
+        if is_active:
+            if app_type == 'game':
+                icon = "🎮"
+            elif app_type == 'subscription':
+                icon = "📅"
+            else:
+                icon = "📱"
+            callback_data = f"var_{opt['id']}"
+        else:
+            icon = "🔒"
+            callback_data = f"disabled_option_{opt['id']}"
+        
+        if is_active:
+            price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
+            discounted_price_usd = price_with_profit * (1 - discount/100)
+            price_syp = discounted_price_usd * current_rate
+            
+            if discount > 0:
+                button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
+            else:
+                button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
+        else:
+            button_text = f"{icon} {opt['name']} (متوقف)"
+        
+        builder.row(types.InlineKeyboardButton(
+            text=button_text,
+            callback_data=callback_data
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع للقسم",
+        callback_data=f"cat_{app_dict['category_id']}"
+    ))
+    
+    type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "خدمة"
+    active_count = sum(1 for opt in options if opt['is_active'])
+    disabled_count = len(options) - active_count
+    status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً" if disabled_count > 0 else ""
+    
+    await callback.message.edit_text(
+        f"**{app_dict['name']}**\n\n"
+        f"📱 **النوع:** {type_name}\n"
+        f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
+        f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
+        f"{status_message}\n\n"
+        "🔸 **اختر الخيار المناسب:**\n"
+        "🔒 الخيارات المقفلة متوقفة مؤقتاً",
+        reply_markup=builder.as_markup()
+    )
+    await state.set_state(OrderStates.choosing_variant)
 
 # ============= استلام الهدف والتأكيد =============
 
