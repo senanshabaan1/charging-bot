@@ -52,7 +52,6 @@ async def get_maintenance_message(pool):
 
 # ============= سعر الصرف =============
 
-@cached(ttl=30, key_prefix="exchange_rate")
 async def get_exchange_rate(pool):
     """جلب سعر الصرف مع كاش 30 ثانية"""
     try:
