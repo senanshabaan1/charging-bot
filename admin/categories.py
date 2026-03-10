@@ -591,6 +591,8 @@ async def delete_category_confirm(callback: types.CallbackQuery, db_pool):
         logger.error(f"خطأ في delete_category_confirm: {e}")
         await callback.answer("❌ حدث خطأ", show_alert=True)
 
+# admin/categories.py - تحديث دالة delete_category_execute
+
 @router.callback_query(F.data.startswith("confirm_del_cat_"))
 async def delete_category_execute(callback: types.CallbackQuery, db_pool):
     """تنفيذ حذف القسم"""
@@ -602,28 +604,46 @@ async def delete_category_execute(callback: types.CallbackQuery, db_pool):
         
         async with db_pool.acquire() as conn:
             async with conn.transaction():
+                # جلب معلومات القسم قبل الحذف
                 category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
                 if not category:
                     return await callback.answer("❌ القسم غير موجود", show_alert=True)
                 
+                # منع حذف القسم الافتراضي
                 if category['name'] == 'chat_apps':
                     return await callback.answer("❌ لا يمكن حذف القسم الافتراضي", show_alert=True)
                 
-                # حذف المنتجات المرتبطة أولاً
-                deleted_products = await conn.fetchval(
-                    "DELETE FROM applications WHERE category_id = $1 RETURNING COUNT(*)",
+                # ✅ حساب عدد المنتجات قبل الحذف
+                products_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM applications WHERE category_id = $1",
                     cat_id
-                ) or 0
+                )
                 
-                # حذف القسم
-                await conn.execute("DELETE FROM categories WHERE id = $1", cat_id)
+                # ✅ حذف المنتجات المرتبطة أولاً
+                await conn.execute(
+                    "DELETE FROM applications WHERE category_id = $1",
+                    cat_id
+                )
+                
+                # ✅ حذف القسم
+                await conn.execute(
+                    "DELETE FROM categories WHERE id = $1",
+                    cat_id
+                )
         
         # ✅ مسح الكاش بعد الحذف
         clear_cache("categories")
         clear_cache("category_products_count")
         
-        await callback.answer(f"✅ تم حذف القسم {category['display_name']} و {deleted_products} منتج بنجاح")
+        # ✅ رسالة نجاح مع العدد
+        await callback.answer(
+            f"✅ تم حذف القسم {category['display_name']} و {products_count} منتج بنجاح",
+            show_alert=True
+        )
+        
+        # ✅ العودة لقائمة الأقسام
         await delete_category_list(callback, db_pool)
+        
     except Exception as e:
-        logger.error(f"خطأ في delete_category_execute: {e}")
+        logger.error(f"❌ خطأ في delete_category_execute: {e}")
         await callback.answer(f"❌ حدث خطأ: {str(e)}", show_alert=True)
