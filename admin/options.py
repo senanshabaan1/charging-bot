@@ -527,7 +527,10 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     else:
         text += f"**الخيارات الحالية ({len(options)}):**\n\n"
         for i, opt in enumerate(options, 1):
-            text += f"**{i}. {opt['name']}**\n"
+            status_icon = "✅" if opt['is_active'] else "🔒"
+            status_text = "" if opt['is_active'] else " (متوقف)"
+            
+            text += f"**{i}. {status_icon} {opt['name']}{status_text}**\n"
             text += f"   🆔 `{opt['id']}`\n"
             text += f"   📦 الكمية: {opt['quantity']}\n"
             text += f"   💰 سعر المورد: ${float(opt['price_usd']):.3f}\n"
@@ -539,22 +542,23 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
     
     for opt in options:
+        # زر تعديل
         builder.row(
             types.InlineKeyboardButton(text=f"✏️ تعديل {opt['name']}", callback_data=f"edit_option_{opt['id']}"),
+            # زر تشغيل/إيقاف
+            types.InlineKeyboardButton(
+                text=f"{'🔒 تعطيل' if opt['is_active'] else '✅ تفعيل'} {opt['name']}", 
+                callback_data=f"toggle_option_{opt['id']}_{'1' if opt['is_active'] else '0'}"
+            ),
             types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
-    # أزرار إضافية حسب نوع المنتج
-    if product['type'] == 'game':
-        builder.row(types.InlineKeyboardButton(text="🎮 قوالب ألعاب", callback_data=f"templates_menu_{product_id}"))
-    elif product['type'] == 'subscription':
-        builder.row(types.InlineKeyboardButton(text="📅 قوالب اشتراكات", callback_data=f"templates_menu_{product_id}"))
-    else:  # service
-        builder.row(types.InlineKeyboardButton(text="📱 قوالب خدمات", callback_data=f"templates_menu_{product_id}"))
+    builder.row(
+        types.InlineKeyboardButton(text="🔙 رجوع للقسم", callback_data=f"manage_opts_cat_{product['category_id']}"),
+        types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="manage_options")
+    )
     
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
-    
-    await message.answer(text, reply_markup=builder.as_markup())
+    await callback.message.edit_text(text, reply_markup=builder.as_markup())
 
 # ============= تعديل خيار =============
 
