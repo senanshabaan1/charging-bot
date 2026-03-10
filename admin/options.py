@@ -254,7 +254,20 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
             "SELECT * FROM categories WHERE id = $1",
             cat_id
         )
-        products = await get_cached_apps_by_category(db_pool, cat_id)
+        products = await conn.fetch('''
+            SELECT a.id, a.name, a.type, a.is_active
+            FROM applications a
+            WHERE a.category_id = $1
+            ORDER BY a.is_active DESC, a.name
+        ''', cat_id)
+        
+        # جلب عدد الخيارات لكل منتج بشكل منفصل
+        for product in products:
+            options_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                product['id']
+            ) or 0
+            product['options_count'] = options_count
     
     if not products:
         icon = category.get('icon', '📁')
@@ -287,7 +300,9 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
             icon = PRODUCT_TYPE_ICONS.get(product['type'], "📱")
             status = ""
         
-        options_info = f" [{product['options_count']} خيار]" if product['options_count'] > 0 else ""
+        # ✅ استخدام get مع قيمة افتراضية
+        options_count = product.get('options_count', 0)
+        options_info = f" [{options_count} خيار]" if options_count > 0 else ""
         button_text = f"{icon} {product['name']}{status}{options_info}"
         
         builder.row(types.InlineKeyboardButton(
