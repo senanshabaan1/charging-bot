@@ -12,9 +12,10 @@ from handlers.keyboards import get_confirmation_keyboard, get_cancel_keyboard
 from utils import is_admin, is_owner, safe_edit_message, format_amount, get_formatted_damascus_time
 from cache import cached, clear_cache  # ✅ استيراد الكاش
 
-# ✅ استيراد دوال قاعدة البيانات هنا (الأهم!)
-from database.core import get_exchange_rate, set_exchange_rate
-from database.settings import (
+# ✅ استيراد دوال قاعدة البيانات من core.py (التعديل هنا)
+from database.core import (
+    get_exchange_rate, 
+    set_exchange_rate,
     get_bot_status, 
     set_bot_status, 
     get_syriatel_numbers, 
@@ -40,19 +41,19 @@ CACHE_TTL_MAINTENANCE = 60  # دقيقة
 @cached(ttl=CACHE_TTL_RATE, key_prefix="exchange_rate")
 async def get_cached_exchange_rate(db_pool) -> float:
     """جلب سعر الصرف مع كاش 30 ثانية"""
-    return await get_exchange_rate(db_pool)  # ✅ الآن الدالة موجودة
+    return await get_exchange_rate(db_pool)
 
 # ✅ كاش لأرقام سيرياتل
 @cached(ttl=CACHE_TTL_SYRIATEL, key_prefix="syriatel_numbers")
 async def get_cached_syriatel_numbers(db_pool) -> List[str]:
     """جلب أرقام سيرياتل مع كاش دقيقتين"""
-    return await get_syriatel_numbers(db_pool)  # ✅ الآن الدالة موجودة
+    return await get_syriatel_numbers(db_pool)
 
 # ✅ كاش لرسالة الصيانة
 @cached(ttl=CACHE_TTL_MAINTENANCE, key_prefix="maintenance_message")
 async def get_cached_maintenance_message(db_pool) -> str:
     """جلب رسالة الصيانة مع كاش دقيقة"""
-    return await get_maintenance_message(db_pool)  # ✅ الآن الدالة موجودة
+    return await get_maintenance_message(db_pool)
 
 # ✅ كاش لحالة البوت
 @cached(ttl=30, key_prefix="bot_status")
