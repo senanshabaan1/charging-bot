@@ -62,6 +62,7 @@ async def get_cached_bot_status(db_pool) -> bool:
     return await get_bot_status(db_pool)
 
 # تشغيل/إيقاف البوت
+# admin/settings.py - دالة toggle_bot
 @router.callback_query(F.data == "toggle_bot")
 async def toggle_bot(callback: types.CallbackQuery, db_pool):
     """تشغيل أو إيقاف البوت"""
@@ -77,16 +78,17 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     
     start_time = time.time()
     
-    from database import get_bot_status, set_bot_status
-    from handlers.middleware import refresh_bot_status_cache
-    
+    # جلب الحالة الحالية
     current_status = await get_cached_bot_status(db_pool)
-    new_status = not current_status
+    new_status = not current_status  # ✅ هذا boolean (True/False)
     
-    await set_bot_status(db_pool, new_status)
+    # تحديث في قاعدة البيانات
+    await set_bot_status(db_pool, new_status)  # ✅ نرسل boolean
+    
+    # تحديث الكاش
     await refresh_bot_status_cache(db_pool)
     
-    # ✅ مسح الكاش
+    # مسح الكاش
     clear_cache("bot_status")
     
     status_text = "🟢 يعمل" if new_status else "🔴 متوقف"
