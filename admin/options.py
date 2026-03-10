@@ -100,22 +100,20 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
     
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE applications SET is_active = $1 WHERE id = $2", new_status, app_id)
-        app = await conn.fetchrow("SELECT name FROM applications WHERE id = $1", app_id)
+        app = await conn.fetchrow("SELECT name, category_id FROM applications WHERE id = $1", app_id)
     
     status_text = "✅ مفعل" if new_status else "❌ معطل"
     await callback.answer(f"تم تغيير حالة {app['name']} إلى {status_text}")
     
     # العودة لقائمة التطبيقات
-    async with db_pool.acquire() as conn:
-        app_info = await conn.fetchrow("SELECT category_id FROM applications WHERE id = $1", app_id)
-    
     await show_apps_for_status(
         types.CallbackQuery(
             id=callback.id,
             from_user=callback.from_user,
             chat_instance="dummy",
             message=callback.message,
-            data=f"app_status_cat_{app_info['category_id']}"
+            data=f"app_status_cat_{app['category_id']}",
+            bot=callback.bot
         ), 
         db_pool
     )
@@ -182,8 +180,7 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
         )
         
         products = await conn.fetch('''
-            SELECT a.id, a.name, a.type, a.is_active,
-                   (SELECT COUNT(*) FROM product_options WHERE product_id = a.id) as options_count
+            SELECT a.id, a.name, a.type, a.is_active
             FROM applications a
             WHERE a.category_id = $1
             ORDER BY a.is_active DESC, a.name
@@ -209,6 +206,13 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
     
     # تجميع الأزرار في أعمدة
     for product in products:
+        # جلب عدد الخيارات لكل منتج بشكل منفصل
+        async with db_pool.acquire() as conn:
+            options_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
+                product['id']
+            )
+        
         # تحديد الأيقونة حسب النوع والحالة
         if not product['is_active']:
             icon = "🔒"
@@ -223,7 +227,7 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
             icon = "📱"
             status = ""
         
-        options_info = f" [{product['options_count']} خيار]" if product['options_count'] > 0 else ""
+        options_info = f" [{options_count} خيار]" if options_count > 0 else ""
         
         button_text = f"{icon} {product['name']}{status}{options_info}"
         
@@ -576,7 +580,6 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
         builder.row(types.InlineKeyboardButton(text="📝 تعديل الاسم", callback_data=f"edit_fld_name_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="🔢 تعديل الكمية", callback_data=f"edit_fld_quantity_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="💰 تعديل سعر المورد", callback_data=f"edit_fld_price_{option_id}"))
-        builder.row(types.InlineKeyboardButton(text="📈 تعديل نسبة الربح", callback_data=f"edit_fld_profit_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="📝 تعديل الوصف", callback_data=f"edit_fld_desc_{option_id}"))
         
         # إضافة زر لتشغيل/إيقاف الخيار
@@ -621,7 +624,7 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
         field_type = parts[2]
         option_id = int(parts[3])
         
-        field_names = {'name': 'الاسم', 'quantity': 'الكمية', 'price': 'سعر المورد', 'profit': 'نسبة الربح', 'desc': 'الوصف'}
+        field_names = {'name': 'الاسم', 'quantity': 'الكمية', 'price': 'سعر المورد', 'desc': 'الوصف'}
         field_name = field_names.get(field_type, field_type)
         
         await state.update_data(edit_field=field_type, option_id=option_id)
@@ -630,7 +633,6 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
             'name': "أدخل الاسم الجديد:",
             'quantity': "أدخل الكمية الجديدة (رقم فقط):",
             'price': "أدخل سعر المورد الجديد (بالدولار):",
-            'profit': "أدخل نسبة الربح الجديدة (%):",
             'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
         }
         
@@ -709,19 +711,6 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                 await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):", reply_markup=get_cancel_keyboard())
                 return
             
-        elif field == 'profit':
-            try:
-                profit = float(value)
-                if profit < 0:
-                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
-                    return
-                update_value = profit
-                field_name = "نسبة الربح"
-                db_column = "profit_percentage"
-            except ValueError:
-                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):", reply_markup=get_cancel_keyboard())
-                return
-            
         elif field == 'desc':
             update_value = None if value == '-' else value
             field_name = "الوصف"
@@ -733,47 +722,34 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
             return
         
         async with db_pool.acquire() as conn:
-            if field == 'profit':
-                option = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
-                if option:
-                    await conn.execute(f"UPDATE applications SET {db_column} = $1 WHERE id = $2", update_value, option['product_id'])
-                    product = await conn.fetchrow("SELECT name FROM applications WHERE id = $1", option['product_id'])
-                    product_name = product['name'] if product else "المنتج"
-                    await message.answer(f"✅ تم تحديث {field_name} للمنتج **{product_name}** بنجاح!")
-                else:
-                    await message.answer("❌ لم يتم العثور على الخيار")
-                    await state.clear()
-                    return
-            else:
-                query = f'UPDATE product_options SET "{db_column}" = $1 WHERE id = $2'
-                await conn.execute(query, update_value, option_id)
-                
-                updated_option = await conn.fetchrow(
-                    "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
-                    option_id
+            # تحديث القيمة في قاعدة البيانات
+            query = f'UPDATE product_options SET "{db_column}" = $1 WHERE id = $2'
+            await conn.execute(query, update_value, option_id)
+            
+            # جلب المعلومات المحدثة
+            updated_option = await conn.fetchrow(
+                "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
+                option_id
+            )
+            
+            if updated_option:
+                await message.answer(
+                    f"✅ **تم التحديث بنجاح!**\n\n"
+                    f"📦 المنتج: **{updated_option['product_name']}**\n"
+                    f"🔧 الخيار: **{updated_option['name']}**\n"
+                    f"📝 الحقل المعدل: **{field_name}**\n"
+                    f"📊 القيمة الجديدة: **{update_value}**"
                 )
-                
-                if updated_option:
-                    await message.answer(
-                        f"✅ **تم التحديث بنجاح!**\n\n"
-                        f"📦 المنتج: **{updated_option['product_name']}**\n"
-                        f"🔧 الخيار: **{updated_option['name']}**\n"
-                        f"📝 الحقل المعدل: **{field_name}**\n"
-                        f"📊 القيمة الجديدة: **{update_value}**"
-                    )
-                else:
-                    await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
+                product_id = updated_option['product_id']
+            else:
+                await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
+                # جلب product_id بشكل منفصل
+                opt = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
+                product_id = opt['product_id'] if opt else None
         
         await state.clear()
         
         # العودة لقائمة الخيارات
-        if 'updated_option' in locals() and updated_option:
-            product_id = updated_option['product_id']
-        else:
-            async with db_pool.acquire() as conn:
-                opt = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
-                product_id = opt['product_id'] if opt else None
-        
         if product_id:
             builder = InlineKeyboardBuilder()
             builder.row(types.InlineKeyboardButton(text="🔙 العودة لقائمة الخيارات", callback_data=f"prod_options_{product_id}"))
@@ -824,19 +800,20 @@ async def delete_option_execute(callback: types.CallbackQuery, db_pool):
     product_id = option['product_id']
     
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE product_options SET is_active = FALSE WHERE id = $1", option_id)
+        await conn.execute("DELETE FROM product_options WHERE id = $1", option_id)
     
     await callback.answer("✅ تم حذف الخيار بنجاح")
     
     # العودة لقائمة الخيارات
-    fake_callback = types.CallbackQuery(
-        id='0',
+    new_callback = types.CallbackQuery(
+        id=callback.id,
         from_user=callback.from_user,
+        chat_instance=callback.chat_instance,
         message=callback.message,
         data=f"prod_options_{product_id}",
         bot=callback.bot
     )
-    await show_product_options(fake_callback, db_pool)
+    await show_product_options(new_callback, db_pool)
 
 # ============= تشغيل/إيقاف الخيارات =============
 
