@@ -15,8 +15,6 @@ from database.vip import get_user_vip
 from database.points import get_points_per_order
 from database.products import get_product_options, get_product_option
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
-from cache import cached, clear_cache  # ✅ استيراد الكاش
-
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -25,24 +23,54 @@ class OrderStates(StatesGroup):
     target_id = State()
     confirm = State()
     choosing_variant = State()
-
-# ✅ إضافة كاش للدالة التي تجلب الأقسام
-@cached(ttl=60, key_prefix="categories")
-async def get_cached_categories(db_pool):
-    """جلب الأقسام مع كاش 60 ثانية"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
-
-# ✅ إضافة كاش للتطبيقات في قسم معين
-@cached(ttl=30, key_prefix="apps_by_category")
-async def get_cached_apps_by_category(db_pool, category_id):
-    """جلب التطبيقات في قسم معين مع كاش 30 ثانية"""
-    async with db_pool.acquire() as conn:
-        return await conn.fetch(
-            "SELECT * FROM applications WHERE category_id = $1 ORDER BY is_active DESC, name",
-            category_id
+# ============= معالج الكولباك للقائمة الرئيسية =============
+@router.callback_query(F.data == "show_categories")
+async def show_categories_callback(callback: types.CallbackQuery, db_pool):
+    """عرض الأقسام من القائمة الإنلاين"""
+    await callback.answer()
+    
+    categories = await get_cached_categories(db_pool)
+    
+    if not categories:
+        is_admin = await is_admin_user(db_pool, callback.from_user.id)
+        await callback.message.edit_text(
+            "⚠️ لا توجد أقسام متاحة حالياً.",
+            reply_markup=get_main_menu_keyboard(is_admin)
         )
+        return
+    
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        icon = cat.get('icon', '📁')
+        display_name = cat.get('display_name', 'قسم')
+        builder.row(types.InlineKeyboardButton(
+            text=f"{icon} {display_name}", 
+            callback_data=f"cat_{cat['id']}"
+        ))
+    
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع", 
+        callback_data="back_to_main"
+    ))
+    
+    await callback.message.edit_text(
+        "🌟 **اختر القسم:**\n\n"
+        "🔸 اختر الفئة التي تريدها:", 
+        reply_markup=builder.as_markup()
+    )
 
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_callback(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """العودة للقائمة الرئيسية"""
+    await callback.answer()
+    await state.clear()
+    
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    
+    await callback.message.edit_text(
+        "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
+        reply_markup=get_main_menu_keyboard(is_admin)
+    )
 async def send_order_to_group(bot: Bot, order_data: dict):
     """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
@@ -121,8 +149,8 @@ async def global_back_handler(message: types.Message, state: FSMContext, db_pool
 @router.message(F.text == "📱 خدمات الشحن")
 async def show_categories(message: types.Message, db_pool):
     """عرض الأقسام أولاً"""
-    # ✅ استخدام الكاش
-    categories = await get_cached_categories(db_pool)
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
     
     if not categories:
         is_admin = await is_admin_user(db_pool, message.from_user.id)
@@ -153,9 +181,6 @@ async def show_categories(message: types.Message, db_pool):
 @router.callback_query(F.data.startswith("disabled_app_"))
 async def handle_disabled_app(callback: types.CallbackQuery):
     """معالج للتطبيقات المعطلة"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     app_id = int(callback.data.split("_")[2])
     
     await callback.answer(
@@ -166,24 +191,23 @@ async def handle_disabled_app(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     """عرض التطبيقات في قسم معين - مع تمييز التطبيقات المعطلة"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     cat_id = int(callback.data.split("_")[1])
     
-    # ✅ استخدام الكاش للتطبيقات
-    apps = await get_cached_apps_by_category(db_pool, cat_id)
-    
     async with db_pool.acquire() as conn:
+        # جلب جميع التطبيقات في القسم (سواء مفعلة أو معطلة)
+        apps = await conn.fetch(
+            "SELECT * FROM applications WHERE category_id = $1 ORDER BY is_active DESC, name",
+            cat_id
+        )
         category = await conn.fetchrow(
             "SELECT display_name FROM categories WHERE id = $1",
             cat_id
         )
         
-        # ✅ سعر الصرف عنده كاش من database/core.py
+        # جلب سعر الصرف الحالي
         current_rate = await get_exchange_rate(db_pool)
         
-        # ✅ مستوى VIP عنده كاش من database/vip.py
+        # جلب مستوى VIP للمستخدم
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
         vip_level = user_vip.get('vip_level', 0)
@@ -272,11 +296,8 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "back_to_categories")
 async def back_to_categories(callback: types.CallbackQuery, db_pool):
     """العودة إلى الأقسام"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
-    # ✅ استخدام الكاش
-    categories = await get_cached_categories(db_pool)
+    async with db_pool.acquire() as conn:
+        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
     
     builder = InlineKeyboardBuilder()
     for cat in categories:
@@ -301,9 +322,6 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء طلب شراء مع تطبيق الخصم - عرض جميع الخيارات مع تمييز المعطل"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     parts = callback.data.split("_")
     app_id = int(parts[1])
     app_type = parts[2] if len(parts) > 2 else 'service'
@@ -343,8 +361,11 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     })
     
     # جلب جميع الخيارات (المفعلة والمعطلة) من product_options
-    # ✅ product_options عنده كاش من database/products.py
-    options = await get_product_options(db_pool, app_id)
+    async with db_pool.acquire() as conn:
+        options = await conn.fetch(
+            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
+            app_id
+        )
     
     # إذا كان هناك خيارات، اعرضها كلها مع تمييز المعطل
     if options and len(options) > 0:
@@ -437,21 +458,25 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         await state.set_state(OrderStates.qty)
         
-        await callback.message.answer(
+        # تعديل هنا: استخدام callback.message.edit_text بدلاً من إرسال رسالة جديدة
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(
+            text="🔙 رجوع",
+            callback_data="cancel_order"
+        ))
+        
+        await callback.message.edit_text(
             f"🏷 **الخدمة:** {app_dict['name']}\n"
             f"📦 **أقل كمية:** {app_dict['min_units']}\n"
             f"{price_text}\n\n"
             f"**الرجاء إدخال الكمية المطلوبة:**",
-            reply_markup=get_cancel_keyboard(),
+            reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
 
 @router.callback_query(F.data.startswith("disabled_option_"))
 async def handle_disabled_option(callback: types.CallbackQuery):
     """معالج للخيارات المعطلة"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     option_id = int(callback.data.split("_")[2])
     
     await callback.answer(
@@ -572,11 +597,18 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     elif 'netflix' in app_name:
         instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
     
+    # تعديل هنا: استخدام builder للرجوع
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data="cancel_order"
+    ))
+    
     await message.answer(
         f"✅ **تم قبول الكمية**\n\n"
         f"{price_message}\n\n"
         f"{instructions}",
-        reply_markup=get_cancel_keyboard(),
+        reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
     
@@ -586,17 +618,29 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
 @router.message(OrderStates.choosing_variant)
 async def handle_choosing_variant(message: types.Message, state: FSMContext):
     """معالج إذا كان المستخدم في حالة اختيار الفئة وأرسل رسالة نصية"""
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data="cancel_order"
+    ))
+    
     await message.answer(
         "⚠️ الرجاء اختيار الفئة من الأزرار أعلاه",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=builder.as_markup()
     )
 
 @router.message(OrderStates.confirm)
 async def handle_confirm_state(message: types.Message, state: FSMContext):
     """معالج إذا كان المستخدم في حالة التأكيد وأرسل رسالة نصية"""
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data="cancel_order"
+    ))
+    
     await message.answer(
         "⚠️ الرجاء استخدام الأزرار لتأكيد الطلب أو إلغائه",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=builder.as_markup()
     )
 
 # ============= اختيار الفئة =============
@@ -604,12 +648,8 @@ async def handle_confirm_state(message: types.Message, state: FSMContext):
 @router.callback_query(F.data.startswith("var_"))
 async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """اختيار خيار (لجميع أنواع المنتجات) مع عرض الوصف"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     variant_id = int(callback.data.split("_")[1])
     
-    # ✅ get_product_option عنده كاش من database/products.py
     option = await get_product_option(db_pool, variant_id)
     
     if not option:
@@ -678,9 +718,16 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     else:
         instructions = "🎯 **يرجى إرسال الحساب المستهدف:**"
     
-    await callback.message.answer(
+    # تعديل هنا: استخدام builder للرجوع
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🔙 رجوع",
+        callback_data="cancel_order"
+    ))
+    
+    await callback.message.edit_text(
         f"{details}{instructions}",
-        reply_markup=get_cancel_keyboard()
+        reply_markup=builder.as_markup()
     )
     await state.set_state(OrderStates.target_id)
 
@@ -702,9 +749,14 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     
     target_id = message.text.strip()
     if not target_id:
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(
+            text="🔙 رجوع",
+            callback_data="cancel_order"
+        ))
         await message.answer(
             "⚠️ يرجى إدخال ID الحساب.",
-            reply_markup=get_cancel_keyboard()  # هنا لسه بنستخدم كيبورد الإلغاء
+            reply_markup=builder.as_markup()
         )
         return
     
@@ -809,9 +861,6 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
     """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     data = await state.get_data()
     
     if not data:
@@ -911,10 +960,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     "UPDATE orders SET group_message_id = $1 WHERE id = $2",
                     group_msg_id, order_id
                 )
-            
-            # ✅ مسح كاش المستخدم بعد تغيير الرصيد
-            from database.cache_utils import invalidate_user_cache
-            await invalidate_user_cache(callback.from_user.id)
     
     if discount > 0:
         saved_amount = data.get('original_total_syp', total_syp) - total_syp
@@ -922,19 +967,27 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     else:
         discount_text = ""
     
-    is_admin = await is_admin_user(db_pool, callback.from_user.id)
-    
-    # ✅ تعديل الرسالة الحالية فقط (بدون إرسال رسالة جديدة) - مع إضافة الكيبورد في نفس الأمر
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
         f"📋 **سيتم التنفيذ خلال 24 ساعة.**\n"
         f"⭐ **نقاط مضافة:** +{points}"
         f"{discount_text}\n\n"
-        f"🔸 **رقم طلبك:** #{order_id}\n\n"
-        f"👋 يمكنك العودة للقائمة الرئيسية من الأزرار أدناه:",
-        reply_markup=get_main_menu_keyboard(is_admin),  # ✅ إضافة الكيبورد هنا
+        f"🔸 **رقم طلبك:** #{order_id}",
         parse_mode="Markdown"
+    )
+    
+    # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🏠 القائمة الرئيسية",
+        callback_data="back_to_main"
+    ))
+    
+    await callback.message.answer(
+        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
+        reply_markup=builder.as_markup()
     )
     
     await state.clear()
@@ -942,16 +995,29 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
 @router.callback_query(F.data == "cancel_order")
 async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """إلغاء الطلب"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
-    
     await state.clear()
     
+    # إرسال رسالة إلغاء مع القائمة الرئيسية
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
     
-    # ✅ تعديل الرسالة الحالية فقط (بدون إرسال رسالة جديدة) - مع إضافة الكيبورد في نفس الأمر
-    await callback.message.edit_text(
-        "❌ **تم إلغاء الطلب.**\n\n"
+    # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(
+        text="🏠 القائمة الرئيسية",
+        callback_data="back_to_main"
+    ))
+    
+    await callback.message.answer(
         "👋 تم العودة للقائمة الرئيسية",
-        reply_markup=get_main_menu_keyboard(is_admin)  # ✅ إضافة الكيبورد هنا
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main(callback: types.CallbackQuery, db_pool):
+    """العودة إلى القائمة الرئيسية"""
+    is_admin = await is_admin_user(db_pool, callback.from_user.id)
+    await callback.message.edit_text(
+        "👋 أهلاً بك في القائمة الرئيسية",
+        reply_markup=get_main_menu_keyboard(is_admin)
     )
