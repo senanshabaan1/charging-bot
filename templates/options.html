@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة خيارات المنتج | لوحة التحكم</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Tajawal', sans-serif;
+        }
+        
+        body {
+            background: #f8f9fc;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1a1f2b 0%, #2c3e50 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+        }
+        
+        .sidebar .logo {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar .logo i {
+            font-size: 40px;
+            color: #3498db;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        .sidebar .nav-link.active {
+            background: #3498db;
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            margin-left: 10px;
+            width: 20px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .page-header h2 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .product-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+        
+        .product-info h3 {
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .product-info .badge {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 50px;
+            margin-left: 10px;
+        }
+        
+        .options-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+        
+        .card-header {
+            background: #fafbfc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .card-header h5 i {
+            margin-left: 10px;
+            color: #3498db;
+        }
+        
+        .card-body {
+            padding: 25px;
+        }
+        
+        .table {
+            margin: 0;
+        }
+        
+        .table thead th {
+            border-top: none;
+            font-weight: 600;
+            color: #7f8c8d;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        
+        .btn-group-sm .btn {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .modal-content {
+            border-radius: 15px;
+        }
+        
+        .modal-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            border-radius: 15px 15px 0 0;
+        }
+        
+        .templates-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .template-card {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .template-card:hover {
+            border-color: #3498db;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        
+        .template-card i {
+            font-size: 32px;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+        
+        .template-card h6 {
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .template-card small {
+            color: #7f8c8d;
+            font-size: 11px;
+        }
+        
+        .template-card.selected {
+            border-color: #27ae60;
+            background: #d4edda;
+        }
+        
+        .price-badge {
+            background: #27ae60;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #27ae60;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .slider.round {
+            border-radius: 34px;
+        }
+        
+        .slider.round:before {
+            border-radius: 50%;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+                position: static;
+            }
+            
+            .card-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي -->
+            <div class="col-md-2 sidebar">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h4>إدارة البوت</h4>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a href="/" class="nav-link">
+                            <i class="fas fa-home"></i> الرئيسية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link">
+                            <i class="fas fa-users"></i> إدارة المستخدمين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/applications" class="nav-link">
+                            <i class="fas fa-mobile-alt"></i> إدارة التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/categories" class="nav-link">
+                            <i class="fas fa-folder"></i> إدارة الأقسام
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/points" class="nav-link">
+                            <i class="fas fa-star"></i> إدارة النقاط
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/vip" class="nav-link">
+                            <i class="fas fa-crown"></i> نظام VIP
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/statistics" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/broadcast" class="nav-link">
+                            <i class="fas fa-bullhorn"></i> رسالة جماعية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admins" class="nav-link">
+                            <i class="fas fa-shield-alt"></i> إدارة المشرفين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <a href="/logout" class="btn btn-danger w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                </a>
+            </div>
+            
+            <!-- المحتوى الرئيسي -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'danger' else 'check-circle' }} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <div class="page-header">
+                    <h2>
+                        <i class="fas fa-list-ul me-2"></i>
+                        إدارة خيارات المنتج
+                    </h2>
+                    <a href="/applications" class="btn btn-secondary">
+                        <i class="fas fa-arrow-right me-2"></i>العودة للتطبيقات
+                    </a>
+                </div>
+                
+                <!-- معلومات المنتج -->
+                <div class="product-info">
+                    <div class="d-flex align-items-center mb-3">
+                        <span class="badge">{{ product.category_icon }} {{ product.category_name }}</span>
+                        <h3 class="mb-0">{{ product.name }}</h3>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <small>السعر الأساسي</small>
+                            <h5>${{ "%.6f"|format(product.unit_price_usd) }}</h5>
+                        </div>
+                        <div class="col-md-3">
+                            <small>الحد الأدنى</small>
+                            <h5>{{ product.min_units }}</h5>
+                        </div>
+                        <div class="col-md-3">
+                            <small>نسبة الربح</small>
+                            <h5>{{ product.profit_percentage }}%</h5>
+                        </div>
+                        <div class="col-md-3">
+                            <small>النوع</small>
+                            <h5>
+                                {% if product.type == 'game' %}
+                                🎮 لعبة
+                                {% elif product.type == 'subscription' %}
+                                📅 اشتراك
+                                {% else %}
+                                📱 خدمة
+                                {% endif %}
+                            </h5>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- قوالب جاهزة -->
+                <div class="options-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-template"></i>
+                            قوالب جاهزة
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="templates-grid">
+                            <!-- قوالب حسب نوع المنتج -->
+                            {% if product.type == 'game' %}
+                            <div class="template-card" onclick="applyTemplate('pubg')">
+                                <i class="fas fa-gamepad"></i>
+                                <h6>PUBG Mobile</h6>
+                                <small>6 خيارات</small>
+                            </div>
+                            <div class="template-card" onclick="applyTemplate('freefire')">
+                                <i class="fas fa-fire"></i>
+                                <h6>Free Fire</h6>
+                                <small>5 خيارات</small>
+                            </div>
+                            <div class="template-card" onclick="applyTemplate('coc')">
+                                <i class="fas fa-shield-alt"></i>
+                                <h6>Clash of Clans</h6>
+                                <small>5 خيارات</small>
+                            </div>
+                            {% endif %}
+                            
+                            {% if product.type == 'subscription' %}
+                            <div class="template-card" onclick="applyTemplate('monthly')">
+                                <i class="fas fa-calendar-alt"></i>
+                                <h6>اشتراكات شهرية</h6>
+                                <small>4 خيارات</small>
+                            </div>
+                            <div class="template-card" onclick="applyTemplate('yearly')">
+                                <i class="fas fa-calendar-check"></i>
+                                <h6>اشتراكات سنوية</h6>
+                                <small>3 خيارات</small>
+                            </div>
+                            {% endif %}
+                            
+                            {% if product.type == 'service' %}
+                            <div class="template-card" onclick="applyTemplate('instagram')">
+                                <i class="fab fa-instagram"></i>
+                                <h6>متابعين انستغرام</h6>
+                                <small>5 خيارات</small>
+                            </div>
+                            <div class="template-card" onclick="applyTemplate('tiktok')">
+                                <i class="fab fa-tiktok"></i>
+                                <h6>متابعين تيك توك</h6>
+                                <small>5 خيارات</small>
+                            </div>
+                            <div class="template-card" onclick="applyTemplate('telegram_stars')">
+                                <i class="fab fa-telegram"></i>
+                                <h6>نجوم تليجرام</h6>
+                                <small>5 خيارات</small>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="template-card" onclick="clearTemplates()">
+                                <i class="fas fa-trash"></i>
+                                <h6>تفريغ الكل</h6>
+                                <small>حذف جميع الخيارات</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- الخيارات الحالية -->
+                <div class="options-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-list"></i>
+                            الخيارات الحالية ({{ options|length }})
+                        </h5>
+                        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addOptionModal">
+                            <i class="fas fa-plus me-2"></i>إضافة خيار جديد
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        {% if options %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>الاسم</th>
+                                        <th>الكمية</th>
+                                        <th>سعر المورد</th>
+                                        <th>سعر البيع ($)</th>
+                                        <th>سعر البيع (ل.س)</th>
+                                        <th>الوصف</th>
+                                        <th>الحالة</th>
+                                        <th>الإجراءات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for opt in options %}
+                                    <tr id="option-{{ opt.id }}">
+                                        <td>{{ opt.id }}</td>
+                                        <td class="fw-bold">{{ opt.name }}</td>
+                                        <td>{{ opt.quantity }}</td>
+                                        <td>${{ "%.3f"|format(opt.price_usd) }}</td>
+                                        <td>
+                                            {% set final_price = opt.price_usd * (1 + product.profit_percentage/100) %}
+                                            ${{ "%.3f"|format(final_price) }}
+                                        </td>
+                                        <td class="text-success">{{ (final_price * rate)|int }} ل.س</td>
+                                        <td>
+                                            {% if opt.description %}
+                                            <small>{{ opt.description }}</small>
+                                            {% else %}
+                                            -
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <label class="switch">
+                                                <input type="checkbox" class="option-status" data-option-id="{{ opt.id }}" {% if opt.is_active %}checked{% endif %}>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#editOptionModal{{ opt.id }}">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <form action="/option/{{ opt.id }}/delete" method="POST" class="d-inline" onsubmit="return confirm('هل أنت متأكد من حذف هذا الخيار؟');">
+                                                    <button type="submit" class="btn btn-danger">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-box-open text-muted" style="font-size: 48px;"></i>
+                            <p class="mt-3 text-muted">لا توجد خيارات لهذا المنتج</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal إضافة خيار جديد -->
+    <div class="modal fade" id="addOptionModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="/product/{{ product.id }}/add_option" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-plus-circle text-success me-2"></i>
+                            إضافة خيار جديد
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">اسم الخيار <span class="text-danger">*</span></label>
+                            <input type="text" name="name" class="form-control" placeholder="مثال: 60 UC" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الكمية <span class="text-danger">*</span></label>
+                            <input type="number" name="quantity" class="form-control" min="1" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">سعر المورد ($) <span class="text-danger">*</span></label>
+                            <input type="number" name="price_usd" class="form-control" step="0.001" min="0.001" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الوصف</label>
+                            <textarea name="description" class="form-control" rows="3" placeholder="اختياري"></textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الترتيب</label>
+                            <input type="number" name="sort_order" class="form-control" value="0" min="0">
+                        </div>
+                        
+                        <div class="info-box">
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle me-1"></i>
+                                سعر البيع النهائي: سعر المورد × (1 + {{ product.profit_percentage }}%) = 
+                                <span id="finalPricePreview">$0.000</span>
+                            </small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                        <button type="submit" class="btn btn-success">إضافة الخيار</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal تعديل خيار -->
+    {% for opt in options %}
+    <div class="modal fade" id="editOptionModal{{ opt.id }}" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="/option/{{ opt.id }}/edit" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-edit text-warning me-2"></i>
+                            تعديل الخيار: {{ opt.name }}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">اسم الخيار</label>
+                            <input type="text" name="name" class="form-control" value="{{ opt.name }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الكمية</label>
+                            <input type="number" name="quantity" class="form-control" value="{{ opt.quantity }}" min="1" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">سعر المورد ($)</label>
+                            <input type="number" name="price_usd" class="form-control" step="0.001" value="{{ opt.price_usd }}" min="0.001" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الوصف</label>
+                            <textarea name="description" class="form-control" rows="3">{{ opt.description or '' }}</textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الترتيب</label>
+                            <input type="number" name="sort_order" class="form-control" value="{{ opt.sort_order or 0 }}" min="0">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                        <button type="submit" class="btn btn-warning">حفظ التعديلات</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // تحديث معاينة السعر النهائي
+        document.querySelector('input[name="price_usd"]')?.addEventListener('input', function() {
+            const price = parseFloat(this.value) || 0;
+            const profit = {{ product.profit_percentage }};
+            const finalPrice = price * (1 + profit/100);
+            document.getElementById('finalPricePreview').textContent = '$' + finalPrice.toFixed(3);
+        });
+        
+        // تطبيق قالب
+        function applyTemplate(templateName) {
+            if (confirm('هل أنت متأكد من تطبيق هذا القالب؟ سيتم استبدال جميع الخيارات الحالية.')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/product/{{ product.id }}/apply_template/' + templateName;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+        
+        // تفريغ جميع الخيارات
+        function clearTemplates() {
+            if (confirm('⚠️ هل أنت متأكد من حذف جميع الخيارات؟')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/product/{{ product.id }}/apply_template/clear';
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+        
+        // تفعيل/تعطيل الخيار
+        document.querySelectorAll('.option-status').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const optionId = this.dataset.optionId;
+                const isActive = this.checked;
+                
+                fetch(`/option/${optionId}/toggle`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) {
+                        this.checked = !isActive;
+                        alert('❌ حدث خطأ: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    this.checked = !isActive;
+                    alert('❌ خطأ في الاتصال');
+                });
+            });
+        });
+        
+        // تحديث معاينة السعر عند فتح المودال
+        $('#addOptionModal').on('shown.bs.modal', function() {
+            const priceInput = document.querySelector('input[name="price_usd"]');
+            if (priceInput) {
+                priceInput.value = '';
+                document.getElementById('finalPricePreview').textContent = '$0.000';
+            }
+        });
+    </script>
+</body>
+</html>

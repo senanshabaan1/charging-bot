@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>رسالة جماعية | لوحة التحكم</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Tajawal', sans-serif;
+        }
+        
+        body {
+            background: #f8f9fc;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1a1f2b 0%, #2c3e50 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+        }
+        
+        .sidebar .logo {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar .logo i {
+            font-size: 40px;
+            color: #3498db;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        .sidebar .nav-link.active {
+            background: #3498db;
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            margin-left: 10px;
+            width: 20px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .page-header h2 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .broadcast-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: #fafbfc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        .card-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .card-header h5 i {
+            margin-left: 10px;
+            color: #e74c3c;
+        }
+        
+        .card-body {
+            padding: 25px;
+        }
+        
+        .stats-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .preview-box {
+            background: #f8f9fa;
+            border: 2px dashed #3498db;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .preview-box h6 {
+            color: #3498db;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+        
+        .preview-content {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            min-height: 100px;
+        }
+        
+        .form-control, .form-select {
+            border-radius: 10px;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        
+        .btn-send {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 15px 30px;
+            font-size: 18px;
+            font-weight: 600;
+            color: white;
+            width: 100%;
+            transition: all 0.3s;
+        }
+        
+        .btn-send:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-send:active {
+            transform: translateY(0);
+        }
+        
+        .markdown-guide {
+            background: #e7f3ff;
+            border-right: 4px solid #3498db;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .markdown-guide code {
+            background: white;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي -->
+            <div class="col-md-2 sidebar">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h4>إدارة البوت</h4>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a href="/" class="nav-link">
+                            <i class="fas fa-home"></i> الرئيسية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link">
+                            <i class="fas fa-users"></i> إدارة المستخدمين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/applications" class="nav-link">
+                            <i class="fas fa-mobile-alt"></i> إدارة التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/categories" class="nav-link">
+                            <i class="fas fa-folder"></i> إدارة الأقسام
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/points" class="nav-link">
+                            <i class="fas fa-star"></i> إدارة النقاط
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/vip" class="nav-link">
+                            <i class="fas fa-crown"></i> نظام VIP
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/statistics" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/broadcast" class="nav-link active">
+                            <i class="fas fa-bullhorn"></i> رسالة جماعية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admins" class="nav-link">
+                            <i class="fas fa-shield-alt"></i> إدارة المشرفين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <a href="/logout" class="btn btn-danger w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                </a>
+            </div>
+            
+            <!-- المحتوى الرئيسي -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'danger' else 'check-circle' }} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <div class="page-header">
+                    <h2>
+                        <i class="fas fa-bullhorn me-2"></i>
+                        إرسال رسالة جماعية
+                    </h2>
+                </div>
+                
+                <div class="broadcast-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-envelope-open-text"></i>
+                            إنشاء رسالة جديدة
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- إحصائيات -->
+                        <div class="stats-box">
+                            <div class="row">
+                                <div class="col-6">
+                                    <h6 class="mb-1">إجمالي المستخدمين</h6>
+                                    <h3 class="mb-0">{{ total_users }}</h3>
+                                </div>
+                                <div class="col-6">
+                                    <h6 class="mb-1">المستخدمين النشطين</h6>
+                                    <h3 class="mb-0">{{ active_users }}</h3>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- دليل Markdown -->
+                        <div class="markdown-guide">
+                            <h6><i class="fas fa-info-circle me-2"></i>دليل التنسيق</h6>
+                            <p class="mb-2">يمكنك استخدام هذه الرموز لتنسيق النص:</p>
+                            <div class="row">
+                                <div class="col-6">
+                                    <code>**نص عريض**</code> → <strong>نص عريض</strong><br>
+                                    <code>*نص مائل*</code> → <em>نص مائل</em>
+                                </div>
+                                <div class="col-6">
+                                    <code>`كود`</code> → <code>كود</code><br>
+                                    <code>__تسطير__</code> → <u>تسطير</u>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <form action="/send_broadcast" method="POST" id="broadcastForm">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">نص الرسالة</label>
+                                <textarea name="message" id="messageText" class="form-control" rows="8" placeholder="اكتب رسالتك هنا..." required></textarea>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">إلى</label>
+                                <select name="target" id="targetSelect" class="form-control" onchange="toggleSpecificUsers()">
+                                    <option value="all">👥 جميع المستخدمين</option>
+                                    <option value="active">✅ المستخدمين النشطين فقط</option>
+                                    <option value="specific">🔢 مستخدمين محددين</option>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3" id="specificUsersDiv" style="display: none;">
+                                <label class="form-label fw-bold">آيديات المستخدمين (كل آيدي في سطر)</label>
+                                <textarea name="specific_users" class="form-control" rows="4" placeholder="123456789
+987654321"></textarea>
+                                <small class="text-muted">أدخل كل آيدي في سطر منفصل</small>
+                            </div>
+                            
+                            <!-- معاينة -->
+                            <div class="preview-box">
+                                <h6><i class="fas fa-eye me-2"></i>معاينة الرسالة</h6>
+                                <div class="preview-content" id="messagePreview">
+                                    سيظهر معاينة الرسالة هنا...
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn-send" onclick="return confirmBroadcast()">
+                                <i class="fas fa-paper-plane me-2"></i>إرسال الرسالة
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // تحديث المعاينة
+        function updatePreview() {
+            const message = document.getElementById('messageText').value;
+            const preview = document.getElementById('messagePreview');
+            
+            if (!message) {
+                preview.innerHTML = 'سيظهر معاينة الرسالة هنا...';
+                return;
+            }
+            
+            // تحويل Markdown إلى HTML بسيط
+            let html = message
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/__(.*?)__/g, '<u>$1</u>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+            
+            preview.innerHTML = html;
+        }
+        
+        document.getElementById('messageText').addEventListener('input', updatePreview);
+        
+        // إظهار/إخفاء حقل المستخدمين المحددين
+        function toggleSpecificUsers() {
+            const target = document.getElementById('targetSelect').value;
+            const div = document.getElementById('specificUsersDiv');
+            div.style.display = target === 'specific' ? 'block' : 'none';
+        }
+        
+        // تأكيد الإرسال
+        function confirmBroadcast() {
+            const target = document.getElementById('targetSelect').value;
+            const message = document.getElementById('messageText').value;
+            
+            if (!message) {
+                alert('❌ الرجاء إدخال نص الرسالة');
+                return false;
+            }
+            
+            let userCount = '{{ total_users }}';
+            if (target === 'active') userCount = '{{ active_users }}';
+            else if (target === 'specific') {
+                const specific = document.querySelector('textarea[name="specific_users"]').value;
+                const lines = specific.split('\n').filter(l => l.trim());
+                userCount = lines.length;
+                
+                if (lines.length === 0) {
+                    alert('❌ الرجاء إدخال آيديات المستخدمين');
+                    return false;
+                }
+            }
+            
+            return confirm(`هل أنت متأكد من إرسال هذه الرسالة إلى ${userCount} مستخدم؟`);
+        }
+        
+        // تحديث أولي
+        updatePreview();
+    </script>
+</body>
+</html>

@@ -3,8 +3,10 @@ import time
 import asyncio
 import logging
 import hashlib
+import json
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, List, Union
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ class Cache:
             return True
         return False
     
-    def delete_pattern(self, pattern: str) -> int:
+    def delete_pattern(self, pattern: str):
         """حذف العناصر التي تطابق نمطاً معيناً"""
         keys_to_delete = [key for key in self._cache.keys() if pattern in key]
         for key in keys_to_delete:
@@ -152,50 +154,22 @@ class Cache:
 _cache_instance = Cache()
 
 
-def _build_simple_key(key_prefix: str, *args) -> str:
-    """
-    بناء مفتاح كاش بسيط متوافق مع cache_utils.py
-    
-    Args:
-        key_prefix: بادئة المفتاح (مثل "user_vip")
-        args: المعاملات الإضافية
-    
-    Returns:
-        str: مفتاح الكاش (مثال: "user_vip:8227444931")
-    """
-    if not args:
-        return key_prefix
-    
-    # المفتاح البسيط: البادئة:المعامل الأول
-    return f"{key_prefix}:{args[0]}"
-
-
 def cached(ttl: int = DEFAULT_TTL, key_prefix: str = ""):
     """
-    ديكوريتر للتخزين المؤقت - متوافق مع cache_utils.py
+    ديكوريتر للتخزين المؤقت
     
     Args:
         ttl: مدة الصلاحية بالثواني
-        key_prefix: بادئة للمفتاح (مهم جداً!)
+        key_prefix: بادئة للمفتاح (اختياري)
     
     Returns:
         Callable: الدالة المزخرفة
-    
-    Example:
-        @cached(ttl=30, key_prefix="user_vip")
-        async def get_user_vip(db_pool, user_id):
-            return await fetch_vip(user_id)
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            # بناء مفتاح بسيط: key_prefix:user_id
-            # args[0] عادة يكون db_pool، args[1] هو user_id
-            if len(args) > 1:
-                cache_key = f"{key_prefix}:{args[1]}"
-            else:
-                # إذا ما في user_id، استخدم اسم الدالة
-                cache_key = f"{key_prefix}:{func.__name__}"
+            # بناء مفتاح الكاش
+            cache_key = _build_cache_key(func, key_prefix, args, kwargs)
             
             # محاولة الحصول من الكاش
             cached_value = _cache_instance.get(cache_key)
@@ -220,10 +194,7 @@ def cached(ttl: int = DEFAULT_TTL, key_prefix: str = ""):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
             # للدوال المتزامنة
-            if len(args) > 1:
-                cache_key = f"{key_prefix}:{args[1]}"
-            else:
-                cache_key = f"{key_prefix}:{func.__name__}"
+            cache_key = _build_cache_key(func, key_prefix, args, kwargs)
             
             cached_value = _cache_instance.get(cache_key)
             if cached_value is not None:
@@ -248,22 +219,67 @@ def cached(ttl: int = DEFAULT_TTL, key_prefix: str = ""):
     return decorator
 
 
+def _build_cache_key(func: Callable, prefix: str, args: tuple, kwargs: dict) -> str:
+    """
+    بناء مفتاح كاش موحد
+    
+    Args:
+        func: الدالة
+        prefix: بادئة
+        args: المعاملات الموضعية
+        kwargs: المعاملات المسماة
+    
+    Returns:
+        str: مفتاح الكاش
+    """
+    # استخدام اسم الوحدة والصف إذا وجد
+    module_name = func.__module__
+    func_name = func.__qualname__
+    
+    # تجميع المعاملات
+    key_parts = [module_name, func_name]
+    
+    if prefix:
+        key_parts.insert(0, prefix)
+    
+    # إضافة المعاملات الموضعية
+    for arg in args:
+        if hasattr(arg, '__dict__'):
+            # للأشياء المعقدة، استخدم الـ id
+            key_parts.append(str(id(arg)))
+        else:
+            key_parts.append(str(arg))
+    
+    # إضافة المعاملات المسماة بشكل مرتب
+    if kwargs:
+        sorted_kwargs = sorted(kwargs.items())
+        for k, v in sorted_kwargs:
+            key_parts.append(f"{k}={v}")
+    
+    # بناء المفتاح النهائي
+    key_string = ":".join(key_parts)
+    
+    # استخدام hash إذا كان المفتاح طويلاً جداً
+    if len(key_string) > 200:
+        return f"{prefix}{func_name}:{hashlib.md5(key_string.encode()).hexdigest()}"
+    
+    return key_string
+
+
 # ============= دوال مساعدة =============
 
 def clear_cache(pattern: Optional[str] = None):
     """
-    مسح الكاش - متوافق مع cache_utils.py
+    مسح الكاش
     
     Args:
-        pattern: نمط لمسح مفاتيح محددة (مثلاً "user_vip:8227444931")
+        pattern: نمط لمسح مفاتيح محددة (مثلاً "get_user:*")
     """
     if pattern is None:
         _cache_instance.clear()
-        logger.info("✅ تم مسح كل الكاش")
     else:
         deleted = _cache_instance.delete_pattern(pattern)
-        if deleted > 0:
-            logger.info(f"✅ تم مسح {deleted} مفتاح من الكاش: {pattern}")
+        logger.info(f"✅ تم مسح {deleted} مفتاح من الكاش: {pattern}")
 
 
 def get_cache_stats() -> Dict[str, Any]:
@@ -281,29 +297,53 @@ def warm_cache(key: str, value: Any, ttl: int = DEFAULT_TTL):
     _cache_instance.set(key, value, ttl)
 
 
-# ============= دوال متوافقة مع cache_utils.py =============
-
-def invalidate_user_cache(user_id: int):
-    """مسح كاش المستخدم - متوافق مع cache_utils.py"""
-    clear_cache(f"user_vip:{user_id}")
-    clear_cache(f"user_balance:{user_id}")
-    clear_cache(f"user_profile:{user_id}")
-    clear_cache(f"user_basic:{user_id}")
-    clear_cache(f"user_points:{user_id}")
-
-
-def invalidate_exchange_rate():
-    """مسح كاش سعر الصرف"""
-    clear_cache("exchange_rate")
-
-
-def invalidate_categories():
-    """مسح كاش الأقسام"""
-    clear_cache("categories")
-    clear_cache("apps_by_category")
-
-
 # ============= ديكوريترات متخصصة =============
+
+def cached_ttl_by_args(ttl_func: Callable):
+    """
+    ديكوريتر مع TTL متغير حسب المعاملات
+    
+    Args:
+        ttl_func: دالة تأخذ نفس معاملات الدالة الأصلية وتعيد TTL
+    
+    Example:
+        @cached_ttl_by_args(lambda user_id: 300 if user_id == 1 else 60)
+        async def get_user(user_id):
+            return await fetch_user(user_id)
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            ttl = ttl_func(*args, **kwargs)
+            cache_key = _build_cache_key(func, "", args, kwargs)
+            
+            cached_value = _cache_instance.get(cache_key)
+            if cached_value is not None:
+                return cached_value
+            
+            result = await func(*args, **kwargs)
+            _cache_instance.set(cache_key, result, ttl)
+            return result
+        
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            ttl = ttl_func(*args, **kwargs)
+            cache_key = _build_cache_key(func, "", args, kwargs)
+            
+            cached_value = _cache_instance.get(cache_key)
+            if cached_value is not None:
+                return cached_value
+            
+            result = func(*args, **kwargs)
+            _cache_instance.set(cache_key, result, ttl)
+            return result
+        
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        return sync_wrapper
+    
+    return decorator
+
 
 def cache_result(ttl: int = DEFAULT_TTL):
     """
@@ -325,8 +365,5 @@ __all__ = [
     'invalidate_key',
     'warm_cache',
     'cache_result',
-    'invalidate_user_cache',
-    'invalidate_exchange_rate',
-    'invalidate_categories',
-    'Cache'  # تصدير الكلاس للاستخدام في run_bot_webhook.py
+    'cached_ttl_by_args'
 ]

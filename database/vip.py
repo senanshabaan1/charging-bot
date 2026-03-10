@@ -1,6 +1,5 @@
 # database/vip.py
 import logging
-from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 async def get_vip_levels(pool):
     """جلب جميع مستويات VIP"""
@@ -19,25 +18,23 @@ async def get_user_vip(pool, user_id):
     try:
         async with pool.acquire() as conn:
             user = await conn.fetchrow('''
-                SELECT vip_level, total_spent, discount_percent, manual_vip
+                SELECT vip_level, total_spent, discount_percent 
                 FROM users WHERE user_id = $1
             ''', user_id)
-            return user or {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0, 'manual_vip': False}
+            return user or {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
     except Exception as e:
         logging.error(f"❌ خطأ في جلب مستوى VIP للمستخدم {user_id}: {e}")
-        return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0, 'manual_vip': False}
+        return {'vip_level': 0, 'total_spent': 0, 'discount_percent': 0}
 
 async def update_user_vip(pool, user_id):
-    """تحديث مستوى VIP للمستخدم - نسخة محسنة"""
+    """تحديث مستوى VIP للمستخدم - حسب طلبك"""
     try:
         async with pool.acquire() as conn:
-            # جلب معلومات المستخدم الحالية
             user = await conn.fetchrow(
                 "SELECT manual_vip, vip_level, discount_percent FROM users WHERE user_id = $1",
                 user_id
             )
             
-            # ✅ إذا كان المستخدم لديه VIP يدوي، لا نغيره
             if user and user['manual_vip']:
                 logging.info(f"👑 المستخدم {user_id} لديه مستوى يدوي VIP {user['vip_level']}")
                 return {
@@ -48,21 +45,19 @@ async def update_user_vip(pool, user_id):
                     'manual': True
                 }
             
-            # حساب إجمالي الإنفاق من الطلبات المكتملة
             total_spent = await conn.fetchval('''
                 SELECT COALESCE(SUM(total_amount_syp), 0) 
                 FROM orders 
                 WHERE user_id = $1 AND status = 'completed'
             ''', user_id) or 0
             
-            # تحديد المستوى والخصم بناءً على الإنفاق
             level = 0
             discount = 0
             
             vip_levels = [
-                (3500, 1, 1),   # 3500 ل.س = VIP 1 (خصم 1%)
-                (6500, 2, 2),   # 6500 ل.س = VIP 2 (خصم 2%)
-                (12000, 3, 3),  # 12000 ل.س = VIP 3 (خصم 3%)
+                (3500, 1, 1),
+                (6500, 2, 2),
+                (12000, 3, 3),
             ]
             
             for spent, lvl, disc in reversed(vip_levels):
@@ -71,20 +66,16 @@ async def update_user_vip(pool, user_id):
                     discount = disc
                     break
             
-            # ✅ تحديث المستخدم - تم إزالة الشرط الذي كان يمنع التحديث
             await conn.execute('''
                 UPDATE users 
                 SET vip_level = $1, 
                     total_spent = $2, 
                     discount_percent = $3,
                     manual_vip = FALSE
-                WHERE user_id = $4
+                WHERE user_id = $4 AND (manual_vip IS NULL OR manual_vip = FALSE)
             ''', level, total_spent, discount, user_id)
             
             logging.info(f"✅ تم تحديث VIP للمستخدم {user_id} إلى المستوى {level} (خصم {discount}%) - إنفاق: {total_spent:,.0f} ل.س")
-            
-            # ✅ مسح الكاش
-            clear_cache(f"user_vip:{user_id}")
             
             return {
                 'level': level,

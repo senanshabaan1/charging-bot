@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Optional, Dict, Any
 from utils import is_admin, format_amount, safe_edit_message, get_formatted_damascus_time
-from handlers.keyboards import get_confirmation_keyboard, get_cancel_keyboard
+from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
 from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,6 @@ async def save_points_settings(message: types.Message, state: FSMContext, db_poo
         await state.clear()
 
 # طلبات الاسترداد
-# طلبات الاسترداد
 @router.callback_query(F.data == "view_redemptions")
 async def view_redemptions(callback: types.CallbackQuery, db_pool):
     """عرض طلبات الاسترداد المعلقة"""
@@ -227,41 +226,28 @@ async def view_redemptions(callback: types.CallbackQuery, db_pool):
         await callback.answer("📭 لا توجد طلبات استرداد معلقة", show_alert=True)
         return
     
-    # ✅ نص موحد لجميع الطلبات
-    text = "📋 **طلبات الاسترداد المعلقة**\n\n"
-    text += f"إجمالي الطلبات: {len(redemptions)}\n"
-    text += "═" * 30 + "\n\n"
+    # ✅ حذف الرسالة الحالية وإرسال الطلبات
+    await callback.message.delete()
     
-    # ✅ بناء الكيبورد بكل الأزرار
-    builder = InlineKeyboardBuilder()
-    
-    for i, r in enumerate(redemptions, 1):
-        created_at = r['created_at'].strftime('%Y-%m-%d %H:%M') if r['created_at'] else "غير معروف"
-        username = r['username'] or "غير معروف"
+    for r in redemptions:
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="✅ موافقة", callback_data=f"appr_red_{r['id']}"),
+            types.InlineKeyboardButton(text="❌ رفض", callback_data=f"reje_red_{r['id']}")
+        )
         
-        # إضافة تفاصيل الطلب للنص
-        text += (
-            f"**الطلب #{i}** (رقم: {r['id']})\n"
-            f"👤 **المستخدم:** @{username}\n"
+        created_at = r['created_at'].strftime('%Y-%m-%d %H:%M') if r['created_at'] else "غير معروف"
+        
+        await callback.message.answer(
+            f"🆔 **طلب استرداد #{r['id']}**\n\n"
+            f"👤 **المستخدم:** @{r['username'] or 'غير معروف'}\n"
             f"🆔 **الآيدي:** `{r['user_id']}`\n"
             f"⭐ **النقاط:** {r['points']}\n"
             f"💰 **المبلغ:** ${r['amount_usd']:.2f} ({r['amount_syp']:,.0f} ل.س)\n"
-            f"📅 **التاريخ:** {created_at}\n"
+            f"📅 **التاريخ:** {created_at}\n\n"
+            f"**الإجراء:**",
+            reply_markup=builder.as_markup()
         )
-        
-        # ✅ إضافة أزرار لهذا الطلب مع الرقم واضح
-        builder.row(
-            types.InlineKeyboardButton(text=f"✅ موافقة على الطلب #{i}", callback_data=f"appr_red_{r['id']}"),
-            types.InlineKeyboardButton(text=f"❌ رفض الطلب #{i}", callback_data=f"reje_red_{r['id']}")
-        )
-        
-        text += "─" * 30 + "\n\n"
-    
-    # ✅ إضافة زر الرجوع في النهاية
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_points"))
-    
-    # ✅ تعديل الرسالة الحالية
-    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("appr_red_"))
 async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
@@ -291,17 +277,12 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
             
             elapsed_time = time.time() - start_time
             
-            # ✅ تحديث الرسالة لإزالة الطلب الذي تمت الموافقة عليه
-            await refresh_redemptions(callback, db_pool)
-            
-            # ✅ إرسال إشعار للمشرف بتأكيد الموافقة
-            await callback.message.answer(
-                f"✅ **تمت الموافقة على الطلب #{req_id}**\n"
-                f"👤 المستخدم: @{req['username']}\n"
-                f"⭐ النقاط: {req['points']}\n"
-                f"💰 المبلغ: {req['amount_syp']:,.0f} ل.س\n"
+            await safe_edit_message(
+                callback.message,
+                callback.message.text + f"\n\n✅ **تمت الموافقة على الطلب**\n"
+                f"💰 بسعر صرف: {current_rate:,.0f} ل.س\n"
                 f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية",
-                parse_mode="Markdown"
+                reply_markup=None
             )
             
             try:
@@ -322,7 +303,7 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
     except Exception as e:
         logger.error(f"❌ خطأ في الموافقة على الاسترداد: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
-        
+
 @router.callback_query(F.data.startswith("reje_red_"))
 async def reject_redemption(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
     """رفض طلب استرداد نقاط"""
@@ -337,21 +318,16 @@ async def reject_redemption(callback: types.CallbackQuery, state: FSMContext, db
         
         if success:
             async with db_pool.acquire() as conn:
-                req = await conn.fetchrow("SELECT user_id, points, username FROM redemption_requests WHERE id = $1", req_id)
+                req = await conn.fetchrow("SELECT user_id, points FROM redemption_requests WHERE id = $1", req_id)
             
             # ✅ مسح الكاش
             clear_cache("pending_redemptions")
             clear_cache("pending_count")
             
-            # ✅ تحديث الرسالة لإزالة الطلب الذي تم رفضه
-            await refresh_redemptions(callback, db_pool)
-            
-            # ✅ إرسال إشعار للمشرف بتأكيد الرفض
-            await callback.message.answer(
-                f"❌ **تم رفض الطلب #{req_id}**\n"
-                f"👤 المستخدم: @{req['username']}\n"
-                f"⭐ النقاط: {req['points']}",
-                parse_mode="Markdown"
+            await safe_edit_message(
+                callback.message,
+                callback.message.text + "\n\n❌ **تم رفض الطلب**",
+                reply_markup=None
             )
             
             try:

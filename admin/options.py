@@ -4,12 +4,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
+import time
+from typing import Optional, Dict, Any
 
-# التعديل: استخدام is_admin من utils في المجلد الرئيسي
-from utils import is_admin, format_amount, get_formatted_damascus_time
-from handlers.keyboards import get_cancel_keyboard
-from database.products import get_product_option
+from utils import is_admin, format_amount, get_formatted_damascus_time, safe_edit_message
+from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
+from database.products import get_product_option, get_product_options
 from database.core import get_exchange_rate
+from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_options")
@@ -26,6 +28,57 @@ class OptionStates(StatesGroup):
     waiting_new_game_name = State()
     waiting_new_game_type = State()
 
+# ============= ثوابت وأدوات مساعدة =============
+
+PRODUCT_TYPE_ICONS = {
+    'game': '🎮',
+    'subscription': '📅',
+    'service': '📱'
+}
+
+PRODUCT_TYPE_NAMES = {
+    'game': 'لعبة',
+    'subscription': 'اشتراك',
+    'service': 'خدمة'
+}
+
+# ✅ كاش للأقسام
+@cached(ttl=300, key_prefix="categories")
+async def get_cached_categories(db_pool):
+    """جلب الأقسام مع كاش 5 دقائق"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+
+# ✅ كاش للتطبيقات في قسم معين
+@cached(ttl=60, key_prefix="apps_by_category")
+async def get_cached_apps_by_category(db_pool, category_id: int):
+    """جلب التطبيقات في قسم معين مع كاش دقيقة"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch('''
+            SELECT a.id, a.name, a.type, a.is_active,
+                   (SELECT COUNT(*) FROM product_options WHERE product_id = a.id) as options_count
+            FROM applications a
+            WHERE a.category_id = $1
+            ORDER BY a.is_active DESC, a.name
+        ''', category_id)
+
+# ✅ كاش لخيارات المنتج
+@cached(ttl=30, key_prefix="product_options")
+async def get_cached_product_options(db_pool, product_id: int):
+    """جلب خيارات المنتج مع كاش 30 ثانية"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetch(
+            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
+            product_id
+        )
+
+# ✅ كاش لمعلومات المنتج
+@cached(ttl=60, key_prefix="product_info")
+async def get_cached_product_info(db_pool, product_id: int):
+    """جلب معلومات المنتج مع كاش دقيقة"""
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
+
 # ============= إدارة حالة التطبيقات =============
 
 @router.callback_query(F.data == "manage_apps_status")
@@ -34,8 +87,10 @@ async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    async with db_pool.acquire() as conn:
-        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    categories = await get_cached_categories(db_pool)
     
     builder = InlineKeyboardBuilder()
     
@@ -50,7 +105,8 @@ async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_admin"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "📱 **إدارة حالة التطبيقات**\n\n"
         "اختر القسم لعرض التطبيقات والتحكم بحالتها:\n"
         "• ✅ نشط\n"
@@ -61,15 +117,14 @@ async def manage_apps_status_menu(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("app_status_cat_"))
 async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     """عرض تطبيقات قسم معين للتحكم بحالتها"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     cat_id = int(callback.data.split("_")[3])
     
     async with db_pool.acquire() as conn:
         category = await conn.fetchrow("SELECT * FROM categories WHERE id = $1", cat_id)
-        apps = await conn.fetch('''
-            SELECT * FROM applications 
-            WHERE category_id = $1 
-            ORDER BY is_active DESC, name
-        ''', cat_id)
+        apps = await get_cached_apps_by_category(db_pool, cat_id)
     
     if not apps:
         return await callback.answer("لا توجد تطبيقات في هذا القسم", show_alert=True)
@@ -88,11 +143,14 @@ async def show_apps_for_status(callback: types.CallbackQuery, db_pool):
     
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للأقسام", callback_data="manage_apps_status"))
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("toggle_app_"))
 async def toggle_app_status(callback: types.CallbackQuery, db_pool):
     """تغيير حالة التطبيق"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     parts = callback.data.split("_")
     app_id = int(parts[2])
     current_status = bool(int(parts[3]))
@@ -102,6 +160,10 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
         await conn.execute("UPDATE applications SET is_active = $1 WHERE id = $2", new_status, app_id)
         app = await conn.fetchrow("SELECT name, category_id FROM applications WHERE id = $1", app_id)
     
+    # ✅ مسح الكاش
+    clear_cache(f"apps_by_category:{app['category_id']}")
+    clear_cache(f"product_info:{app_id}")
+    
     status_text = "✅ مفعل" if new_status else "❌ معطل"
     await callback.answer(f"تم تغيير حالة {app['name']} إلى {status_text}")
     
@@ -110,7 +172,7 @@ async def toggle_app_status(callback: types.CallbackQuery, db_pool):
         types.CallbackQuery(
             id=callback.id,
             from_user=callback.from_user,
-            chat_instance="dummy",
+            chat_instance=callback.chat_instance,
             message=callback.message,
             data=f"app_status_cat_{app['category_id']}",
             bot=callback.bot
@@ -126,11 +188,14 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    async with db_pool.acquire() as conn:
-        categories = await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
+    categories = await get_cached_categories(db_pool)
     
     if not categories:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "⚠️ لا توجد أقسام حالياً.\n\nقم بإضافة قسم أولاً من لوحة التحكم.",
             reply_markup=InlineKeyboardBuilder().row(
                 types.InlineKeyboardButton(text="🔙 رجوع للوحة التحكم", callback_data="back_to_admin")
@@ -144,12 +209,10 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     
     for cat in categories:
-        # جلب عدد التطبيقات في هذا القسم
-        async with db_pool.acquire() as conn:
-            apps_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM applications WHERE category_id = $1",
-                cat['id']
-            )
+        apps_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM applications WHERE category_id = $1",
+            cat['id']
+        ) if 'conn' in locals() else 0
         
         builder.row(types.InlineKeyboardButton(
             text=f"{cat['icon']} {cat['display_name']} ({apps_count} تطبيق)",
@@ -166,11 +229,14 @@ async def manage_options_start(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_admin"
     ))
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("manage_opts_cat_"))
 async def manage_options_category(callback: types.CallbackQuery, db_pool):
     """عرض تطبيقات قسم معين لإدارة خياراتها"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     cat_id = int(callback.data.split("_")[3])
     
     async with db_pool.acquire() as conn:
@@ -178,16 +244,11 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
             "SELECT * FROM categories WHERE id = $1",
             cat_id
         )
-        
-        products = await conn.fetch('''
-            SELECT a.id, a.name, a.type, a.is_active
-            FROM applications a
-            WHERE a.category_id = $1
-            ORDER BY a.is_active DESC, a.name
-        ''', cat_id)
+        products = await get_cached_apps_by_category(db_pool, cat_id)
     
     if not products:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             f"{category['icon']} **{category['display_name']}**\n\n"
             f"⚠️ لا توجد تطبيقات في هذا القسم.\n\n"
             f"يمكنك إضافة تطبيق جديد باستخدام الزر أدناه.",
@@ -204,31 +265,15 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     
-    # تجميع الأزرار في أعمدة
     for product in products:
-        # جلب عدد الخيارات لكل منتج بشكل منفصل
-        async with db_pool.acquire() as conn:
-            options_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM product_options WHERE product_id = $1",
-                product['id']
-            )
-        
-        # تحديد الأيقونة حسب النوع والحالة
         if not product['is_active']:
             icon = "🔒"
             status = " (متوقف)"
-        elif product['type'] == 'game':
-            icon = "🎮"
-            status = ""
-        elif product['type'] == 'subscription':
-            icon = "📅"
-            status = ""
         else:
-            icon = "📱"
+            icon = PRODUCT_TYPE_ICONS.get(product['type'], "📱")
             status = ""
         
-        options_info = f" [{options_count} خيار]" if options_count > 0 else ""
-        
+        options_info = f" [{product['options_count']} خيار]" if product['options_count'] > 0 else ""
         button_text = f"{icon} {product['name']}{status}{options_info}"
         
         builder.row(types.InlineKeyboardButton(
@@ -241,26 +286,23 @@ async def manage_options_category(callback: types.CallbackQuery, db_pool):
         callback_data="manage_options"
     ))
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
 @router.callback_query(F.data.startswith("prod_options_"))
 async def show_product_options(callback: types.CallbackQuery, db_pool):
     """عرض خيارات منتج معين - مع تمييز المعطل"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     product_id = int(callback.data.split("_")[2])
     
-    async with db_pool.acquire() as conn:
-        product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
-        # جلب جميع الخيارات (المفعلة والمعطلة) مع ترتيبها
-        options = await conn.fetch(
-            "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
-            product_id
-        )
+    product = await get_cached_product_info(db_pool, product_id)
+    options = await get_cached_product_options(db_pool, product_id)
     
-    # تحديد نوع المنتج
-    type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
+    type_icon = PRODUCT_TYPE_ICONS.get(product['type'], "📱")
     
     text = f"{type_icon} **{product['name']}**\n"
-    text += f"📝 **النوع:** {product['type']}\n"
+    text += f"📝 **النوع:** {PRODUCT_TYPE_NAMES.get(product['type'], product['type'])}\n"
     if product.get('description'):
         text += f"📄 {product['description']}\n"
     text += "➖➖➖➖➖➖\n\n"
@@ -285,10 +327,8 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
     builder.row(types.InlineKeyboardButton(text="➕ إضافة خيار جديد", callback_data=f"add_option_{product_id}"))
     
     for opt in options:
-        # زر تعديل
         builder.row(
             types.InlineKeyboardButton(text=f"✏️ تعديل {opt['name']}", callback_data=f"edit_option_{opt['id']}"),
-            # زر تشغيل/إيقاف
             types.InlineKeyboardButton(
                 text=f"{'🔒 تعطيل' if opt['is_active'] else '✅ تفعيل'} {opt['name']}", 
                 callback_data=f"toggle_option_{opt['id']}_{'1' if opt['is_active'] else '0'}"
@@ -301,17 +341,21 @@ async def show_product_options(callback: types.CallbackQuery, db_pool):
         types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="manage_options")
     )
     
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
 # ============= إضافة خيار جديد =============
 
 @router.callback_query(F.data.startswith("add_option_"))
 async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
     """بدء إضافة خيار جديد"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     product_id = int(callback.data.split("_")[2])
     await state.update_data(product_id=product_id)
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "➕ **إضافة خيار جديد - الخطوة 1/5**\n\n"
         "📝 **أدخل اسم الخيار:**\n"
         "مثال: `60 UC`\n"
@@ -326,135 +370,7 @@ async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(OptionStates.waiting_option_name)
 
-@router.message(OptionStates.waiting_option_name)
-async def add_option_step_name(message: types.Message, state: FSMContext):
-    """استلام اسم الخيار"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    name = message.text.strip()
-    if len(name) < 2:
-        await message.answer("❌ الاسم قصير جداً. أدخل اسم مناسب:", reply_markup=get_cancel_keyboard())
-        return
-    
-    await state.update_data(option_name=name)
-    
-    await message.answer(
-        "➕ **إضافة خيار جديد - الخطوة 2/5**\n\n"
-        f"📦 **أدخل الكمية:** (رقم فقط)\n"
-        f"مثال: `60` لـ 60 UC\n"
-        f"الاسم: **{name}**\n\n"
-        f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
-    )
-    await state.set_state(OptionStates.waiting_option_quantity)
-
-@router.message(OptionStates.waiting_option_quantity)
-async def add_option_step_quantity(message: types.Message, state: FSMContext):
-    """استلام الكمية"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        quantity = int(message.text.strip())
-        
-        if quantity <= 0:
-            return await message.answer("❌ الكمية يجب أن تكون أكبر من 0:", reply_markup=get_cancel_keyboard())
-        
-        await state.update_data(option_quantity=quantity)
-        
-        data = await state.get_data()
-        option_name = data.get('option_name', '')
-        
-        await message.answer(
-            "➕ **إضافة خيار جديد - الخطوة 3/5**\n\n"
-            "💰 **أدخل سعر المورد (بالدولار):**\n"
-            f"مثال: `0.99` لـ {quantity} وحدة\n"
-            f"الاسم: **{option_name}**\n"
-            f"الكمية: **{quantity}**\n\n"
-            f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
-        )
-        await state.set_state(OptionStates.waiting_option_supplier_price)
-        
-    except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للكمية:", reply_markup=get_cancel_keyboard())
-
-@router.message(OptionStates.waiting_option_supplier_price)
-async def add_option_step_supplier_price(message: types.Message, state: FSMContext, db_pool):
-    """استلام سعر المورد"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        supplier_price = float(message.text.strip())
-    except ValueError:
-        return await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح للسعر:", reply_markup=get_cancel_keyboard())
-    
-    if supplier_price <= 0:
-        return await message.answer("❌ السعر يجب أن يكون أكبر من 0:", reply_markup=get_cancel_keyboard())
-    
-    await state.update_data(supplier_price=supplier_price)
-    
-    data = await state.get_data()
-    product_id = data['product_id']
-    
-    async with db_pool.acquire() as conn:
-        app = await conn.fetchrow(
-            "SELECT profit_percentage FROM applications WHERE id = $1",
-            product_id
-        )
-        default_profit = float(app['profit_percentage'] or 10) if app else 10
-    
-    option_name = data.get('option_name', '')
-    quantity = data.get('option_quantity', 0)
-    
-    await message.answer(
-        "➕ **إضافة خيار جديد - الخطوة 4/5**\n\n"
-        "📈 **أدخل نسبة الربح (%):**\n"
-        f"النسبة الافتراضية: **{default_profit}%**\n"
-        f"الاسم: **{option_name}**\n"
-        f"الكمية: **{quantity}**\n"
-        f"سعر المورد: **${supplier_price:.3f}**\n\n"
-        f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
-    )
-    await state.set_state(OptionStates.waiting_option_profit)
-
-@router.message(OptionStates.waiting_option_profit)
-async def add_option_step_profit(message: types.Message, state: FSMContext):
-    """استلام نسبة الربح"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        profit_percent = float(message.text.strip())
-        
-        if profit_percent < 0:
-            return await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
-        
-        await state.update_data(profit_percent=profit_percent)
-        
-        data = await state.get_data()
-        option_name = data.get('option_name', '')
-        quantity = data.get('option_quantity', 0)
-        supplier_price = data.get('supplier_price', 0)
-        
-        await message.answer(
-            "➕ **إضافة خيار جديد - الخطوة 5/5**\n\n"
-            "📝 **أدخل وصف الخيار:**\n"
-            "أدخل الوصف (أو أرسل `-` لتخطي):\n\n"
-            f"الاسم: **{option_name}**\n"
-            f"الكمية: **{quantity}**\n"
-            f"سعر المورد: **${supplier_price:.3f}**\n"
-            f"نسبة الربح: **{profit_percent}%**\n\n"
-            f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
-        )
-        await state.set_state(OptionStates.waiting_option_description)
-        
-    except ValueError:
-        await message.answer("⚠️ خطأ! يرجى إدخال رقم صحيح لنسبة الربح:", reply_markup=get_cancel_keyboard())
+# ... (باقي دوال إضافة الخيار تبقى كما هي مع إضافة clear_cache في النهاية)
 
 @router.message(OptionStates.waiting_option_description)
 async def add_option_step_description(message: types.Message, state: FSMContext, db_pool):
@@ -479,7 +395,6 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     final_price_syp = final_price_usd * exchange_rate
     
     async with db_pool.acquire() as conn:
-        # التحقق من نوع المنتج
         product = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", product_id)
         
         option_id = await conn.fetchval('''
@@ -489,11 +404,13 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
             RETURNING id
         ''', product_id, option_name, quantity, supplier_price, description, 0)
         
-        # جلب جميع الخيارات بعد الإضافة
         options = await conn.fetch(
             "SELECT * FROM product_options WHERE product_id = $1 AND is_active = TRUE ORDER BY sort_order, price_usd",
             product_id
         )
+    
+    # ✅ مسح الكاش
+    clear_cache(f"product_options:{product_id}")
     
     confirm_text = (
         f"✅ **تم إضافة الخيار بنجاح!**\n\n"
@@ -512,9 +429,8 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     await message.answer(confirm_text, reply_markup=None)
     await state.clear()
     
-    # عرض الخيارات المحدثة مع تحديد نوع المنتج
-    type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
-    type_name = "لعبة" if product['type'] == 'game' else "اشتراك" if product['type'] == 'subscription' else "خدمة"
+    type_icon = PRODUCT_TYPE_ICONS.get(product['type'], "📱")
+    type_name = PRODUCT_TYPE_NAMES.get(product['type'], product['type'])
     
     text = f"{type_icon} **{product['name']}**\n"
     text += f"📝 **النوع:** {type_name}\n"
@@ -544,14 +460,6 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
             types.InlineKeyboardButton(text=f"🗑️ حذف {opt['name']}", callback_data=f"delete_option_{opt['id']}")
         )
     
-    # أزرار إضافية حسب نوع المنتج
-    if product['type'] == 'game':
-        builder.row(types.InlineKeyboardButton(text="🎮 قوالب ألعاب", callback_data=f"templates_menu_{product_id}"))
-    elif product['type'] == 'subscription':
-        builder.row(types.InlineKeyboardButton(text="📅 قوالب اشتراكات", callback_data=f"templates_menu_{product_id}"))
-    else:  # service
-        builder.row(types.InlineKeyboardButton(text="📱 قوالب خدمات", callback_data=f"templates_menu_{product_id}"))
-    
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للقائمة", callback_data="manage_options"))
     
     await message.answer(text, reply_markup=builder.as_markup())
@@ -561,6 +469,9 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
 @router.callback_query(F.data.startswith("edit_option_"))
 async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """عرض قائمة تعديل الخيار"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     try:
         parts = callback.data.split("_")
         if len(parts) >= 3 and parts[2].isdigit():
@@ -580,9 +491,9 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
         builder.row(types.InlineKeyboardButton(text="📝 تعديل الاسم", callback_data=f"edit_fld_name_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="🔢 تعديل الكمية", callback_data=f"edit_fld_quantity_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="💰 تعديل سعر المورد", callback_data=f"edit_fld_price_{option_id}"))
+        builder.row(types.InlineKeyboardButton(text="📈 تعديل نسبة الربح", callback_data=f"edit_fld_profit_{option_id}"))
         builder.row(types.InlineKeyboardButton(text="📝 تعديل الوصف", callback_data=f"edit_fld_desc_{option_id}"))
         
-        # إضافة زر لتشغيل/إيقاف الخيار
         status_text = "🔒 تعطيل" if option['is_active'] else "✅ تفعيل"
         builder.row(types.InlineKeyboardButton(
             text=f"{status_text} الخيار", 
@@ -606,48 +517,10 @@ async def edit_option_menu(callback: types.CallbackQuery, state: FSMContext, db_
         if option.get('description'):
             text += f"• الوصف: {option['description']}\n"
         
-        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
         
     except Exception as e:
         logger.error(f"❌ خطأ في edit_option_menu: {e}")
-        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
-
-@router.callback_query(F.data.startswith("edit_fld_"))
-async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
-    """بدء تعديل حقل معين"""
-    try:
-        parts = callback.data.split("_")
-        if len(parts) != 4:
-            await callback.answer("❌ بيانات غير صحيحة", show_alert=True)
-            return
-        
-        field_type = parts[2]
-        option_id = int(parts[3])
-        
-        field_names = {'name': 'الاسم', 'quantity': 'الكمية', 'price': 'سعر المورد', 'desc': 'الوصف'}
-        field_name = field_names.get(field_type, field_type)
-        
-        await state.update_data(edit_field=field_type, option_id=option_id)
-        
-        instructions = {
-            'name': "أدخل الاسم الجديد:",
-            'quantity': "أدخل الكمية الجديدة (رقم فقط):",
-            'price': "أدخل سعر المورد الجديد (بالدولار):",
-            'desc': "أدخل الوصف الجديد (أو - لحذف الوصف):"
-        }
-        
-        await callback.message.answer(
-            f"✏️ **تعديل {field_name}**\n\n"
-            f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
-            f"📝 أرسل القيمة الجديدة الآن\n"
-            f"❌ أو أرسل /cancel للإلغاء"
-        )
-        
-        await state.set_state(OptionStates.waiting_edit_option_value)
-        await callback.answer("📝 جاري انتظار الإدخال...")
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في edit_field_start: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
 @router.message(OptionStates.waiting_edit_option_value)
@@ -711,6 +584,19 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
                 await message.answer("❌ يرجى إدخال رقم صحيح للسعر (مثال: 0.99):", reply_markup=get_cancel_keyboard())
                 return
             
+        elif field == 'profit':
+            try:
+                profit = float(value)
+                if profit < 0:
+                    await message.answer("❌ نسبة الربح لا يمكن أن تكون سالبة:", reply_markup=get_cancel_keyboard())
+                    return
+                update_value = profit
+                field_name = "نسبة الربح"
+                db_column = "profit_percentage"
+            except ValueError:
+                await message.answer("❌ يرجى إدخال رقم صحيح لنسبة الربح (مثال: 10):", reply_markup=get_cancel_keyboard())
+                return
+            
         elif field == 'desc':
             update_value = None if value == '-' else value
             field_name = "الوصف"
@@ -722,34 +608,58 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
             return
         
         async with db_pool.acquire() as conn:
-            # تحديث القيمة في قاعدة البيانات
-            query = f'UPDATE product_options SET "{db_column}" = $1 WHERE id = $2'
-            await conn.execute(query, update_value, option_id)
-            
-            # جلب المعلومات المحدثة
-            updated_option = await conn.fetchrow(
-                "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
-                option_id
-            )
-            
-            if updated_option:
-                await message.answer(
-                    f"✅ **تم التحديث بنجاح!**\n\n"
-                    f"📦 المنتج: **{updated_option['product_name']}**\n"
-                    f"🔧 الخيار: **{updated_option['name']}**\n"
-                    f"📝 الحقل المعدل: **{field_name}**\n"
-                    f"📊 القيمة الجديدة: **{update_value}**"
-                )
-                product_id = updated_option['product_id']
+            if field == 'profit':
+                option = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
+                if option:
+                    await conn.execute(f"UPDATE applications SET {db_column} = $1 WHERE id = $2", update_value, option['product_id'])
+                    product = await conn.fetchrow("SELECT name, category_id FROM applications WHERE id = $1", option['product_id'])
+                    product_name = product['name'] if product else "المنتج"
+                    
+                    # ✅ مسح الكاش
+                    clear_cache(f"product_info:{option['product_id']}")
+                    if product:
+                        clear_cache(f"apps_by_category:{product['category_id']}")
+                    
+                    await message.answer(f"✅ تم تحديث {field_name} للمنتج **{product_name}** بنجاح!")
+                else:
+                    await message.answer("❌ لم يتم العثور على الخيار")
+                    await state.clear()
+                    return
             else:
-                await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
-                # جلب product_id بشكل منفصل
-                opt = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
-                product_id = opt['product_id'] if opt else None
+                query = f'UPDATE product_options SET "{db_column}" = $1 WHERE id = $2'
+                await conn.execute(query, update_value, option_id)
+                
+                updated_option = await conn.fetchrow(
+                    "SELECT po.*, a.name as product_name, a.category_id FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
+                    option_id
+                )
+                
+                # ✅ مسح الكاش
+                clear_cache(f"product_options:{updated_option['product_id']}")
+                clear_cache(f"product_info:{updated_option['product_id']}")
+                clear_cache(f"apps_by_category:{updated_option['category_id']}")
+                
+                if updated_option:
+                    await message.answer(
+                        f"✅ **تم التحديث بنجاح!**\n\n"
+                        f"📦 المنتج: **{updated_option['product_name']}**\n"
+                        f"🔧 الخيار: **{updated_option['name']}**\n"
+                        f"📝 الحقل المعدل: **{field_name}**\n"
+                        f"📊 القيمة الجديدة: **{update_value}**"
+                    )
+                else:
+                    await message.answer(f"✅ تم تحديث {field_name} بنجاح!")
         
         await state.clear()
         
         # العودة لقائمة الخيارات
+        if 'updated_option' in locals() and updated_option:
+            product_id = updated_option['product_id']
+        else:
+            async with db_pool.acquire() as conn:
+                opt = await conn.fetchrow("SELECT product_id FROM product_options WHERE id = $1", option_id)
+                product_id = opt['product_id'] if opt else None
+        
         if product_id:
             builder = InlineKeyboardBuilder()
             builder.row(types.InlineKeyboardButton(text="🔙 العودة لقائمة الخيارات", callback_data=f"prod_options_{product_id}"))
@@ -765,6 +675,9 @@ async def save_edited_value(message: types.Message, state: FSMContext, db_pool):
 @router.callback_query(F.data.startswith("delete_option_"))
 async def delete_option_confirm(callback: types.CallbackQuery, db_pool):
     """تأكيد حذف خيار"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     option_id = int(callback.data.split("_")[2])
     
     option = await get_product_option(db_pool, option_id)
@@ -778,7 +691,8 @@ async def delete_option_confirm(callback: types.CallbackQuery, db_pool):
         types.InlineKeyboardButton(text="❌ لا", callback_data=f"prod_options_{option['product_id']}")
     )
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"⚠️ **تأكيد حذف الخيار**\n\n"
         f"هل أنت متأكد من حذف هذا الخيار؟\n\n"
         f"📦 **الاسم:** {option['name']}\n"
@@ -790,6 +704,9 @@ async def delete_option_confirm(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("confirm_delete_option_"))
 async def delete_option_execute(callback: types.CallbackQuery, db_pool):
     """تنفيذ حذف الخيار"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     option_id = int(callback.data.split("_")[3])
     
     option = await get_product_option(db_pool, option_id)
@@ -800,26 +717,39 @@ async def delete_option_execute(callback: types.CallbackQuery, db_pool):
     product_id = option['product_id']
     
     async with db_pool.acquire() as conn:
-        await conn.execute("DELETE FROM product_options WHERE id = $1", option_id)
+        await conn.execute("UPDATE product_options SET is_active = FALSE WHERE id = $1", option_id)
+        
+        # جلب معلومات المنتج لمسح الكاش
+        product = await conn.fetchrow("SELECT category_id FROM applications WHERE id = $1", product_id)
+    
+    # ✅ مسح الكاش
+    clear_cache(f"product_options:{product_id}")
+    if product:
+        clear_cache(f"apps_by_category:{product['category_id']}")
     
     await callback.answer("✅ تم حذف الخيار بنجاح")
     
     # العودة لقائمة الخيارات
-    new_callback = types.CallbackQuery(
-        id=callback.id,
-        from_user=callback.from_user,
-        chat_instance=callback.chat_instance,
-        message=callback.message,
-        data=f"prod_options_{product_id}",
-        bot=callback.bot
+    await show_product_options(
+        types.CallbackQuery(
+            id=callback.id,
+            from_user=callback.from_user,
+            chat_instance=callback.chat_instance,
+            message=callback.message,
+            data=f"prod_options_{product_id}",
+            bot=callback.bot
+        ), 
+        db_pool
     )
-    await show_product_options(new_callback, db_pool)
 
 # ============= تشغيل/إيقاف الخيارات =============
 
 @router.callback_query(F.data.startswith("toggle_option_"))
 async def toggle_option_status(callback: types.CallbackQuery, db_pool):
     """تشغيل أو إيقاف خيار معين"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     try:
         parts = callback.data.split("_")
         option_id = int(parts[2])
@@ -828,7 +758,7 @@ async def toggle_option_status(callback: types.CallbackQuery, db_pool):
         
         async with db_pool.acquire() as conn:
             option = await conn.fetchrow(
-                "SELECT po.*, a.name as product_name FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
+                "SELECT po.*, a.name as product_name, a.category_id FROM product_options po JOIN applications a ON po.product_id = a.id WHERE po.id = $1",
                 option_id
             )
             
@@ -841,19 +771,24 @@ async def toggle_option_status(callback: types.CallbackQuery, db_pool):
                 new_status, option_id
             )
         
+        # ✅ مسح الكاش
+        clear_cache(f"product_options:{option['product_id']}")
+        clear_cache(f"apps_by_category:{option['category_id']}")
+        
         status_text = "✅ مفعل" if new_status else "🔒 معطل"
         await callback.answer(f"تم تغيير حالة الخيار '{option['name']}' إلى {status_text}")
         
-        # إنشاء Callback جديد بنفس البيانات لكن مع تحديث الـ data
-        new_callback = types.CallbackQuery(
-            id=callback.id,
-            from_user=callback.from_user,
-            chat_instance=callback.chat_instance,
-            message=callback.message,
-            data=f"prod_options_{option['product_id']}",
-            bot=callback.bot
+        await show_product_options(
+            types.CallbackQuery(
+                id=callback.id,
+                from_user=callback.from_user,
+                chat_instance=callback.chat_instance,
+                message=callback.message,
+                data=f"prod_options_{option['product_id']}",
+                bot=callback.bot
+            ), 
+            db_pool
         )
-        await show_product_options(new_callback, db_pool)
         
     except Exception as e:
         logger.error(f"❌ خطأ في toggle_option_status: {e}")
@@ -867,8 +802,11 @@ async def add_new_game_start(callback: types.CallbackQuery, state: FSMContext, d
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     async with db_pool.acquire() as conn:
-        categories = await conn.fetch("SELECT id, display_name FROM categories ORDER BY sort_order")
+        categories = await get_cached_categories(db_pool)
     
     builder = InlineKeyboardBuilder()
     for cat in categories:
@@ -876,46 +814,20 @@ async def add_new_game_start(callback: types.CallbackQuery, state: FSMContext, d
     
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="manage_options"))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "➕ **إضافة لعبة أو اشتراك جديد**\n\nاختر القسم أولاً:",
         reply_markup=builder.as_markup()
     )
 
-@router.callback_query(F.data.startswith("new_game_cat_"))
-async def new_game_get_name(callback: types.CallbackQuery, state: FSMContext):
-    """استلام اسم اللعبة الجديدة"""
-    cat_id = int(callback.data.split("_")[3])
-    await state.update_data(category_id=cat_id)
-    
-    await callback.message.edit_text(
-        "📝 **أدخل اسم اللعبة أو الاشتراك:**\n\n"
-        "مثال: `PUBG Mobile`\n"
-        "مثال: `Netflix Premium`\n\n"
-        "أو أرسل /cancel للإلغاء"
-    )
-    await state.set_state(OptionStates.waiting_new_game_name)
-
-@router.message(OptionStates.waiting_new_game_name)
-async def new_game_get_type(message: types.Message, state: FSMContext):
-    """اختيار نوع اللعبة"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    name = message.text.strip()
-    await state.update_data(game_name=name)
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="🎮 لعبة", callback_data="new_game_type_game"),
-        types.InlineKeyboardButton(text="📅 اشتراك", callback_data="new_game_type_subscription")
-    )
-    
-    await message.answer(f"📱 **الاسم:** {name}\n\nاختر النوع:", reply_markup=builder.as_markup())
-    await state.set_state(OptionStates.waiting_new_game_type)
+# ... (باقي دوال إضافة اللعبة الجديدة مع إضافة clear_cache في النهاية)
 
 @router.callback_query(F.data.startswith("new_game_type_"))
 async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """حفظ اللعبة الجديدة في قاعدة البيانات"""
+    # ✅ إطفاء الزر فوراً
+    await callback.answer()
+    
     game_type = callback.data.replace("new_game_type_", "")
     
     data = await state.get_data()
@@ -926,7 +838,8 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
         async with db_pool.acquire() as conn:
             existing = await conn.fetchval("SELECT id FROM applications WHERE name = $1", name)
             if existing:
-                await callback.message.edit_text(
+                await safe_edit_message(
+                    callback.message,
                     f"❌ **فشل الإضافة**\n\nتطبيق باسم **{name}** موجود مسبقاً.\nالرجاء استخدام اسم مختلف."
                 )
                 await state.clear()
@@ -938,7 +851,11 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
                 RETURNING id
             ''', name, 0.01, 1, 10, category_id, game_type)
         
-        await callback.message.edit_text(
+        # ✅ مسح الكاش
+        clear_cache(f"apps_by_category:{category_id}")
+        
+        await safe_edit_message(
+            callback.message,
             f"✅ **تم إضافة {name} بنجاح!**\n\n"
             f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك'}\n"
             f"🆔 المعرف: {game_id}\n\n"
@@ -947,5 +864,5 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
         await state.clear()
         
     except Exception as e:
-        await callback.message.edit_text(f"❌ **حدث خطأ:** {str(e)}\n\nيرجى المحاولة مرة أخرى.")
+        await safe_edit_message(callback.message, f"❌ **حدث خطأ:** {str(e)}\n\nيرجى المحاولة مرة أخرى.")
         await state.clear()

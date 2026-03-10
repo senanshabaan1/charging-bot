@@ -10,7 +10,7 @@ import pytz
 import random
 import string
 from handlers.time_utils import format_damascus_time, get_damascus_time_now
-from handlers.keyboards import get_main_menu_keyboard, get_main_menu_only_keyboard, get_cancel_keyboard, get_back_inline_keyboard
+from handlers.keyboards import get_main_menu_keyboard, get_back_keyboard
 from utils import is_admin
 from .profile_handlers import router as profile_router
 from database.points import get_redemption_rate, create_redemption_request
@@ -660,12 +660,10 @@ async def admin_control_panel(message: types.Message, db_pool):
     from admin.main import admin_panel
     await admin_panel(message, db_pool)
 
-# ========== المساعدة (للكيبورد الإنلاين) ==========
-@router.callback_query(F.data == "show_help")
-async def show_help_callback(callback: types.CallbackQuery):
-    """عرض رسالة المساعدة عند الضغط على الزر الإنلاين"""
-    await callback.answer()
-    
+# ========== المساعدة ==========
+@router.message(F.text == "❓ مساعدة")
+async def show_help(message: types.Message):
+    """عرض رسالة المساعدة"""
     help_text = (
         "📚 **دليل استخدام البوت**\n\n"
         "**📱 خدمات الشحن:**\n"
@@ -704,9 +702,4 @@ async def show_help_callback(callback: types.CallbackQuery):
         "🔹 **لتحديث القائمة: أرسل /start**"
     )
     
-    # ✅ تعديل الرسالة الحالية بدلاً من إرسال رسالة جديدة
-    await callback.message.edit_text(
-        help_text,
-        parse_mode="Markdown",
-        reply_markup=get_back_inline_keyboard("back_to_main")  # زر رجوع للقائمة الرئيسية
-    )
+    await message.answer(help_text, parse_mode="Markdown")

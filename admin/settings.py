@@ -8,20 +8,9 @@ import logging
 import time
 from typing import Optional, List
 from config import ADMIN_ID, MODERATORS
-from handlers.keyboards import get_confirmation_keyboard, get_cancel_keyboard
+from handlers.keyboards import get_cancel_keyboard, get_confirmation_keyboard
 from utils import is_admin, is_owner, safe_edit_message, format_amount, get_formatted_damascus_time
-
-# ✅ استيراد الدوال مباشرة من database.core
-from database.core import (
-    get_exchange_rate,
-    set_exchange_rate,
-    get_syriatel_numbers,
-    set_syriatel_numbers,
-    get_maintenance_message,
-    get_bot_status,
-    set_bot_status
-)
-from handlers.middleware import refresh_bot_status_cache
+from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_settings")
@@ -31,21 +20,37 @@ class SettingsStates(StatesGroup):
     waiting_maintenance_msg = State()
     waiting_new_syriatel_numbers = State()
 
-# ✅ دوال مساعدة بدون كاش - تجلب من قاعدة البيانات مباشرة
-async def get_db_exchange_rate(db_pool) -> float:
-    """جلب سعر الصرف من قاعدة البيانات مباشرة"""
+# ✅ ثوابت للأداء
+CACHE_TTL_RATE = 30  # 30 ثانية
+CACHE_TTL_SYRIATEL = 120  # دقيقتين
+CACHE_TTL_MAINTENANCE = 60  # دقيقة
+
+# ✅ كاش لسعر الصرف
+@cached(ttl=CACHE_TTL_RATE, key_prefix="exchange_rate")
+async def get_cached_exchange_rate(db_pool) -> float:
+    """جلب سعر الصرف مع كاش 30 ثانية"""
+    from database import get_exchange_rate
     return await get_exchange_rate(db_pool)
 
-async def get_db_syriatel_numbers(db_pool) -> List[str]:
-    """جلب أرقام سيرياتل من قاعدة البيانات مباشرة"""
+# ✅ كاش لأرقام سيرياتل
+@cached(ttl=CACHE_TTL_SYRIATEL, key_prefix="syriatel_numbers")
+async def get_cached_syriatel_numbers(db_pool) -> List[str]:
+    """جلب أرقام سيرياتل مع كاش دقيقتين"""
+    from database import get_syriatel_numbers
     return await get_syriatel_numbers(db_pool)
 
-async def get_db_maintenance_message(db_pool) -> str:
-    """جلب رسالة الصيانة من قاعدة البيانات مباشرة"""
+# ✅ كاش لرسالة الصيانة
+@cached(ttl=CACHE_TTL_MAINTENANCE, key_prefix="maintenance_message")
+async def get_cached_maintenance_message(db_pool) -> str:
+    """جلب رسالة الصيانة مع كاش دقيقة"""
+    from database import get_maintenance_message
     return await get_maintenance_message(db_pool)
 
-async def get_db_bot_status(db_pool) -> bool:
-    """جلب حالة البوت من قاعدة البيانات مباشرة"""
+# ✅ كاش لحالة البوت
+@cached(ttl=30, key_prefix="bot_status")
+async def get_cached_bot_status(db_pool) -> bool:
+    """جلب حالة البوت مع كاش 30 ثانية"""
+    from database import get_bot_status
     return await get_bot_status(db_pool)
 
 # تشغيل/إيقاف البوت
@@ -55,28 +60,26 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ التحقق من أن المستخدم هو المالك
     if not is_owner(callback.from_user.id):
         return await callback.answer("⚠️ فقط المالك يمكنه تشغيل/إيقاف البوت", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
+    
     start_time = time.time()
     
-    # ✅ جلب القيمة الحقيقية من قاعدة البيانات مباشرة
-    async with db_pool.acquire() as conn:
-        db_status = await conn.fetchval(
-            "SELECT value FROM bot_settings WHERE key = 'bot_status'"
-        )
-        current_status = (db_status == 'running')
+    from database import get_bot_status, set_bot_status
+    from handlers.middleware import refresh_bot_status_cache
     
+    current_status = await get_cached_bot_status(db_pool)
     new_status = not current_status
     
-    logger.info(f"🔄 تغيير حالة البوت: {current_status} ({'🟢' if current_status else '🔴'}) -> {new_status}")
-    
-    # ✅ تحديث قاعدة البيانات
     await set_bot_status(db_pool, new_status)
-    
-    # ✅ تحديث كاش الميدل وير (لازم نشيله بعدين)
     await refresh_bot_status_cache(db_pool)
+    
+    # ✅ مسح الكاش
+    clear_cache("bot_status")
     
     status_text = "🟢 يعمل" if new_status else "🔴 متوقف"
     action_text = "تشغيل" if new_status else "إيقاف"
@@ -111,10 +114,11 @@ async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContex
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
-    # ✅ عرض الرسالة الحالية من قاعدة البيانات مباشرة
-    current_msg = await get_db_maintenance_message(db_pool)
+    # ✅ عرض الرسالة الحالية
+    current_msg = await get_cached_maintenance_message(db_pool)
     
     await callback.message.answer(
         f"📝 **تعديل رسالة الصيانة**\n\n"
@@ -141,6 +145,9 @@ async def save_maintenance_message(message: types.Message, state: FSMContext, db
             message.text
         )
     
+    # ✅ مسح الكاش
+    clear_cache("maintenance_message")
+    
     elapsed_time = time.time() - start_time
     
     await message.answer(
@@ -156,10 +163,11 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
-    # ✅ استخدام قاعدة البيانات مباشرة
-    current_nums = await get_db_syriatel_numbers(db_pool)
+    # ✅ استخدام الكاش
+    current_nums = await get_cached_syriatel_numbers(db_pool)
     
     nums_text = "\n".join([f"{i+1}. `{num}`" for i, num in enumerate(current_nums)])
     
@@ -174,7 +182,6 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
     await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_cancel_keyboard())
     await state.set_state(SettingsStates.waiting_new_syriatel_numbers)
 
-# admin/settings.py - تحديث دالة save_syriatel_numbers
 @router.message(SettingsStates.waiting_new_syriatel_numbers)
 async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
     """حفظ أرقام سيرياتل الجديدة"""
@@ -188,6 +195,7 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
     invalid_numbers = []
     
     for num in numbers:
+        # إزالة أي مسافات أو شرطات
         clean_num = num.replace(' ', '').replace('-', '').replace('+', '')
         if clean_num.isdigit() and len(clean_num) >= 8:
             valid_numbers.append(clean_num)
@@ -201,21 +209,19 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
             reply_markup=get_cancel_keyboard()
         )
     
-    # ✅ تحديث قاعدة البيانات
+    from database import set_syriatel_numbers
     success = await set_syriatel_numbers(db_pool, valid_numbers)
     
     if success:
         import config
-        # ✅ تحديث config فوراً
         config.SYRIATEL_NUMS = valid_numbers
         
-        # ✅ طباعة للتحقق
-        logger.info(f"📞 تم تحديث أرقام سيرياتل في config: {config.SYRIATEL_NUMS}")
+        # ✅ مسح الكاش
+        clear_cache("syriatel_numbers")
         
         text = "✅ **تم تحديث أرقام سيرياتل كاش بنجاح!**\n\nالأرقام الجديدة:\n"
         for i, num in enumerate(valid_numbers, 1):
             text += f"{i}. `{num}`\n"
-        text += "\n🔄 التحديث فوري في جميع أنحاء البوت!"
     else:
         text = "❌ **فشل تحديث الأرقام**"
     
@@ -229,10 +235,11 @@ async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_p
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
-    # ✅ استخدام قاعدة البيانات مباشرة
-    current_rate = await get_db_exchange_rate(db_pool)
+    # ✅ استخدام الكاش
+    current_rate = await get_cached_exchange_rate(db_pool)
     
     await callback.message.answer(
         f"💵 **تعديل سعر الصرف**\n\n"
@@ -290,6 +297,7 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
 @router.callback_query(F.data.startswith("confirm_high_rate_"))
 async def confirm_high_rate(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """تأكيد سعر الصرف المرتفع"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     new_rate = float(callback.data.replace("confirm_high_rate_", ""))
@@ -298,6 +306,7 @@ async def confirm_high_rate(callback: types.CallbackQuery, state: FSMContext, db
 @router.callback_query(F.data == "cancel_rate_edit")
 async def cancel_rate_edit(callback: types.CallbackQuery, state: FSMContext):
     """إلغاء تعديل سعر الصرف"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     await state.clear()
@@ -307,7 +316,11 @@ async def update_exchange_rate(message: types.Message, state: FSMContext, db_poo
     """تحديث سعر الصرف في قاعدة البيانات"""
     start_time = time.time()
     
+    from database import set_exchange_rate
     await set_exchange_rate(db_pool, new_rate)
+    
+    # ✅ مسح الكاش
+    clear_cache("exchange_rate")
     
     import config
     config.USD_TO_SYP = new_rate
@@ -343,13 +356,14 @@ async def view_settings(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
-    # جلب جميع الإعدادات من قاعدة البيانات مباشرة
-    rate = await get_db_exchange_rate(db_pool)
-    syriatel = await get_db_syriatel_numbers(db_pool)
-    maintenance = await get_db_maintenance_message(db_pool)
-    bot_status = await get_db_bot_status(db_pool)
+    # جلب جميع الإعدادات
+    rate = await get_cached_exchange_rate(db_pool)
+    syriatel = await get_cached_syriatel_numbers(db_pool)
+    maintenance = await get_cached_maintenance_message(db_pool)
+    bot_status = await get_cached_bot_status(db_pool)
     
     status_text = "🟢 يعمل" if bot_status else "🔴 متوقف"
     
@@ -384,9 +398,11 @@ async def reset_settings(callback: types.CallbackQuery, state: FSMContext, db_po
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ التحقق من أن المستخدم هو المالك
     if not is_owner(callback.from_user.id):
         return await callback.answer("⚠️ فقط المالك يمكنه إعادة تعيين الإعدادات", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     builder = get_confirmation_keyboard("confirm_reset_settings", "cancel_reset_settings")
@@ -408,6 +424,7 @@ async def confirm_reset_settings(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     start_time = time.time()
@@ -430,6 +447,11 @@ async def confirm_reset_settings(callback: types.CallbackQuery, db_pool):
             UPDATE bot_settings SET value = $1 WHERE key = 'maintenance_message'
         ''', 'البوت قيد الصيانة حالياً، يرجى المحاولة لاحقاً')
     
+    # ✅ مسح الكاش
+    clear_cache("exchange_rate")
+    clear_cache("syriatel_numbers")
+    clear_cache("maintenance_message")
+    
     elapsed_time = time.time() - start_time
     
     await safe_edit_message(
@@ -443,6 +465,7 @@ async def confirm_reset_settings(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "cancel_reset_settings")
 async def cancel_reset_settings(callback: types.CallbackQuery):
     """إلغاء إعادة تعيين الإعدادات"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     await safe_edit_message(callback.message, "✅ تم إلغاء العملية.")

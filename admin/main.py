@@ -7,7 +7,7 @@ import logging
 import time
 from typing import List, Tuple
 from config import ADMIN_ID, MODERATORS
-from handlers.keyboards import get_main_menu_keyboard, get_main_menu_only_keyboard, get_cancel_keyboard
+from handlers.keyboards import get_main_menu_keyboard, get_cancel_keyboard
 from utils import is_admin, safe_edit_message, get_formatted_damascus_time
 from cache import cached, clear_cache  # ✅ استيراد الكاش
 
@@ -25,6 +25,11 @@ ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("📢 رسالة للكل", "broadcast"),
     ("👤 معلومات مستخدم", "user_info"),
     ("⭐ إدارة النقاط", "manage_points"),
+    ("💳 الأكثر إيداعاً", "top_deposits"),
+    ("🛒 الأكثر طلبات", "top_orders"),
+    ("🔗 الأكثر إحالة", "top_referrals"),
+    ("⭐ الأكثر نقاط", "top_points"),
+    ("👥 إحصائيات VIP", "vip_stats"),
     ("📊 تقارير ونسخ", "reports_menu"),
     ("➕ إضافة منتج", "add_product"),
     ("✏️ تعديل منتج", "edit_product"),
@@ -40,7 +45,6 @@ ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("🎮 إدارة خيارات الألعاب", "manage_options"),
     ("📁 إدارة الأقسام", "manage_categories"),
     ("➕ إضافة قسم", "add_category"),
-    ("🏠 القائمة الرئيسية", "back_to_main"),
 ]
 
 # ✅ كاش لحالة البوت

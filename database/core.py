@@ -11,28 +11,20 @@ async def get_bot_status(pool):
             status = await conn.fetchval(
                 "SELECT value FROM bot_settings WHERE key = 'bot_status'"
             )
-            # ✅ التحقق الصحيح: 'running' = True, أي شيء آخر = False
             return status == 'running'
     except Exception as e:
         logging.error(f"❌ خطأ في جلب حالة البوت: {e}")
-        return True  # افتراضي يعمل
+        return True
 
-async def set_bot_status(pool, status: bool):
-    """تغيير حالة البوت - status يجب أن يكون boolean"""
+async def set_bot_status(pool, status):
+    """تغيير حالة البوت"""
     try:
         async with pool.acquire() as conn:
-            # ✅ تحويل boolean إلى النص المناسب
-            status_text = 'running' if status else 'stopped'
-            
-            await conn.execute('''
-                INSERT INTO bot_settings (key, value, description) 
-                VALUES ('bot_status', $1, 'حالة البوت (running/stopped)')
-                ON CONFLICT (key) DO UPDATE SET 
-                    value = $2, 
-                    updated_at = CURRENT_TIMESTAMP
-            ''', status_text, status_text)
-            
-            logging.info(f"✅ تم تغيير حالة البوت إلى: {status_text} (status={status})")
+            await conn.execute(
+                "UPDATE bot_settings SET value = $1, updated_at = CURRENT_TIMESTAMP WHERE key = 'bot_status'",
+                'running' if status else 'stopped'
+            )
+            logging.info(f"✅ تم تغيير حالة البوت إلى: {'running' if status else 'stopped'}")
             return True
     except Exception as e:
         logging.error(f"❌ خطأ في تغيير حالة البوت: {e}")
@@ -52,6 +44,7 @@ async def get_maintenance_message(pool):
 
 # ============= سعر الصرف =============
 
+@cached(ttl=30, key_prefix="exchange_rate")
 async def get_exchange_rate(pool):
     """جلب سعر الصرف مع كاش 30 ثانية"""
     try:
