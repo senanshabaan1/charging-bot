@@ -30,9 +30,7 @@ async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
     await callback.answer()
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
-    
-    # ✅ استخدام الكاش لطرق الدفع
-    methods = await get_cached_payment_methods()
+ 
     
     kb = []
     for method in methods:
@@ -61,8 +59,7 @@ async def back_to_main_callback(callback: types.CallbackQuery, db_pool):
         reply_markup=get_main_menu_keyboard(is_admin)
     )
 
-# ✅ كاش لطرق الدفع (تتغير نادراً)
-@cached(ttl=300, key_prefix="payment_methods")  # 5 دقائق كاش
+
 async def get_cached_payment_methods():
     """جلب طرق الدفع المتاحة"""
     return [
@@ -72,8 +69,6 @@ async def get_cached_payment_methods():
         {"name": "USDT BEP20 ($)", "callback": "m_usdt"},
     ]
 
-# ✅ كاش لأرقام سيرياتل
-@cached(ttl=120, key_prefix="syriatel_nums")  # دقيقتين كاش
 async def get_cached_syriatel_numbers(db_pool):
     """جلب أرقام سيرياتل مع كاش"""
     return await get_syriatel_numbers(db_pool)
@@ -104,8 +99,7 @@ async def choose_meth(message: types.Message, db_pool):
     """عرض قائمة طرق الدفع - تعدل الرسالة الحالية"""
     is_admin = await is_admin_user(db_pool, message.from_user.id)
     
-    # ✅ استخدام الكاش لطرق الدفع
-    methods = await get_cached_payment_methods()
+
     
     kb = []
     for method in methods:
