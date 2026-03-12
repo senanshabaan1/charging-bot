@@ -61,8 +61,8 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 **📁 الأقسام**:\n\n"
-        "🔸اختر القسم المفضل:", 
+        "🌟 **الأقسام** 📁:\n\n"
+        "🔸اختر القسم المفضل:"
         reply_markup=builder.as_markup()
     )
 
@@ -161,7 +161,7 @@ async def handle_disabled_app(callback: types.CallbackQuery):
     app_id = int(callback.data.split("_")[2])
     
     await callback.answer(
-        "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+        "هذا التطبيق متوقف حالياً🔒",
         show_alert=True
     )
 
@@ -259,9 +259,9 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     
     # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
-        f"📱 **{category['display_name']}**\n\n"
+        f"📱 {category['display_name']}\n\n"
         f"👤 مستواك: {vip_icon} {vip_name} (خصم {discount}%)\n"
-        f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
+        f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
         f"🔒 التطبيقات المقفلة متوقفة حالياً\n\n"
         "🔸 اختر التطبيق المطلوب:", 
         reply_markup=builder.as_markup()
@@ -285,8 +285,8 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 **اختر القسم:**\n\n"
-        "🔸 اختر الفئة التي تريدها:", 
+        "🌟 **الأقسام** 📁:\n\n"
+        "🔸اختر القسم المفضل:"
         reply_markup=builder.as_markup()
     )
 
@@ -311,7 +311,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         # التحقق من حالة تفعيل التطبيق نفسه
         if not app['is_active']:
             await callback.answer(
-                "❌ هذا التطبيق متوقف حالياً، يرجى المحاولة لاحقاً",
+                "هذا التطبيق متوقف حالياً🔒",
                 show_alert=True
             )
             return
@@ -401,12 +401,12 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً"
         
         await callback.message.edit_text(
-            f"**{app_dict['name']}**\n\n"
-            f"📱 **النوع:** {type_name}\n"
-            f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
-            f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
+            f"{app_dict['name']}\n\n"
+            f"📱 **النوع**: {type_name}\n"
+            f"👑 **مستواك**: VIP {vip_level} (خصم {discount}%)\n"
+            f"💰 **سعر الصرف الحالي**: {current_rate:,.0f} ل.س = 1$\n"
             f"{status_message}\n\n"
-            "🔸 **اختر الخيار المناسب:**\n"
+            "🔸 **اختر الخيار المناسب**:\n"
             "🔒 الخيارات المقفلة متوقفة مؤقتاً",
             reply_markup=builder.as_markup()
         )
@@ -427,10 +427,10 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         
         if discount > 0:
             original_price = final_unit_price_usd * current_rate
-            price_text = f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س (بدلاً من {original_price:,.0f} ل.س)\n"
-            price_text += f"🎁 **خصم VIP {vip_level}:** {discount}%"
+            price_text = f"💰 **سعر الوحدة**: {price_per_unit_syp:,.0f} ل.س (بدلاً من {original_price:,.0f} ل.س)\n"
+            price_text += f"🎁 خصم VIP {vip_level}: {discount}%"
         else:
-            price_text = f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س"
+            price_text = f"💰 سعر الوحدة: {price_per_unit_syp:,.0f} ل.س"
         
         await state.set_state(OrderStates.qty)
         
@@ -442,10 +442,10 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         ))
         
         await callback.message.edit_text(
-            f"🏷 **الخدمة:** {app_dict['name']}\n"
-            f"📦 **أقل كمية:** {app_dict['min_units']}\n"
+            f"🏷 الخدمة: {app_dict['name']}\n"
+            f"📦 أقل كمية: {app_dict['min_units']}\n"
             f"{price_text}\n\n"
-            f"**الرجاء إدخال الكمية المطلوبة:**",
+            f"**الرجاء إدخال الكمية المطلوبة**:",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -557,7 +557,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
                 f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
                 f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
                 f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
-                f"قم بشحن رصيدك من خلال قسم الإيداع",
+                f"**قم بشحن رصيدك من خلال قسم شحن المحفظة**",
                 reply_markup=builder.as_markup()
             )
             return
@@ -565,20 +565,20 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     if discount > 0:
         saved_amount = original_total_syp - total_syp
         price_message = (
-            f"💰 **المبلغ قبل الخصم:** {original_total_syp:,.0f} ل.س\n"
-            f"💰 **المبلغ بعد الخصم:** {total_syp:,.0f} ل.س\n"
-            f"🎁 **وفرت:** {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
+            f"💰 **المبلغ قبل الخصم**: {original_total_syp:,.0f} ل.س\n"
+            f"💰 **المبلغ بعد الخصم**: {total_syp:,.0f} ل.س\n"
+            f"🎁 **وفرت**: {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
         )
     else:
-        price_message = f"💰 **المبلغ الإجمالي:** {total_syp:,.0f} ل.س"
+        price_message = f"💰 **المبلغ الإجمالي**: {total_syp:,.0f} ل.س"
     
     app_name = app['name'].lower()
-    instructions = "🎯 **الرجاء إرسال الحساب المستهدف:**"
+    instructions = " **الرجاء إرسال الـ 🆔**:"
     
     if 'pubg' in app_name:
-        instructions = "🎮 **الرجاء إرسال ID اللاعب (PUBG):**"
+        instructions = "🎮 **الرجاء إرسال 🆔 اللاعب** (PUBG):"
     elif 'free fire' in app_name:
-        instructions = "🔥 **الرجاء إرسال ID اللاعب (Free Fire):**"
+        instructions = "🔥 **الرجاء إرسال 🆔 اللاعب** (Free Fire):"
     elif 'clash' in app_name:
         instructions = "⚔️ **الرجاء إرسال إيميل Supercell ID:**"
     elif 'instagram' in app_name:
@@ -686,30 +686,30 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
     
     details = f"{type_icon} **{app['name']}**\n\n"
-    details += f"📦 **الخيار:** {option['name']}\n"
-    details += f"🔢 **الكمية:** {quantity}\n"
+    details += f"📦 **الخيار**: {option['name']}\n"
+    details += f"🔢 **الكمية**: {quantity}\n"
     
     # إضافة الوصف هنا
     if option.get('description'):
-        details += f"📝 **الوصف:**\n{option['description']}\n\n"
+        details += f"📝 **الوصف**:\n{option['description']}\n\n"
     
     if discount > 0:
         saved = original_total_syp - total_syp
-        details += f"💰 **السعر:** {total_syp:,.0f} ل.س (بدلاً من {original_total_syp:,.0f} ل.س)\n"
-        details += f"🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved:,.0f} ل.س)\n\n"
+        details += f"💰 **السعر**: {total_syp:,.0f} ل.س (بدلاً من {original_total_syp:,.0f} ل.س)\n"
+        details += f"🎁 **خصم VIP** {vip_level}: {discount}% (وفرت {saved:,.0f} ل.س)\n\n"
     else:
-        details += f"💰 **السعر:** {total_syp:,.0f} ل.س\n\n"
+        details += f"💰 **السعر**: {total_syp:,.0f} ل.س\n\n"
     
     # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
     if 'pubg' in app_name or 'free fire' in app_name:
-        instructions = "🎮 **يرجى إرسال ID اللاعب الخاص بك:**"
+        instructions = "🎮 **يرجى إرسال 🆔 اللاعب:**"
     elif 'clash' in app_name:
         instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**"
     elif 'instagram' in app_name or 'tiktok' in app_name:
         instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
-        instructions = "🎯 **يرجى إرسال الحساب المستهدف:**"
+        instructions = " ** يرجى إرسال الـ 🆔:**"
     
     # ✅ زر الرجوع للخيارات السابقة
     builder = InlineKeyboardBuilder()
@@ -811,11 +811,11 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
     
     await callback.message.edit_text(
         f"**{app_dict['name']}**\n\n"
-        f"📱 **النوع:** {type_name}\n"
-        f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
-        f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n"
+        f"📱 **النوع**: {type_name}\n"
+        f"👑 **مستواك**: VIP {vip_level} (خصم {discount}%)\n"
+        f"💰 **سعر الصرف الحالي**: {current_rate:,.0f} ل.س = 1$\n"
         f"{status_message}\n\n"
-        "🔸 **اختر الخيار المناسب:**\n"
+        "🔸 **اختر الخيار المناسب**:\n"
         "🔒 الخيارات المقفلة متوقفة مؤقتاً",
         reply_markup=builder.as_markup()
     )
@@ -845,7 +845,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
             callback_data="cancel_order"
         ))
         await message.answer(
-            "⚠️ يرجى إدخال ID الحساب.",
+            "⚠️ يرجى إدخال 🆔 الحساب.",
             reply_markup=builder.as_markup()
         )
         return
@@ -903,19 +903,19 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         saved_amount = original_total_syp - total_syp
         if saved_amount > 0:
             price_detail = (
-                f"💰 **السعر قبل الخصم:** {original_total_syp:,.0f} ل.س\n"
-                f"💰 **السعر بعد الخصم:** {total_syp:,.0f} ل.س\n"
-                f"🎁 **وفرت:** {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
+                f"💰 **السعر قبل الخصم**: {original_total_syp:,.0f} ل.س\n"
+                f"💰 **السعر بعد الخصم**: {total_syp:,.0f} ل.س\n"
+                f"🎁 **وفرت**: {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
             )
         else:
-            price_detail = f"💰 **السعر الإجمالي:** {total_syp:,.0f} ل.س"
+            price_detail = f"💰 **السعر الإجمالي**: {total_syp:,.0f} ل.س"
     else:
-        price_detail = f"💰 **السعر الإجمالي:** {total_syp:,.0f} ل.س"
+        price_detail = f"💰 **السعر الإجمالي**: {total_syp:,.0f} ل.س"
     
     app_name = data['app']['name'].lower()
     warnings = ""
     if 'pubg' in app_name or 'free fire' in app_name:
-        warnings = "\n⚠️ **تنبيه:** غير مسؤولين عن أي ID خاطئ. تأكد من صحة ID اللاعب قبل الإرسال.\n"
+        warnings = "\n⚠️ **تنبيه:** غير مسؤولين عن أي 🆔 خاطئ. تأكد من صحة 🆔 اللاعب قبل الإرسال.\n"
     elif 'clash' in app_name:
         warnings = "\n⚠️ **تنبيه:** تأكد من صحة إيميل Supercell ID الخاص بك.\n"
     
