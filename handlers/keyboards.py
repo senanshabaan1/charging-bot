@@ -1,28 +1,7 @@
 # handlers/keyboards.py
 from aiogram import types
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
-
-# ============= دوال الكيبورد العادية (Reply Keyboard) =============
-
-# handlers/keyboards.py
-
-# ============= دوال الكيبورد العادية (Reply Keyboard) =============
-
-def get_main_menu_only_keyboard():
-    """العودة للقائمة الرئيسية فقط - كيبورد عادي"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="🏠 القائمة الرئيسية"))
-    return builder.as_markup(resize_keyboard=True)
-
-def get_back_and_cancel_keyboard():
-    """أزرار رجوع وإلغاء معاً"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(
-        types.KeyboardButton(text="🔙 رجوع للقائمة"),
-        types.KeyboardButton(text="❌ إلغاء")
-    )
-    return builder.as_markup(resize_keyboard=True)
-    
+ 
 # ============= دوال الكيبورد الإنلاين (Inline Keyboard) =============
 
 def get_main_menu_keyboard(is_admin_user: bool = False):
