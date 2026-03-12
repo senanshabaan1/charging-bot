@@ -61,7 +61,7 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 **الأقسام 📁:**\n\n"
+        "🌟 الأقسام 📁:\n\n"
         "🔸اختر القسم المفضل:",
         reply_markup=builder.as_markup()
     )
@@ -285,7 +285,7 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 **الأقسام**:\n\n"
+        "🌟 الأقسام:\n\n"
         "🔸اختر القسم المفضل:",
         reply_markup=builder.as_markup()
     )
@@ -685,7 +685,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تحديد نوع المنتج للعرض
     type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
     
-    details = f"{type_icon} **{app['name']}**\n\n"
+    details = f"{type_icon} {app['name']}\n\n"
     details += f"📦 الخيار: {option['name']}\n"
     details += f"🔢 الكمية: {quantity}\n"
     
