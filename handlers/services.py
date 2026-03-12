@@ -591,7 +591,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     # استخدام builder للرجوع
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
+        text="❌ إلغاء",
         callback_data="cancel_order"
     ))
     
