@@ -61,8 +61,8 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 **اختر القسم:**\n\n"
-        "🔸 اختر الفئة التي تريدها:", 
+        "🌟 **📁 الأقسام**:\n\n"
+        "🔸اختر القسم المفضل:", 
         reply_markup=builder.as_markup()
     )
 
