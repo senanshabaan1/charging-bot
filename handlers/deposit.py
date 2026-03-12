@@ -179,7 +179,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     
     await callback.message.answer(
         msg,
-        reply_markup=get_cancel_keyboard()
+        
     )
 
 # ============= استلام المبلغ =============
@@ -217,7 +217,7 @@ async def get_amount(message: types.Message, state: FSMContext):
             return await message.answer(
                 "⚠️ المبلغ يجب أن يكون أكبر من 0.\n"
                 "الرجاء إدخال مبلغ صحيح:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
         # التحقق من الحد الأدنى للمبلغ
@@ -225,14 +225,14 @@ async def get_amount(message: types.Message, state: FSMContext):
             return await message.answer(
                 "⚠️ الحد الأدنى للمبلغ هو 1.\n"
                 "الرجاء إدخال مبلغ أكبر:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
     except ValueError:
         return await message.answer(
             "⚠️ خطأ في الصيغة!\n"
             "الرجاء إدخال رقم صحيح (مثال: 500 أو 50.5):",
-            reply_markup=get_cancel_keyboard()
+            
         )
     
     data = await state.get_data()
@@ -266,7 +266,6 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"{nums_text}\n"
             f"✅ **بعد التحويل، أرسل رقم العملية**:\n"
             f"💡 *اضغط على الرقم لنسخه*",
-            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -280,7 +279,6 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"`{data['wallet']}`\n\n"
             f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
             f"💡 *اضغط على رقم المحفظة لنسخه*",
-            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -292,7 +290,6 @@ async def get_amount(message: types.Message, state: FSMContext):
             f"`{data['wallet']}`\n\n"
             f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
             f"💡 *اضغط على العنوان لنسخه*",
-            reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_photo)
@@ -386,7 +383,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
             return await message.answer(
                 "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون 12 رقم على الأقل.\n"
                 "📝 يرجى إدخال رقم صحيح:",
-                reply_markup=get_cancel_keyboard(),
                 parse_mode="Markdown"
             )
     
@@ -649,7 +645,6 @@ async def invalid_photo(message: types.Message):
     """معالج إذا أرسل المستخدم نص بدل صورة"""
     await message.answer(
         "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n"
-        "📸 أرسل الصورة الآن، أو اضغط على زر الإلغاء.",
-        reply_markup=get_cancel_keyboard(),
+        
         parse_mode="Markdown"
     )
