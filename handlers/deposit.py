@@ -116,13 +116,13 @@ async def choose_meth(message: types.Message, db_pool):
     # ✅ تعديل الرسالة الحالية بدلاً من إرسال جديدة
     try:
         await message.edit_text(
-            "💳 **اختر وسيلة الدفع المناسبة:**", 
+            "💳 **اختر وسيلة الدفع المناسبة**:", 
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
         )
     except:
         # إذا فشل التعديل (مثلاً لأنها أول رسالة)، نرسل رسالة جديدة
         await message.answer(
-            "💳 **اختر وسيلة الدفع المناسبة:**", 
+            "💳 **اختر وسيلة الدفع المناسبة**:", 
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
         )
 
@@ -169,13 +169,13 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     
     await state.set_state(DepStates.waiting_amount)
     
-    msg = f"💸 **{method_name}**\n\n"
-    msg += f"💰 **سعر الصرف الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
+    msg = f"💸 {method_name}\n\n"
+    msg += f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n\n"
     
     if method in ["m_syr", "m_sham_syp"]:
-        msg += "أدخل المبلغ بالليرة السورية (مثال: 5000):"
+        msg += "أدخل المبلغ بالليرة السورية (مثال: 500):"
     else:
-        msg += "أدخل المبلغ بالدولار (مثال: 50):"
+        msg += "أدخل المبلغ بالدولار (مثال: 5):"
     
     await callback.message.answer(
         msg,
@@ -231,7 +231,7 @@ async def get_amount(message: types.Message, state: FSMContext):
     except ValueError:
         return await message.answer(
             "⚠️ خطأ في الصيغة!\n"
-            "الرجاء إدخال رقم صحيح (مثال: 5000 أو 50.5):",
+            "الرجاء إدخال رقم صحيح (مثال: 500 أو 50.5):",
             reply_markup=get_cancel_keyboard()
         )
     
@@ -264,7 +264,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
             f"{nums_text}\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
+            f"✅ **بعد التحويل، أرسل رقم العملية**:\n"
             f"💡 *اضغط على الرقم لنسخه*",
             reply_markup=get_cancel_keyboard(),
             parse_mode="Markdown"
@@ -382,9 +382,9 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
     if data['method'] == "m_syr":
         # إزالة أي مسافات أو شرطات
         clean_tx = tx.replace(' ', '').replace('-', '')
-        if not clean_tx.isdigit() or len(clean_tx) < 8:
+        if not clean_tx.isdigit() or len(clean_tx) < 12:
             return await message.answer(
-                "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون أرقام فقط وطوله 8 أرقام على الأقل.\n"
+                "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون 12 رقم على الأقل.\n"
                 "📝 يرجى إدخال رقم صحيح:",
                 reply_markup=get_cancel_keyboard(),
                 parse_mode="Markdown"
