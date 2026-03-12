@@ -8,12 +8,6 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
 # ============= دوال الكيبورد العادية (Reply Keyboard) =============
 
-def get_cancel_keyboard():
-    """زر إلغاء موحد للمشرفين والمستخدمين"""
-    builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="❌ إلغاء"))
-    return builder.as_markup(resize_keyboard=True)
-
 def get_main_menu_only_keyboard():
     """العودة للقائمة الرئيسية فقط - كيبورد عادي"""
     builder = ReplyKeyboardBuilder()
