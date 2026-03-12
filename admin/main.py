@@ -7,7 +7,7 @@ import logging
 import time
 from typing import List, Tuple
 from config import ADMIN_ID, MODERATORS
-from handlers.keyboards import get_main_menu_keyboard, get_cancel_keyboard
+from handlers.keyboards import get_main_menu_keyboard
 from utils import is_admin, safe_edit_message, get_formatted_damascus_time
 from cache import cached, clear_cache  # ✅ استيراد الكاش
 
