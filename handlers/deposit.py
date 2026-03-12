@@ -644,7 +644,7 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
 async def invalid_photo(message: types.Message):
     """معالج إذا أرسل المستخدم نص بدل صورة"""
     await message.answer(
-        "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n"
+        "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n",
         
         parse_mode="Markdown"
     )
