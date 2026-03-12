@@ -154,36 +154,6 @@ async def global_back_handler(message: types.Message, state: FSMContext, db_pool
 
 # ============= عرض الأقسام =============
 
-@router.message(F.text == "📱 خدمات الشحن")
-async def show_categories(message: types.Message, db_pool):
-    """عرض الأقسام أولاً"""
-    categories = await get_cached_categories(db_pool)
-    
-    if not categories:
-        is_admin = await is_admin_user(db_pool, message.from_user.id)
-        await message.answer(
-            "⚠️ لا توجد أقسام متاحة حالياً.",
-            reply_markup=get_main_menu_keyboard(is_admin)
-        )
-        return
-    
-    builder = InlineKeyboardBuilder()
-    for cat in categories:
-        builder.row(types.InlineKeyboardButton(
-            text=f"{cat['icon']} {cat['display_name']}", 
-            callback_data=f"cat_{cat['id']}"
-        ))
-    
-    builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع", 
-        callback_data="back_to_main"
-    ))
-    
-    await message.answer(
-        "🌟 **اختر القسم:**\n\n"
-        "🔸 اختر الفئة التي تريدها:", 
-        reply_markup=builder.as_markup()
-    )
 
 @router.callback_query(F.data.startswith("disabled_app_"))
 async def handle_disabled_app(callback: types.CallbackQuery):
