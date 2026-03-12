@@ -62,7 +62,7 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(
         "🌟 **الأقسام**:\n\n"
-        "🔸اختر القسم المفضل:"
+        "🔸اختر القسم المفضل:",
         reply_markup=builder.as_markup()
     )
 
@@ -286,7 +286,7 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(
         "🌟 **الأقسام**:\n\n"
-        "🔸اختر القسم المفضل:"
+        "🔸اختر القسم المفضل:",
         reply_markup=builder.as_markup()
     )
 
