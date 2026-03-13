@@ -126,7 +126,7 @@ async def get_product_name(message: types.Message, state: FSMContext):
     if len(product_name) < 2:
         return await message.answer(
             "❌ اسم المنتج قصير جداً. أدخل اسم أطول:",
-            reply_markup=get_cancel_keyboard()
+            
         )
     
     await state.update_data(product_name=product_name)
@@ -134,7 +134,7 @@ async def get_product_name(message: types.Message, state: FSMContext):
         "💰 **أدخل سعر الوحدة بالدولار:**\n"
         "مثال: 0.001\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(ProductStates.waiting_product_price)
 
@@ -149,7 +149,7 @@ async def get_product_price(message: types.Message, state: FSMContext):
         if price <= 0:
             return await message.answer(
                 "⚠️ السعر يجب أن يكون أكبر من 0:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
         await state.update_data(product_price=price)
@@ -157,13 +157,13 @@ async def get_product_price(message: types.Message, state: FSMContext):
             "📦 **أدخل الحد الأدنى للكمية:**\n"
             "مثال: 100\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            
         )
         await state.set_state(ProductStates.waiting_product_min)
     except ValueError:
         await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 0.001):",
-            reply_markup=get_cancel_keyboard()
+            
         )
 
 @router.message(ProductStates.waiting_product_min)
@@ -177,7 +177,7 @@ async def get_product_min(message: types.Message, state: FSMContext):
         if min_units <= 0:
             return await message.answer(
                 "⚠️ الحد الأدنى يجب أن يكون أكبر من 0:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
         await state.update_data(product_min=min_units)
@@ -202,14 +202,14 @@ async def get_product_min(message: types.Message, state: FSMContext):
             "📈 **أدخل نسبة الربح (%):**\n"
             "مثال: 10\n\n"
             "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            
         )
         await state.set_state(ProductStates.waiting_product_profit)
         
     except ValueError:
         await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):",
-            reply_markup=get_cancel_keyboard()
+            
         )
 
 @router.message(ProductStates.waiting_product_profit)
@@ -223,7 +223,7 @@ async def get_product_profit(message: types.Message, state: FSMContext, db_pool)
         if profit < 0:
             return await message.answer(
                 "⚠️ نسبة الربح لا يمكن أن تكون سالبة:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
         data = await state.get_data()
@@ -265,7 +265,7 @@ async def get_product_profit(message: types.Message, state: FSMContext, db_pool)
     except ValueError:
         await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 10):",
-            reply_markup=get_cancel_keyboard()
+            
         )
     except Exception as e:
         logger.error(f"❌ خطأ في إضافة المنتج: {e}")
@@ -345,8 +345,8 @@ async def edit_product_form(callback: types.CallbackQuery, state: FSMContext, db
         f"• الحالة: {'✅ نشط' if product['is_active'] else '❌ غير نشط'}\n\n"
         f"📝 أرسل البيانات الجديدة بالصيغة:\n"
         f"`الاسم|السعر|الحد_الأدنى|الربح`\n\n"
-        f"مثال: `اسم جديد|0.002|200|15`\n\n"
-        f"أو أرسل /cancel للإلغاء"
+        f"مثال:` اسم جديد|0.01|200|10 `\n\n"
+        f" أرسل /cancel للإلغاء"
     )
     
     await safe_edit_message(callback.message, text)
