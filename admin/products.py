@@ -310,7 +310,7 @@ async def edit_product_list(callback: types.CallbackQuery, db_pool):
             callback_data=f"edit_prod_{p['id']}"
         ))
     
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="add_product"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
     
     await safe_edit_message(
         callback.message,
@@ -442,7 +442,7 @@ async def delete_product_list(callback: types.CallbackQuery, db_pool):
             callback_data=f"del_prod_{p['id']}"
         ))
     
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="add_product"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_admin"))
     
     await safe_edit_message(
         callback.message,
