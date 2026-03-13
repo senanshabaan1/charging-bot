@@ -553,7 +553,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
                 callback_data="cancel_order"
             ))
             await message.answer(
-                f"⚠️ **رصيدك غير كافي**\n\n"
+                f"⚠️ رصيدك غير كافي\n\n"
                 f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
                 f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
                 f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
@@ -685,7 +685,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تحديد نوع المنتج للعرض
     type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
     
-    details = f"🔽 اخترت:{type_icon} {app['name']}\n\n"
+    details = f"🔽 اخترت: {type_icon} {app['name']}\n\n"
     details += f"📦 الخيار: {option['name']}\n"
     details += f"🔢 الكمية: {quantity}\n"
     
@@ -810,7 +810,7 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
     status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً" if disabled_count > 0 else ""
     
     await callback.message.edit_text(
-        f"🔽 اخترت:{app_dict['name']}\n\n"
+        f"🔽 اخترت: {app_dict['name']}\n\n"
         f"🔶 النوع: {type_name}\n"
         f"👑 مستواك: VIP {vip_level} (خصم {discount}%)\n"
         f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
