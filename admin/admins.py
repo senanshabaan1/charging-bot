@@ -111,7 +111,7 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
         if new_admin_id == message.from_user.id:
             return await message.answer(
                 "❌ <b>لا يمكنك إضافة نفسك كمشرف</b> (أنت المالك بالفعل)",
-                reply_markup=get_cancel_keyboard(),
+                
                 parse_mode="HTML"
             )
         
@@ -121,8 +121,8 @@ async def add_admin_confirm(message: types.Message, state: FSMContext, db_pool):
             return await message.answer(
                 "❌ <b>المستخدم غير موجود</b> في قاعدة البيانات.\n"
                 "يجب على المستخدم استخدام البوت مرة واحدة على الأقل.\n\n"
-                "أو أرسل /cancel للإلغاء",
-                reply_markup=get_cancel_keyboard(),
+                " أرسل /cancel للإلغاء",
+                
                 parse_mode="HTML"
             )
         
@@ -289,7 +289,7 @@ async def admin_info_start(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.message.answer(
         "أدخل الآيدي الآن:",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(AdminManageStates.waiting_admin_info_id)
 
@@ -435,5 +435,5 @@ async def wrong_input_handler(message: types.Message, state: FSMContext):
     
     await message.answer(
         "❌ يرجى إدخال آيدي صحيح (أرقام فقط)\nأو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        
     )
