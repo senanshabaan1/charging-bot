@@ -65,8 +65,8 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext, db_p
         f"• **نص عريض**\n"
         f"• *نص مائل*\n"
         f"• `كود`\n\n"
-        f"أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        f" أرسل /cancel للإلغاء",
+        
         parse_mode="HTML"
     )
     await state.set_state(BroadcastStates.waiting_broadcast_msg)
@@ -314,8 +314,8 @@ async def send_custom_message_start(callback: types.CallbackQuery, state: FSMCon
         "✉️ <b>إرسال رسالة لمستخدم محدد</b>\n\n"
         "أدخل آيدي المستخدم (ID) أو اليوزر نيم:\n"
         "مثال: <code>123456789</code> أو @username\n\n"
-        "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        " أرسل /cancel للإلغاء",
+        
         parse_mode="HTML"
     )
     await state.set_state(BroadcastStates.waiting_custom_message_user)
@@ -355,8 +355,8 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
         await message.answer(
             "❌ <b>المستخدم غير موجود</b>\n\n"
             "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.\n"
-            "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard(),
+            " أرسل /cancel للإلغاء",
+            
             parse_mode="HTML"
         )
         return
@@ -379,8 +379,8 @@ async def get_custom_message_user(message: types.Message, state: FSMContext, db_
         f"• &lt;b&gt;نص عريض&lt;/b&gt;\n"
         f"• &lt;i&gt;نص مائل&lt;/i&gt;\n"
         f"• &lt;code&gt;كود&lt;/code&gt;\n\n"
-        f"أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        f" أرسل /cancel للإلغاء",
+    
         parse_mode="HTML"
     )
     await state.set_state(BroadcastStates.waiting_custom_message_text)
@@ -468,6 +468,6 @@ async def wrong_input_handler(message: types.Message, state: FSMContext):
         return
     
     await message.answer(
-        "❌ إدخال غير صحيح\nأو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard()
+        "❌ إدخال غير صحيح\n أرسل /cancel للإلغاء",
+        
     )
