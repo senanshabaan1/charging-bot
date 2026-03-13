@@ -49,15 +49,15 @@ async def get_pool():
         async def init_connection(conn):
             await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
 
-        # ✅ زيادة حجم المجمع لتحسين سرعة الاستجابة للأزرار الإنلاين
+        # زيادة حجم المجمع لتحسين سرعة الاستجابة للأزرار الإنلاين
         pool_settings = {
-            "min_size": 5,           # زيادة من 1 إلى 5 اتصالات جاهزة دائماً
-            "max_size": 20,           # زيادة من 5 إلى 20 اتصال كحد أقصى
-            "max_queries": 50000,      # عدد الاستعلامات قبل إعادة الاتصال
-            "command_timeout": 30,     # timeout أقل للاستعلامات
+            "min_size": 5,           # 5 اتصالات جاهزة دائماً
+            "max_size": 20,           # 20 اتصال كحد أقصى
+            "max_queries": 50000,
+            "command_timeout": 30,
             "init": init_connection,
-            "statement_cache_size": 100,  # تفعيل كاش الاستعلامات
-            "max_cached_statement_lifetime": 300,  # 5 دقائق
+            "statement_cache_size": 100,
+            "max_cached_statement_lifetime": 300,
             "server_settings": {'timezone': 'Asia/Damascus'}
         }
 
@@ -175,7 +175,7 @@ async def init_db(pool=None):
             );
         ''')
 
-        # جدول الفئات الفرعية (للألعاب والاشتراكات)
+        # جدول الفئات الفرعية
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS app_variants (
                 id SERIAL PRIMARY KEY,
@@ -391,7 +391,7 @@ async def init_db(pool=None):
             ON CONFLICT (key) DO NOTHING;
         ''')
        
-        # ===== إضافة مفتاح أرقام سيرياتل =====
+        # إضافة مفتاح أرقام سيرياتل
         await conn.execute('''
             INSERT INTO bot_settings (key, value, description) 
             VALUES ('syriatel_nums', '74091109,63826779', 'أرقام سيرياتل كاش')
@@ -500,4 +500,8 @@ async def init_db(pool=None):
             logging.info("✅ تم إضافة عمود description إلى جدول applications")
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود description: {e}")
-        
+            
+        # إصلاح الأعمدة المفقودة
+        try:
+            await conn.execute('ALTER TABLE app_variants ADD COLUMN IF NOT EXISTS display_name TEXT')
+            logging.
