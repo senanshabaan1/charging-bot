@@ -504,4 +504,43 @@ async def init_db(pool=None):
         # إصلاح الأعمدة المفقودة
         try:
             await conn.execute('ALTER TABLE app_variants ADD COLUMN IF NOT EXISTS display_name TEXT')
-            logging.
+            logging.info("✅ تم إضافة عمود display_name إلى app_variants")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة display_name إلى app_variants: {e}")
+            
+        try:
+            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            logging.info("✅ تم إضافة عمود updated_at إلى product_options")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة updated_at إلى product_options: {e}")
+            
+        try:
+            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            logging.info("✅ تم التأكد من وجود created_at في product_options")
+        except Exception as e:
+            logging.warning(f"⚠️ خطأ في إضافة created_at إلى product_options: {e}")
+        
+        # ✅ نجاح - تحرير الاتصال
+        if need_release and pool:
+            await pool.release(conn)
+            logging.debug("🔄 تم تحرير الاتصال وإعادته إلى المجمع")
+        elif not need_release:
+            await conn.close()
+            logging.debug("🔌 تم إغلاق الاتصال المباشر")
+            
+        logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
+        return True
+        
+    except Exception as e:
+        logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
+        
+        # ✅ في حالة الخطأ، حاول تحرير الاتصال
+        if conn:
+            try:
+                if need_release and pool:
+                    await pool.release(conn)
+                elif not need_release:
+                    await conn.close()
+            except:
+                pass
+        return False
