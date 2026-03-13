@@ -321,7 +321,7 @@ async def add_option_start(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.message.answer(
         "أدخل اسم الخيار:",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(OptionStates.waiting_option_name)
 
@@ -344,7 +344,7 @@ async def add_option_step_name(message: types.Message, state: FSMContext):
         f"مثال: `60` لـ 60 UC\n"
         f"الاسم: **{name}**\n\n"
         f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(OptionStates.waiting_option_quantity)
 
@@ -372,7 +372,7 @@ async def add_option_step_quantity(message: types.Message, state: FSMContext):
             f"الاسم: **{option_name}**\n"
             f"الكمية: **{quantity}**\n\n"
             f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
+            
         )
         await state.set_state(OptionStates.waiting_option_supplier_price)
         
@@ -416,7 +416,7 @@ async def add_option_step_supplier_price(message: types.Message, state: FSMConte
         f"الكمية: **{quantity}**\n"
         f"سعر المورد: **${supplier_price:.3f}**\n\n"
         f"❌ اضغط على زر الإلغاء للرجوع",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(OptionStates.waiting_option_profit)
 
@@ -448,7 +448,7 @@ async def add_option_step_profit(message: types.Message, state: FSMContext):
             f"سعر المورد: **${supplier_price:.3f}**\n"
             f"نسبة الربح: **{profit_percent}%**\n\n"
             f"❌ اضغط على زر الإلغاء للرجوع",
-            reply_markup=get_cancel_keyboard()
+            
         )
         await state.set_state(OptionStates.waiting_option_description)
         
@@ -643,7 +643,7 @@ async def edit_field_start(callback: types.CallbackQuery, state: FSMContext):
             f"✏️ **تعديل {field_name}**\n\n"
             f"{instructions.get(field_type, 'أدخل القيمة الجديدة:')}\n\n"
             f"📝 أرسل القيمة الجديدة الآن\n"
-            f"❌ أو أرسل /cancel للإلغاء"
+            f"❌  أرسل /cancel للإلغاء"
         )
         
         await state.set_state(OptionStates.waiting_edit_option_value)
@@ -944,7 +944,7 @@ async def new_game_save(callback: types.CallbackQuery, state: FSMContext, db_poo
         
         await callback.message.edit_text(
             f"✅ **تم إضافة {name} بنجاح!**\n\n"
-            f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك'}\n"
+            f"📱 النوع: {'🎮 لعبة' if game_type == 'game' else '📅 اشتراك' if game_type == 'subscription' else '📱 تطبيق'}\n"
             f"🆔 المعرف: {game_id}\n\n"
             f"🔹 الآن يمكنك إضافة خيارات لهذا التطبيق."
         )
