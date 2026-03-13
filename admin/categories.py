@@ -107,7 +107,7 @@ async def add_category_step_name(message: types.Message, state: FSMContext):
         await message.answer(
             "❌ الاسم يجب أن يكون بدون مسافات. استخدم شرطة سفلية `_` بدلاً من المسافة.\n"
             "مثال: `games` أو `chat_apps`\n\nأدخل اسم داخلي صحيح:",
-            reply_markup=get_cancel_keyboard(),
+            
             parse_mode="Markdown"
         )
         return
@@ -120,7 +120,7 @@ async def add_category_step_name(message: types.Message, state: FSMContext):
         f"الاسم الداخلي: **{name}**\n\n"
         f"مثال: `🎮 ألعاب`\nمثال: `💬 تطبيقات دردشة`\n\n"
         f"أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        
         parse_mode="Markdown"
     )
     await state.set_state(CategoryStates.waiting_category_display_name)
@@ -145,7 +145,7 @@ async def add_category_step_display_name(message: types.Message, state: FSMConte
         "مثال: `🎮` للألعاب\nمثال: `💬` للدردشة\n"
         "أو اتركه فارغاً للايقونة الافتراضية `📁`\n\n"
         "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+    
         parse_mode="Markdown"
     )
     await state.set_state(CategoryStates.waiting_category_icon)
@@ -164,8 +164,8 @@ async def add_category_step_icon(message: types.Message, state: FSMContext):
         "🔢 **أدخل ترتيب القسم (رقم):**\n"
         "الأقسام تظهر حسب الترتيب تصاعدياً\n"
         "مثال: `1` (يظهر أولاً)\nمثال: `5` (يظهر خامساً)\n\n"
-        "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        "أرسل /cancel للإلغاء",
+    
         parse_mode="Markdown"
     )
     await state.set_state(CategoryStates.waiting_category_sort)
@@ -193,7 +193,7 @@ async def add_category_step_sort(message: types.Message, state: FSMContext, db_p
         if existing:
             await message.answer(
                 f"❌ قسم باسم **{name}** موجود مسبقاً.\nالرجاء استخدام اسم داخلي مختلف.",
-                reply_markup=get_cancel_keyboard(),
+                
                 parse_mode="Markdown"
             )
             await state.clear()
@@ -265,8 +265,8 @@ async def edit_category_display_start(callback: types.CallbackQuery, state: FSMC
             "📝 **أدخل الاسم المعروض الجديد:**\n\n"
             "مثال: `🎮 ألعاب جديدة`\n"
             "مثال: `💬 تطبيقات دردشة`\n\n"
-            "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard(),
+            " أرسل /cancel للإلغاء",
+            
             parse_mode="Markdown"
         )
         await state.set_state(CategoryStates.waiting_edit_category_value)
@@ -291,8 +291,8 @@ async def edit_category_icon_start(callback: types.CallbackQuery, state: FSMCont
             "مثال: `💬`\n"
             "مثال: `📱`\n"
             "مثال: `🎯`\n\n"
-            "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard(),
+            " أرسل /cancel للإلغاء",
+            
             parse_mode="Markdown"
         )
         await state.set_state(CategoryStates.waiting_edit_category_value)
@@ -316,8 +316,8 @@ async def edit_category_sort_start(callback: types.CallbackQuery, state: FSMCont
             "مثال: `1` (يظهر أولاً)\n"
             "مثال: `5` (يظهر خامساً)\n\n"
             "📌 الأرقام الأصغر تظهر أولاً\n\n"
-            "أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard(),
+            " أرسل /cancel للإلغاء",
+            
             parse_mode="Markdown"
         )
         await state.set_state(CategoryStates.waiting_edit_category_value)
