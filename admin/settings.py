@@ -121,8 +121,8 @@ async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContex
         f"الرسالة الحالية:\n`{current_msg}`\n\n"
         f"أرسل رسالة الصيانة الجديدة:\n\n"
         f"(هذه الرسالة ستظهر للمستخدمين عند إيقاف البوت)\n\n"
-        f"أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        f" أرسل /cancel للإلغاء",
+        
         parse_mode="Markdown"
     )
     await state.set_state(SettingsStates.waiting_maintenance_msg)
@@ -168,7 +168,7 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
         f"{nums_text}\n\n"
         f"**أدخل الأرقام الجديدة** (كل رقم في سطر منفصل):\n"
         f"مثال:\n74091109\n63826779\n\n"
-        f"أو أرسل /cancel للإلغاء"
+        f" أرسل /cancel للإلغاء"
     )
     
     await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_cancel_keyboard())
@@ -198,7 +198,7 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
         return await message.answer(
             f"❌ الأرقام التالية غير صحيحة:\n{', '.join(invalid_numbers)}\n\n"
             f"يرجى إدخال أرقام صحيحة (8 أرقام على الأقل).",
-            reply_markup=get_cancel_keyboard()
+            
         )
     
     success = await set_syriatel_numbers(db_pool, valid_numbers)
@@ -233,9 +233,9 @@ async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_p
         f"السعر الحالي: {current_rate:,.0f} ل.س\n"
         f"🕐 آخر تحديث: {get_formatted_damascus_time()}\n\n"
         f"📝 **أدخل السعر الجديد:**\n\n"
-        f"أو أرسل /cancel للإلغاء",
+        f" أرسل /cancel للإلغاء",
         parse_mode="Markdown",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(SettingsStates.waiting_new_rate)
 
@@ -253,7 +253,7 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
         if new_rate <= 0:
             return await message.answer(
                 "⚠️ سعر الصرف يجب أن يكون أكبر من 0:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
         if new_rate > 10000:
@@ -278,7 +278,7 @@ async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
     except ValueError:
         await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):",
-            reply_markup=get_cancel_keyboard()
+            
         )
 
 @router.callback_query(F.data.startswith("confirm_high_rate_"))
