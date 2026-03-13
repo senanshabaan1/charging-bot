@@ -536,14 +536,16 @@ async def execute_delete_product(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "list_products")
 async def list_products(callback: types.CallbackQuery, db_pool):
     """عرض جميع المنتجات"""
+    # 1. التحقق من صلاحيات الإدارة
     if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
+        return await callback.answer("❌ غير مصرح لك بالدخول", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
+    # 2. إطفاء مؤشر التحميل في التليجرام فوراً
     await callback.answer()
     
     start_time = time.time()
     
+    # 3. جلب البيانات من قاعدة البيانات (Supabase/PostgreSQL)
     async with db_pool.acquire() as conn:
         products = await conn.fetch('''
             SELECT a.*, c.display_name,
@@ -553,9 +555,14 @@ async def list_products(callback: types.CallbackQuery, db_pool):
             ORDER BY c.sort_order, a.name
         ''')
     
+    builder = InlineKeyboardBuilder()
+    
+    # 4. حالة عدم وجود منتجات
     if not products:
-        # ✅ إذا ما في منتجات، عرض رسالة مع زر رجوع
-        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(
+            text="➕ إضافة أول منتج", 
+            callback_data="add_product"
+        ))
         builder.row(types.InlineKeyboardButton(
             text="🔙 رجوع للوحة التحكم", 
             callback_data="back_to_admin"
@@ -563,12 +570,12 @@ async def list_products(callback: types.CallbackQuery, db_pool):
         
         await safe_edit_message(
             callback.message,
-            "❌ لا توجد منتجات",
+            "❌ لا توجد منتجات مضافة حالياً في القاعدة.",
             reply_markup=builder.as_markup()
         )
         return
     
-    # تجميع المنتجات حسب القسم
+    # 5. تجميع المنتجات حسب القسم (Category)
     products_by_category = {}
     for p in products:
         cat_name = p['display_name'] or 'بدون قسم'
@@ -576,13 +583,13 @@ async def list_products(callback: types.CallbackQuery, db_pool):
             products_by_category[cat_name] = []
         products_by_category[cat_name].append(p)
     
-    text = "📱 **قائمة المنتجات**\n\n"
-    total_count = len(products)
-    text += f"إجمالي المنتجات: {total_count}\n"
-    text += "=" * 30 + "\n\n"
+    # 6. بناء نص القائمة
+    text = "📱 **قائمة المنتجات الحالية**\n\n"
+    text += f"📦 إجمالي المنتجات: {len(products)}\n"
+    text += "━" * 15 + "\n\n"
     
     for category, cats in products_by_category.items():
-        text += f"**{category}** ({len(cats)} منتج):\n"
+        text += f"📁 **{category}** ({len(cats)}):\n"
         for p in cats:
             status = "✅" if p['is_active'] else "❌"
             options_info = f" ({p['options_count']} خيار)" if p['options_count'] > 0 else ""
@@ -591,14 +598,27 @@ async def list_products(callback: types.CallbackQuery, db_pool):
         text += "\n"
     
     elapsed_time = time.time() - start_time
-    text += f"\n⚡ وقت التحميل: {elapsed_time:.2f} ثانية"
+    text += f"⚡ سرعة الاستجابة: {elapsed_time:.2f} ثانية"
     
-    # ✅ إضافة زر الرجوع للوحة التحكم
-    builder = InlineKeyboardBuilder()
+    # 7. إضافة الأزرار (إضافة منتج + رجوع)
+    # استخدمنا builder.row لكل زر ليظهرا تحت بعضهما بشكل عريض
+    builder.row(types.InlineKeyboardButton(
+        text="➕ إضافة منتج جديد", 
+        callback_data="add_product"
+    ))
+    
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع للوحة التحكم", 
         callback_data="back_to_admin"
     ))
+    
+    # 8. تحديث الرسالة
+    await safe_edit_message(
+        callback.message,
+        text,
+        reply_markup=builder.as_markup()
+    )
+    
     
     # تقسيم النص إذا كان طويلاً
     if len(text) > 4000:
