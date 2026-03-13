@@ -450,7 +450,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
         logger.warning(f"🚫 محاولة دخول من مستخدم محظور: {user_id}")
         return await message.answer(
             "🚫 عذراً، حسابك محظور من استخدام البوت.\n\n"
-            "📞 للتواصل مع الدعم: @support"
+            "📞 للتواصل مع الدعم: @Charger444"
         )
     
     # إرسال رسالة الترحيب
