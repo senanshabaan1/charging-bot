@@ -221,7 +221,6 @@ async def show_profile(message: types.Message, user_id: int, db_pool):
         f"• خصمك الحالي: {vip_discount}%\n"
         f"• إجمالي مشترياتك: {total_spent:,.0f} ل.س\n"
         f"{progress_text}\n\n"
-        f"🎁 <b>كل {redemption_rate} نقطة = 1$</b> ({base_syp:.0f} ل.س)\n\n"
         f"🔹 <b>اختر من الأزرار أدناه:</b>"
     )
     
@@ -290,7 +289,6 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
         f"• 1 نقطة لكل مشترك جديد\n"
-        f"• كل 100 نقطة = 1$ ({base_syp:.0f} ل.س)\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
@@ -307,21 +305,23 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data == "redeem_points_menu")
 async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     """قائمة استرداد النقاط"""
-    # ✅ إطفاء الزر فوراً
-    await callback.answer()
     
-    # ✅ استخدام الكاش لرصيد النقاط
+    # 1. جلب البيانات أولاً قبل الرد على الـ callback
     points = await get_cached_user_points(db_pool, callback.from_user.id)
-    
     redemption_rate = await get_redemption_rate(db_pool)
-    exchange_rate = await get_exchange_rate(db_pool)
     
+    # 2. التحقق من النقاط
     if points < redemption_rate:
+        # هنا نرسل التنبيه وننهي الدالة
         return await callback.answer(
-            f"تحتاج {redemption_rate} نقطة على الأقل للاسترداد.\nلديك {points} نقطة فقط.", 
+            f"❌ عذراً! تحتاج {redemption_rate} نقطة على الأقل للاسترداد.\nلديك {points} نقطة فقط.", 
             show_alert=True
         )
     
+    # 3. إذا كانت نقاطه كافية، "نطفي" الزر ونكمل العمل
+    await callback.answer()
+    
+    exchange_rate = await get_exchange_rate(db_pool)
     base_syp = 1 * exchange_rate
     max_redemptions = min(points // redemption_rate, 20)
     
@@ -329,10 +329,9 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     for i in range(1, max_redemptions + 1):
         points_needed = i * redemption_rate
         syp_amount = i * base_syp
-        usd_amount = i * 1
         
         builder.row(types.InlineKeyboardButton(
-            text=f"{usd_amount}$ ({syp_amount:.0f} ل.س) - {points_needed} نقطة",
+            text=f"{i}$ ({syp_amount:.0f} ل.س) - {points_needed} نقطة",
             callback_data=f"redeem_{points_needed}_{syp_amount:.0f}_{exchange_rate}"
         ))
     
@@ -343,16 +342,17 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     
     text = (
         f"🎁 **استرداد النقاط**\n\n"
-        f"لديك {points} نقطة\n"
+        f"لديك **{points}** نقطة\n"
         f"🎯 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)\n\n"
         f"اختر المبلغ الذي تريد استرداده:"
     )
     
-    # ✅ تعديل النص والكيبورد بطلب واحد
     await callback.message.edit_text(
         text,
-        reply_markup=builder.as_markup()
-    )
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown" # لضمان ظهور النص الغامق بشكل صحيح
+        )
+    
 
 # ========== معالجة طلب الاسترداد ==========
 @router.callback_query(F.data.startswith("redeem_"))
@@ -457,7 +457,6 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
         f"• من الإحالات: {points_from_referrals} نقطة\n"
         f"• من المشتريات: {points_from_orders} نقطة\n"
         f"• تم استردادها: {points_redeemed} نقطة\n\n"
-        f"💱 **سعر الصرف:** {exchange_rate:.0f} ل.س = 1$\n"
         f"🎁 **معدل الاسترداد:** كل {redemption_rate} نقطة = 1$ ({base_syp:.0f} ل.س)"
     )
     
