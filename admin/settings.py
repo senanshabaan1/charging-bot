@@ -171,7 +171,7 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
         f" أرسل /cancel للإلغاء"
     )
     
-    await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_cancel_keyboard())
+    await callback.message.answer(text, parse_mode="Markdown")
     await state.set_state(SettingsStates.waiting_new_syriatel_numbers)
 
 @router.message(SettingsStates.waiting_new_syriatel_numbers)
