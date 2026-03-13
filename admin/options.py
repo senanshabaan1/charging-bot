@@ -513,7 +513,7 @@ async def add_option_step_description(message: types.Message, state: FSMContext,
     
     # عرض الخيارات المحدثة مع تحديد نوع المنتج
     type_icon = "🎮" if product['type'] == 'game' else "📅" if product['type'] == 'subscription' else "📱"
-    type_name = "لعبة" if product['type'] == 'game' else "اشتراك" if product['type'] == 'subscription' else "خدمة"
+    type_name = "لعبة" if product['type'] == 'game' else "اشتراك" if product['type'] == 'subscription' else "تطبيق"
     
     text = f"{type_icon} **{product['name']}**\n"
     text += f"📝 **النوع:** {type_name}\n"
@@ -910,7 +910,8 @@ async def new_game_get_type(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="🎮 لعبة", callback_data="new_game_type_game"),
-        types.InlineKeyboardButton(text="📅 اشتراك", callback_data="new_game_type_subscription")
+        types.InlineKeyboardButton(text="📅 اشتراك", callback_data="new_game_type_subscription"),
+        types.InlineKeyboardButton(text="📱 تطبيق", callback_data="new_game_type_apps")
     )
     
     await message.answer(f"📱 **الاسم:** {name}\n\nاختر النوع:", reply_markup=builder.as_markup())
