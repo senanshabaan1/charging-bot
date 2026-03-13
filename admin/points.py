@@ -158,7 +158,7 @@ async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext,
         f"مثال: `1 1 100 100`\n\n"
         f"أو أرسل /cancel للإلغاء",
         parse_mode="Markdown",
-        reply_markup=get_cancel_keyboard()
+        
     )
     await state.set_state(PointsStates.waiting_points_settings)
 
