@@ -56,8 +56,8 @@ async def get_pool():
             "max_queries": 50000,
             "command_timeout": 30,
             "init": init_connection,
-            "statement_cache_size": 100,
-            "max_cached_statement_lifetime": 300,
+            "statement_cache_size": 0,
+            "max_cached_statement_lifetime": 0,
             "server_settings": {'timezone': 'Asia/Damascus'}
         }
 
