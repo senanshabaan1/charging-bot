@@ -40,31 +40,35 @@ async def set_database_timezone(pool):
         return False
 
 async def get_pool():
-    """إنشاء مجمع اتصالات ذكي يدعم الرابط أو المصفوفة مع قيود الخطة المجانية"""
+    """إنشاء مجمع اتصالات عالي الأداء لسرعة استجابة أفضل"""
     try:
+        from config import DATABASE_URL, DB_CONFIG
+        
         dsn_link = DATABASE_URL if DATABASE_URL else DB_CONFIG.get("dsn")
         
         async def init_connection(conn):
             await conn.execute("SET TIMEZONE TO 'Asia/Damascus'")
 
+        # ✅ زيادة حجم المجمع لتحسين سرعة الاستجابة للأزرار الإنلاين
         pool_settings = {
-            "min_size": 1,
-            "max_size": 5,
-            "command_timeout": 60,
+            "min_size": 5,           # زيادة من 1 إلى 5 اتصالات جاهزة دائماً
+            "max_size": 20,           # زيادة من 5 إلى 20 اتصال كحد أقصى
+            "max_queries": 50000,      # عدد الاستعلامات قبل إعادة الاتصال
+            "command_timeout": 30,     # timeout أقل للاستعلامات
             "init": init_connection,
-            "statement_cache_size": 0,
-            "max_cached_statement_lifetime": 0,
+            "statement_cache_size": 100,  # تفعيل كاش الاستعلامات
+            "max_cached_statement_lifetime": 300,  # 5 دقائق
             "server_settings": {'timezone': 'Asia/Damascus'}
         }
 
         if dsn_link:
-            logging.info(f"🔌 محاولة الاتصال باستخدام DSN: {dsn_link[:50]}...")
+            logging.info(f"🔌 محاولة الاتصال باستخدام DSN مع pool محسّن: {dsn_link[:50]}...")
             pool = await asyncpg.create_pool(dsn=dsn_link, **pool_settings)
         else:
             logging.info(f"🔌 محاولة الاتصال باستخدام الإعدادات: {DB_CONFIG.get('host')}")
             pool = await asyncpg.create_pool(**DB_CONFIG, **pool_settings)
             
-        logging.info("✅ تم إنشاء مجمع الاتصالات بنجاح (الحد الأقصى: 5)")
+        logging.info(f"✅ تم إنشاء مجمع اتصالات عالي الأداء (min=5, max=20) - لسرعة استجابة أفضل")
         return pool
     except Exception as e:
         logging.error(f"❌ فشل إنشاء مجمع الاتصالات: {e}")
@@ -496,13 +500,4 @@ async def init_db(pool=None):
             logging.info("✅ تم إضافة عمود description إلى جدول applications")
         except Exception as e:
             logging.warning(f"⚠️ خطأ في إضافة عمود description: {e}")
-            
-        # إصلاح الأعمدة المفقودة
-        try:
-            await conn.execute('ALTER TABLE app_variants ADD COLUMN IF NOT EXISTS display_name TEXT')
-            logging.info("✅ تم إضافة عمود display_name إلى app_variants")
-        except Exception as e:
-            logging.warning(f"⚠️ خطأ في إضافة display_name إلى app_variants: {e}")
-            
-        try:
-            await con
+        
