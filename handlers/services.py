@@ -549,7 +549,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
             remaining = total_syp - user['balance']
             builder = InlineKeyboardBuilder()
             builder.row(types.InlineKeyboardButton(
-                text="🔙 رجوع",
+                text="❌ إلغاء",
                 callback_data="cancel_order"
             ))
             await message.answer(
@@ -625,7 +625,7 @@ async def handle_confirm_state(message: types.Message, state: FSMContext):
     """معالج إذا كان المستخدم في حالة التأكيد وأرسل رسالة نصية"""
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
-        text="🔙 رجوع",
+        text="❌ إلغاء",
         callback_data="cancel_order"
     ))
     
@@ -841,7 +841,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     if not target_id:
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع",
+            text="❌ إلغاء",
             callback_data="cancel_order"
         ))
         await message.answer(
