@@ -259,7 +259,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     
     # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
-        f"📱 {category['display_name']}\n\n"
+        f" {category['display_name']}\n\n"
         f"👤 مستواك: {vip_icon} {vip_name} (خصم {discount}%)\n"
         f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
         f"🔒 التطبيقات المقفلة متوقفة حالياً\n\n"
@@ -390,7 +390,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         ))
         
         # رسالة مناسبة حسب نوع التطبيق
-        type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "خدمة"
+        type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "تطبيق"
         
         # حساب عدد الخيارات المتاحة
         active_count = sum(1 for opt in options if opt['is_active'])
@@ -401,8 +401,8 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً"
         
         await callback.message.edit_text(
-            f"{app_dict['name']}\n\n"
-            f"📱 النوع: {type_name}\n"
+            f"🔽اخترت:{app_dict['name']}\n\n"
+            f"🔶 النوع: {type_name}\n"
             f"👑 مستواك: VIP {vip_level} (خصم {discount}%)\n"
             f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
             f"{status_message}\n\n"
@@ -557,7 +557,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
                 f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
                 f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
                 f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
-                f"**قم بشحن رصيدك من خلال قسم شحن المحفظة**",
+                f"قم بشحن رصيدك من خلال قسم شحن المحفظة",
                 reply_markup=builder.as_markup()
             )
             return
@@ -685,7 +685,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تحديد نوع المنتج للعرض
     type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
     
-    details = f"{type_icon} {app['name']}\n\n"
+    details = f"🔽 اخترت:{type_icon} {app['name']}\n\n"
     details += f"📦 الخيار: {option['name']}\n"
     details += f"🔢 الكمية: {quantity}\n"
     
@@ -810,8 +810,8 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
     status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً" if disabled_count > 0 else ""
     
     await callback.message.edit_text(
-        f"**{app_dict['name']}**\n\n"
-        f"📱 النوع: {type_name}\n"
+        f"🔽 اخترت:{app_dict['name']}\n\n"
+        f"🔶 النوع: {type_name}\n"
         f"👑 مستواك: VIP {vip_level} (خصم {discount}%)\n"
         f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
         f"{status_message}\n\n"
@@ -1060,7 +1060,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
-        f"📋 **مدة تنفيذ الطلب من 5 إلى 30 ساعة .**\n"
+        f"📋 **مدة تنفيذ الطلب من 5 إلى 30 دقيقة .**\n"
         f"⭐ **نقاط مضافة:** +{points}"
         f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}",
