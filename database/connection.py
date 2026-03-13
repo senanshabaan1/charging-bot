@@ -42,8 +42,6 @@ async def set_database_timezone(pool):
 async def get_pool():
     """إنشاء مجمع اتصالات ذكي يدعم الرابط أو المصفوفة مع قيود الخطة المجانية"""
     try:
-        from config import DATABASE_URL, DB_CONFIG
-        
         dsn_link = DATABASE_URL if DATABASE_URL else DB_CONFIG.get("dsn")
         
         async def init_connection(conn):
@@ -106,6 +104,9 @@ async def update_old_records_timezone(pool):
 
 async def init_db(pool=None):
     """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
+    conn = None
+    need_release = False
+    
     try:
         if pool:
             conn = await pool.acquire()
@@ -504,24 +505,4 @@ async def init_db(pool=None):
             logging.warning(f"⚠️ خطأ في إضافة display_name إلى app_variants: {e}")
             
         try:
-            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
-            logging.info("✅ تم إضافة عمود updated_at إلى product_options")
-        except Exception as e:
-            logging.warning(f"⚠️ خطأ في إضافة updated_at إلى product_options: {e}")
-            
-        try:
-            await conn.execute('ALTER TABLE product_options ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
-            logging.info("✅ تم التأكد من وجود created_at في product_options")
-        except Exception as e:
-            logging.warning(f"⚠️ خطأ في إضافة created_at إلى product_options: {e}")
-            
-        if need_release:
-            await pool.release(conn)
-        else:
-            await conn.close()
-            
-        logging.info("✅ تم تهيئة قاعدة البيانات والجداول بنجاح مع جميع الإصلاحات.")
-        return True
-    except Exception as e:
-        logging.error(f"❌ خطأ أثناء تهيئة قاعدة البيانات: {e}")
-        return False
+            await con
