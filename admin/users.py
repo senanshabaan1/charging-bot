@@ -82,8 +82,8 @@ async def user_info_start(callback: types.CallbackQuery, state: FSMContext):
         "👤 **البحث عن مستخدم**\n\n"
         "أدخل آيدي المستخدم (ID) أو اليوزر نيم للبحث:\n"
         "مثال: `123456789` أو `@username`\n\n"
-        "أو أرسل /cancel للإلغاء",
-        reply_markup=get_cancel_keyboard(),
+        " أرسل /cancel للإلغاء",
+        
         parse_mode="Markdown"
     )
     await state.set_state(UserStates.waiting_user_info)
@@ -108,7 +108,7 @@ async def user_info_search(message: types.Message, state: FSMContext, db_pool):
         await message.answer(
             "❌ لم يتم العثور على مستخدمين\n"
             "تأكد من الآيدي أو اليوزر نيم وحاول مرة أخرى.",
-            reply_markup=get_cancel_keyboard()
+            
         )
         return
     
@@ -360,8 +360,8 @@ async def add_points_start(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer(
             f"⭐ **إضافة نقاط للمستخدم {user_id}**\n\n"
             f"أدخل عدد النقاط (رقم موجب):\n\n"
-            f"أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            f" أرسل /cancel للإلغاء",
+            
         )
         await state.set_state(UserStates.waiting_points_amount)
     except Exception as e:
@@ -379,7 +379,7 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
         if points <= 0:
             return await message.answer(
                 "⚠️ يرجى إدخال رقم موجب:",
-                reply_markup=get_cancel_keyboard()
+                
             )
         
         data = await state.get_data()
@@ -434,7 +434,7 @@ async def add_points_finalize(message: types.Message, state: FSMContext, db_pool
     except ValueError:
         await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 100):",
-            reply_markup=get_cancel_keyboard()
+            
         )
     except Exception as e:
         logger.error(f"خطأ في إضافة نقاط: {e}")
@@ -458,8 +458,8 @@ async def edit_balance_from_info(callback: types.CallbackQuery, state: FSMContex
             f"💰 **تعديل رصيد المستخدم {user_id}**\n\n"
             f"أدخل المبلغ المراد إضافته (يمكن أن يكون سالباً للخصم):\n"
             f"مثال: `5000` للإضافة، `-1000` للخصم\n\n"
-            f"أو أرسل /cancel للإلغاء",
-            reply_markup=get_cancel_keyboard()
+            f" أرسل /cancel للإلغاء",
+            
         )
         await state.set_state(UserStates.waiting_balance_amount)
     except Exception as e:
@@ -537,7 +537,7 @@ async def finalize_add_balance(message: types.Message, state: FSMContext, db_poo
     except ValueError:
         return await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 5000 أو -1000):",
-            reply_markup=get_cancel_keyboard()
+            
         )
     except Exception as e:
         logger.error(f"خطأ في تعديل الرصيد: {e}")
