@@ -10,7 +10,7 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     
     # الصف الأول
     builder.row(
-        types.InlineKeyboardButton(text="📱 خدمات الشحن", callback_data="show_categories")
+        types.InlineKeyboardButton(text="🛍️ الخدمات ", callback_data="show_categories")
     )
     
     # الصف الثاني
