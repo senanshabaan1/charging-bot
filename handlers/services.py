@@ -531,7 +531,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
                 f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
                 f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
                 f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
-                f"قم بشحن رصيدك من خلال قسم شحن المحفظة",
+                f"قم بشحن رصيدك من قسم إيداع رصيد  ",
                 reply_markup=builder.as_markup()
             )
             return
@@ -549,7 +549,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     app_name = app['name'].lower()
     instructions = " **الرجاء إرسال الـ 🆔**:"
     
-    if 'pubg' in app_name:
+    if any(x in app_name for x in ['pubg 1', 'pubg 2']):
         instructions = "🎮 **الرجاء إرسال 🆔 اللاعب** (PUBG):"
     elif 'free fire' in app_name:
         instructions = "🔥 **الرجاء إرسال 🆔 اللاعب** (Free Fire):"
@@ -557,8 +557,8 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
         instructions = "⚔️ **الرجاء إرسال إيميل Supercell ID:**"
     elif 'instagram' in app_name:
         instructions = "📸 **الرجاء إرسال اسم المستخدم على Instagram:**"
-    elif 'tiktok' in app_name:
-        instructions = "🎵 **الرجاء إرسال اسم المستخدم على TikTok:**"
+    elif any(x in app_name for x in ['telegram', '⭐ telegram']):
+        instructions = " **الرجاء إرسال اسم المستخدم على TELEGRAM:**"
     elif 'netflix' in app_name:
         instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
     
@@ -676,10 +676,10 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     
     # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
-    if 'pubg' in app_name or 'free fire' in app_name:
-        instructions = "🎮 **يرجى إرسال 🆔 اللاعب:**"
-    elif 'clash' in app_name:
-        instructions = "📧 **يرجى إرسال إيميل Supercell ID الخاص بك:**"
+    if 'pubg 1' in app_name or 'pubg 2' in app_name:
+        instructions = "🎮 **الرجاء إرسال 🆔 اللاعب (PUBG):**"
+    elif 'telegram' in app_name:
+        instructions = "✈️ **الرجاء إرسال اسم المستخدم على TELEGRAM:**"
     elif 'instagram' in app_name or 'tiktok' in app_name:
         instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
