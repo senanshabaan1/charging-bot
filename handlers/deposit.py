@@ -35,9 +35,9 @@ def get_current_syriatel_numbers():
 def get_payment_methods():
     """جلب طرق الدفع المتاحة"""
     return [
-        {"name": "Syriatel Cash", "callback": "m_syr"},
-        {"name": "Sham Cash", "callback": "m_sham_syp"},
-        {"name": "Sham Cash ($)", "callback": "m_sham_usd"},
+        {"name": "SYRIATEL CASH", "callback": "m_syr"},
+        {"name": "SHAM CASH", "callback": "m_sham_syp"},
+        {"name": "SHAM CASH ($)", "callback": "m_sham_usd"},
         {"name": "USDT BEP20 ($)", "callback": "m_usdt"},
     ]
 
@@ -263,9 +263,11 @@ async def get_amount(message: types.Message, state: FSMContext):
         
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
+            f"✅ **يرجى الايداع على أحد الأكواد التالية**:\n"
             f"{nums_text}\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية**:\n"
-            f"💡 *اضغط على الرقم لنسخه*",
+            f"✅ **التحويل يدوي حصرا ‼️**:\n"
+            f"✅ **بعد التحويل، أرسل رقم العملية**:\n\n"
+            f"💡 *ملاحظة :اضغط على الرقم لنسخه*",
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -275,10 +277,10 @@ async def get_amount(message: types.Message, state: FSMContext):
         
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"👛 **إلى محفظة شام كاش ({currency}):**\n"
+            f"💳 **يرحى الإرسال إلى العنوان التالي بعملة الليرة السورية({currency}):**\n\n"
             f"`{data['wallet']}`\n\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية:**\n"
-            f"💡 *اضغط على رقم المحفظة لنسخه*",
+            f"✅ **بعد التحويل، أرسل رقم العملية:**\n\n"
+            f"💡 *ملاحظة : اضغط على العنوان لنسخه*",
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_tx)
@@ -286,10 +288,10 @@ async def get_amount(message: types.Message, state: FSMContext):
     elif data['method'] == "m_usdt":
         await message.answer(
             f"📤 **تحويل {display_amount}**\n\n"
-            f"👛 **إلى عنوان USDT (BEP20):**\n"
+            f"💳 **يرجى التحويل إلى عنوان USDT (BEP20):**\n"
             f"`{data['wallet']}`\n\n"
             f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
-            f"💡 *اضغط على العنوان لنسخه*",
+            f"💡 *ملاحظة : اضغط على العنوان لنسخه*",
             parse_mode="Markdown"
         )
         await state.set_state(DepStates.waiting_photo)
