@@ -557,7 +557,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
         instructions = "⚔️ **الرجاء إرسال إيميل Supercell ID:**"
     elif 'instagram' in app_name:
         instructions = "📸 **الرجاء إرسال اسم المستخدم على Instagram:**"
-    elif any(x in app_name for x in ['تيليجرام بريميوم', '⭐ telegram']):
+    elif any(x in app_name for x in ['TELEGRAM', '⭐ telegram']):
         instructions = "الرجاء إرسال اسم المستخدم على TELEGRAM:"
     elif 'netflix' in app_name:
         instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
