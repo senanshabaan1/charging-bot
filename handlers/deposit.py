@@ -260,15 +260,17 @@ async def get_amount(message: types.Message, state: FSMContext):
         nums_text = ""
         for i, num in enumerate(syriatel_nums, 1):
             nums_text += f"📞 **رقم {i}:** `{num}`\n"
+        await message.answer(
+    
         
         await message.answer(
-            f"📤 **تحويل {display_amount}**\n\n"
-            f"✅ **يرجى الايداع على أحد الأكواد التالية**:\n"
+            f"📤 <b>تحويل {display_amount}</b>\n\n"
+            f"✅ <u><b>يرجى الايداع على أحد الأكواد التالية</b></u>:\n"
             f"{nums_text}\n"
-            f"✅ **التحويل يدوي حصرا ‼️**:\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية**:\n\n"
-            f"💡 *ملاحظة :اضغط على الرقم لنسخه*",
-            parse_mode="Markdown"
+            f"✅ <b>التحويل يدوي حصراً ‼️</b>\n"
+            f"✅ <b>بعد التحويل، أرسل رقم العملية</b>\n\n"
+            f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
+            parse_mode="HTML"
         )
         await state.set_state(DepStates.waiting_tx)
     
@@ -276,23 +278,23 @@ async def get_amount(message: types.Message, state: FSMContext):
         currency = "ل.س" if data['method'] == "m_sham_syp" else "$"
         
         await message.answer(
-            f"📤 **تحويل {display_amount}**\n\n"
-            f"💳 **يرحى الإرسال إلى العنوان التالي بعملة الليرة السورية({currency}):**\n\n"
+            f"📤 <b>تحويل {display_amount}</b>\n\n"
+            f"💳 <u><b>يرحى الإرسال إلى العنوان التالي بعملة الليرة السورية({currency}):</b></u>\n\n"
             f"`{data['wallet']}`\n\n"
-            f"✅ **بعد التحويل، أرسل رقم العملية:**\n\n"
-            f"💡 *ملاحظة : اضغط على العنوان لنسخه*",
-            parse_mode="Markdown"
+            f"✅ <b>بعد التحويل، أرسل رقم العملية:</b>\n\n"
+            f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
+            parse_mode="HTML"
         )
         await state.set_state(DepStates.waiting_tx)
     
     elif data['method'] == "m_usdt":
         await message.answer(
-            f"📤 **تحويل {display_amount}**\n\n"
-            f"💳 **يرجى التحويل إلى عنوان USDT (BEP20):**\n"
+            f"📤 <b>تحويل {display_amount}</b>\n\n"
+            f"💳 <u><b>يرجى التحويل إلى عنوان USDT (BEP20):</b></u>\n"
             f"`{data['wallet']}`\n\n"
-            f"📸 **بعد التحويل، أرسل لقطة شاشة للتحويل:**\n"
-            f"💡 *ملاحظة : اضغط على العنوان لنسخه*",
-            parse_mode="Markdown"
+            f"📸 <b>بعد التحويل، أرسل لقطة شاشة للتحويل:</b>\n"
+            f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
+            parse_mode="HTML"
         )
         await state.set_state(DepStates.waiting_photo)
 
