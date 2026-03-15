@@ -277,7 +277,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
-            f"💳 <u><b>يرحى الإرسال إلى العنوان التالي بعملة الليرة السورية({currency}):</b></u>\n\n"
+            f"💳 <u><b>يرحى الإرسال إلى العنوان التالي ({currency}):</b></u>\n\n"
             f"<code>{data['wallet']}</code>\n\n"
             f"✅ <b>بعد التحويل، أرسل رقم العملية:</b>\n\n"
             f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
