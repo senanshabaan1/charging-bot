@@ -228,7 +228,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             # عرض السعر مع إشارة الخصم
             if discount > 0:
                 if app['type'] == 'game' and min_units > 1:
-                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units}) (خصم {discount}%)"
+                    button_text = f"{icon} {app['name']}\n (خصم {discount}%)"
                 else:
                     button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
             else:
