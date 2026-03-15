@@ -97,7 +97,7 @@ async def deposit_back_handler(message: types.Message, state: FSMContext, db_poo
 
 # ============= قائمة طرق الدفع =============
 
-@router.message(F.text == "💰 شحن المحفظة")
+@router.message(F.text == "💳 إيداع رصيد")
 async def choose_meth(message: types.Message, db_pool):
     """عرض قائمة طرق الدفع - تعدل الرسالة الحالية"""
     is_admin = await is_admin_user(db_pool, message.from_user.id)
@@ -116,13 +116,13 @@ async def choose_meth(message: types.Message, db_pool):
     # ✅ تعديل الرسالة الحالية بدلاً من إرسال جديدة
     try:
         await message.edit_text(
-            "💳 **اختر وسيلة الدفع المناسبة**:", 
+            "💳 اختر وسيلة الدفع المناسبة:", 
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
         )
     except:
         # إذا فشل التعديل (مثلاً لأنها أول رسالة)، نرسل رسالة جديدة
         await message.answer(
-            "💳 **اختر وسيلة الدفع المناسبة**:", 
+            "💳 اختر وسيلة الدفع المناسبة:", 
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
         )
 
