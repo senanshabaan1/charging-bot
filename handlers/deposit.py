@@ -259,7 +259,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         
         nums_text = ""
         for i, num in enumerate(syriatel_nums, 1):
-            nums_text += f"📞 **رقم {i}:** `{num}`\n"
+            nums_text += f"📞 <b>رقم {i}:</b> <code>{num}</code>\n"
         
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
@@ -278,7 +278,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
             f"💳 <u><b>يرحى الإرسال إلى العنوان التالي بعملة الليرة السورية({currency}):</b></u>\n\n"
-            f"`{data['wallet']}`\n\n"
+            f"<code>{data['wallet']}</code>\n\n"
             f"✅ <b>بعد التحويل، أرسل رقم العملية:</b>\n\n"
             f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
             parse_mode="HTML"
@@ -289,7 +289,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
             f"💳 <u><b>يرجى التحويل إلى عنوان USDT (BEP20):</b></u>\n"
-            f"`{data['wallet']}`\n\n"
+            f"<code>{data['wallet']}</code>\n\n"
             f"📸 <b>بعد التحويل، أرسل لقطة شاشة للتحويل:</b>\n"
             f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
             parse_mode="HTML"
