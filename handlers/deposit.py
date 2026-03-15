@@ -263,9 +263,9 @@ async def get_amount(message: types.Message, state: FSMContext):
         
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
-            f"✅ <u><b>يرجى الايداع على أحد الأكواد التالية</b></u>:\n"
-            f"{nums_text}\n"
-            f"✅ <b>التحويل يدوي حصراً ‼️</b>\n"
+            f"💳 <u><b>يرجى الايداع على أحد الأكواد التالية</b></u>:\n\n"
+            f"{nums_text}\n\n"
+            f"‼️ <b>التحويل يدوي حصراً ‼️</b>\n\n"
             f"✅ <b>بعد التحويل، أرسل رقم العملية</b>\n\n"
             f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
             parse_mode="HTML"
@@ -307,7 +307,7 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
         amount_info = f"💰 المبلغ: {data['display_amount']}\n"
         amount_info += f"💸 المبلغ بالليرة: {data['amount_syp']:,.0f} ل.س\n"
         
-        method_info = f"📱 الطريقة: {data['method_name']}\n"
+        method_info = f"💳 الطريقة: {data['method_name']}\n"
         
         tx_info_text = f"🔢 رقم العملية: `{tx_info}`\n" if tx_info else ""
         
@@ -397,7 +397,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
     text = (
         f"📋 **تأكيد طلب الشحن**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"📱 **طريقة الدفع:** {data['method_name']}\n"
+        f"💳 **طريقة الدفع:** {data['method_name']}\n"
         f"🔢 **رقم العملية:** `{tx}`\n\n"
         f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
     )
@@ -481,7 +481,7 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
     await callback.message.edit_text(
         f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"🆔 **رقم الطلب:** #{deposit_id}\n"
+        f"🔢 **رقم الطلب:** #{deposit_id}\n"
         f"⏳ **بانتظار موافقة الإدارة.**\n"
         f"📋 **الوقت المتوقع: 5-10 دقائق.**",
         parse_mode="Markdown"
@@ -541,7 +541,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
     text = (
         f"📋 **تأكيد طلب الشحن**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"📱 **طريقة الدفع:** {data['method_name']}\n"
+        f"💳 **طريقة الدفع:** {data['method_name']}\n"
         f"🖼️ **تم استلام لقطة الشاشة**\n\n"
         f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
     )
@@ -626,7 +626,7 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
     await callback.message.edit_text(
         f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"🆔 **رقم الطلب:** #{deposit_id}\n"
+        f"🔢 **رقم الطلب:** #{deposit_id}\n"
         f"⏳ **بانتظار موافقة الإدارة.**\n"
         f"📋 **الوقت المتوقع: 5-10 دقائق.**",
         parse_mode="Markdown"
