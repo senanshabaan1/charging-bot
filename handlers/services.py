@@ -550,15 +550,15 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     instructions = " **الرجاء إرسال الـ 🆔**:"
     
     if any(x in app_name for x in ['pubg 1', 'pubg 2']):
-        instructions = "🎮 **الرجاء إرسال 🆔 اللاعب** (PUBG):"
+        instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
     elif 'free fire' in app_name:
         instructions = "🔥 **الرجاء إرسال 🆔 اللاعب** (Free Fire):"
     elif 'clash' in app_name:
         instructions = "⚔️ **الرجاء إرسال إيميل Supercell ID:**"
     elif 'instagram' in app_name:
         instructions = "📸 **الرجاء إرسال اسم المستخدم على Instagram:**"
-    elif any(x in app_name for x in ['telegram', '⭐ telegram']):
-        instructions = " **الرجاء إرسال اسم المستخدم على TELEGRAM:**"
+    elif any(x in app_name for x in ['تيليجرام بريميوم', '⭐ telegram']):
+        instructions = "الرجاء إرسال اسم المستخدم على TELEGRAM:"
     elif 'netflix' in app_name:
         instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
     
@@ -677,9 +677,9 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
     if 'pubg 1' in app_name or 'pubg 2' in app_name:
-        instructions = "🎮 **الرجاء إرسال 🆔 اللاعب (PUBG):**"
+        instructions = "🎮 الرجاء إرسال 🆔 اللاعب (PUBG):"
     elif 'telegram' in app_name:
-        instructions = "✈️ **الرجاء إرسال اسم المستخدم على TELEGRAM:**"
+        instructions = " الرجاء إرسال اسم المستخدم على TELEGRAM:"
     elif 'instagram' in app_name or 'tiktok' in app_name:
         instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
