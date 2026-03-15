@@ -547,7 +547,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
         price_message = f"💰 المبلغ الإجمالي: {total_syp:,.0f} ل.س"
     
     app_name = app['name'].lower()
-    instructions = " **الرجاء إرسال الـ 🆔**:"
+    instructions = " **الرجاء إرسال الــ 🆔**:"
     
     if any(x in app_name for x in ['pubg 1', 'pubg 2']):
         instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
@@ -659,7 +659,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تحديد نوع المنتج للعرض
     type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
     
-    details = f"🔽 اخترت: {type_icon} {app['name']}\n\n"
+    details = f"🔽 اخترت: {app['name']}\n\n"
     details += f"📦 الخيار: {option['name']}\n"
     details += f"🔢 الكمية: {quantity}\n"
     
@@ -677,13 +677,13 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
     if 'pubg 1' in app_name or 'pubg 2' in app_name:
-        instructions = "🎮 الرجاء إرسال 🆔 اللاعب (PUBG):"
+        instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
     elif 'telegram' in app_name:
         instructions = " الرجاء إرسال اسم المستخدم على TELEGRAM:"
     elif 'instagram' in app_name or 'tiktok' in app_name:
         instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
-        instructions = " ** يرجى إرسال الـ 🆔:**"
+        instructions = " **يرجى إرسال الــ 🆔:**"
     
     # ✅ زر الرجوع للخيارات السابقة
     builder = InlineKeyboardBuilder()
