@@ -260,8 +260,6 @@ async def get_amount(message: types.Message, state: FSMContext):
         nums_text = ""
         for i, num in enumerate(syriatel_nums, 1):
             nums_text += f"📞 **رقم {i}:** `{num}`\n"
-        await message.answer(
-    
         
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
