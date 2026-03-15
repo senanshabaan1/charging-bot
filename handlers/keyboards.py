@@ -15,7 +15,7 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     
     # الصف الثاني
     builder.row(
-        types.InlineKeyboardButton(text="💰 شحن المحفظة", callback_data="show_deposit_methods"),
+        types.InlineKeyboardButton(text="💳 إيداع رصيد", callback_data="show_deposit_methods"),
         types.InlineKeyboardButton(text="👤 حسابي", callback_data="show_profile")
     )
     
@@ -27,7 +27,7 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     
     # الصف الرابع (مساعدة)
     builder.row(
-        types.InlineKeyboardButton(text="❓ مساعدة", callback_data="show_help")
+        types.InlineKeyboardButton(text="❓ مساعدة والدعم", callback_data="show_help")
     )
     
     return builder.as_markup()
