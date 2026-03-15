@@ -165,13 +165,14 @@ async def handle_disabled_app(callback: types.CallbackQuery):
         show_alert=True
     )
 
+# ============= عرض التطبيقات داخل القسم =============
+
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
-    """عرض التطبيقات في قسم معين - مع تمييز التطبيقات المعطلة"""
+    """عرض التطبيقات في قسم معين - الأيقونة والاسم فقط"""
     cat_id = int(callback.data.split("_")[1])
     
     async with db_pool.acquire() as conn:
-        # جلب جميع التطبيقات في القسم (سواء مفعلة أو معطلة)
         apps = await conn.fetch(
             "SELECT * FROM applications WHERE category_id = $1 ORDER BY is_active DESC, name",
             cat_id
@@ -180,14 +181,9 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             "SELECT display_name FROM categories WHERE id = $1",
             cat_id
         )
-        
-        # جلب سعر الصرف الحالي
         current_rate = await get_exchange_rate(db_pool)
-        
-        # جلب مستوى VIP للمستخدم
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
-        vip_level = user_vip.get('vip_level', 0)
         vip_icon = user_vip.get('icon', '⚪')
         vip_name = user_vip.get('name', 'عادي')
     
@@ -201,12 +197,12 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     for app in apps:
         is_active = app['is_active']
         
-        # تحديد الأيقونة حسب حالة التطبيق ونوعه
         if not is_active:
-            icon = "🔒"  # قفل للتطبيقات المعطلة
+            icon = "🔒"
             callback_data = f"disabled_app_{app['id']}"
+            button_text = f"{icon} {app['name']} (متوقف)"
         else:
-            # تعيين الأيقونة حسب نوع التطبيق للمفعلة
+            # اختيار الأيقونة حسب نوع التطبيق
             if app['type'] == 'game':
                 icon = "🎮"
             elif app['type'] == 'subscription':
@@ -214,38 +210,14 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             else:
                 icon = "📱"
             callback_data = f"buy_{app['id']}_{app['type']}"
-        
-        if is_active:
-            # حساب السعر فقط للتطبيقات المفعلة
-            unit_price = float(app['unit_price_usd']) if app['unit_price_usd'] is not None else 0.0
-            profit_percentage = float(app.get('profit_percentage', 0) or 0)
-            min_units = int(app.get('min_units', 1) or 1)
-            
-            final_price_usd = unit_price * (1 + (profit_percentage / 100))
-            discounted_price_usd = final_price_usd * (1 - discount/100)
-            price_syp = discounted_price_usd * current_rate
-            
-            # عرض السعر مع إشارة الخصم
-            if discount > 0:
-                if app['type'] == 'game' and min_units > 1:
-                    button_text = f"{icon} {app['name']}\n (خصم {discount}%)"
-                else:
-                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
-            else:
-                if app['type'] == 'game' and min_units > 1:
-                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س (أقل كمية {min_units})"
-                else:
-                    button_text = f"{icon} {app['name']}\n{price_syp:,.0f} ل.س"
-        else:
-            # للتطبيقات المعطلة - عرض رسالة التوقف فقط
-            button_text = f"{icon} {app['name']} (متوقف)"
+            # عرض الأيقونة والاسم فقط بناءً على طلبك
+            button_text = f"{icon} {app['name']}"
         
         buttons.append(types.InlineKeyboardButton(
             text=button_text, 
             callback_data=callback_data
         ))
     
-    # ترتيب الأزرار (2 في كل صف)
     for i in range(0, len(buttons), 2):
         if i + 1 < len(buttons):
             builder.row(buttons[i], buttons[i + 1])
@@ -256,6 +228,15 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         text="🔙 رجوع للأقسام", 
         callback_data="back_to_categories"
     ))
+    
+    await callback.message.edit_text(
+        f" {category['display_name']}\n\n"
+        f"👤 مستواك: {vip_icon} {vip_name}\n"
+        f"💰 سعر الصرف: {current_rate:,.0f} ل.س\n\n"
+        "🔸 اختر التطبيق أو اللعبة المطلوبة:", 
+        reply_markup=builder.as_markup()
+    )
+
     
     # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
