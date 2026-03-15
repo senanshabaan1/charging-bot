@@ -35,8 +35,8 @@ def get_current_syriatel_numbers():
 def get_payment_methods():
     """جلب طرق الدفع المتاحة"""
     return [
-        {"name": "Syriatel Cash (ل.س)", "callback": "m_syr"},
-        {"name": "Sham Cash (ل.س)", "callback": "m_sham_syp"},
+        {"name": "Syriatel Cash", "callback": "m_syr"},
+        {"name": "Sham Cash", "callback": "m_sham_syp"},
         {"name": "Sham Cash ($)", "callback": "m_sham_usd"},
         {"name": "USDT BEP20 ($)", "callback": "m_usdt"},
     ]
@@ -62,7 +62,7 @@ async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
     
     # ✅ تعديل الرسالة الحالية
     await callback.message.edit_text(
-        "💳 **اختر وسيلة الدفع المناسبة:**", 
+        "💳 اختر وسيلة الدفع المناسبة:", 
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
@@ -144,7 +144,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     
     # تحديد اسم المحفظة حسب الطريقة
     if method == "m_sham_syp":
-        method_name = "شام كاش (ل.س)"
+        method_name = "شام كاش"
         wallet = config.SHAM_CASH_NUM
     elif method == "m_sham_usd":
         method_name = "شام كاش ($)"
