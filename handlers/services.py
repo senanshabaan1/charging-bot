@@ -229,20 +229,13 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_categories"
     ))
     
-    await callback.message.edit_text(
-        f" {category['display_name']}\n\n"
-        f"👤 مستواك: {vip_icon} {vip_name}\n"
-        f"💰 سعر الصرف: {current_rate:,.0f} ل.س\n\n"
-        "🔸 اختر التطبيق أو اللعبة المطلوبة:", 
-        reply_markup=builder.as_markup()
-    )
 
     
     # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
         f" {category['display_name']}\n\n"
         f"👤 مستواك: {vip_icon} {vip_name} (خصم {discount}%)\n"
-        f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
+    
         f"🔒 التطبيقات المقفلة متوقفة حالياً\n\n"
         "🔸 اختر التطبيق المطلوب:", 
         reply_markup=builder.as_markup()
