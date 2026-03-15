@@ -219,7 +219,7 @@ async def notify_user_deposit_rejected(bot: Bot, user_id: int, timestamp: str):
     try:
         await bot.send_message(
             user_id,
-            f"❌ **نعتذر، تم رفض طلب الشحن الخاص بك.**\n\n"
+            f"❌ نعتذر، تم رفض طلب الشحن الخاص بك.\n\n"
             f"📅 **تاريخ الرفض:** {timestamp}\n"
             f"🔸 **الأسباب المحتملة:**\n"
             f"• بيانات التحويل غير صحيحة\n"
@@ -321,7 +321,7 @@ async def notify_user_order_approved(bot, order):
         points = order['points_earned'] or 0
         await bot.send_message(
             order['user_id'],
-            f"✅ **تمت الموافقة على طلبك #{order['id']}**\n\n"
+            f"✅ تمت الموافقة على طلبك #{order['id']}\n\n"
             f"📱 التطبيق: {order['app_name']}\n"
             f"📦 الكمية: {order['quantity']}\n"
             f"🎯 المستهدف: {order['target_id']}\n"
@@ -410,7 +410,7 @@ async def notify_user_order_rejected(bot, order):
             return
         
         text = (
-            f"❌ **تم رفض طلبك #{order_id}**\n\n"
+            f"❌ تم رفض طلبك #{order_id}\n\n"
             f"💰 **تم إعادة:** {order['total_amount_syp']:,.0f} ل.س لرصيدك\n\n"
             f"🔸 **الأسباب المحتملة:**\n"
             "• مشكلة في معلومات الحساب المستهدف\n"
@@ -529,7 +529,7 @@ async def notify_user_order_completed(bot, order, points, user_points, vip_icon,
     try:
         await bot.send_message(
             order['user_id'],
-            f"✅ **تم تنفيذ طلبك #{order['id']} بنجاح!**\n\n"
+            f"✅ تم تنفيذ طلبك #{order['id']} بنجاح!\n\n"
             f"📱 التطبيق: {order['app_name']}\n"
             f"⭐ نقاط مكتسبة: +{points}\n"
             f"💰 رصيد النقاط الجديد: {user_points}\n"
@@ -620,7 +620,7 @@ async def notify_user_order_failed(bot, order):
             return
         
         text = (
-            f"❌ **تعذر تنفيذ طلبك #{order_id}**\n\n"
+            f"❌ تعذر تنفيذ طلبك #{order_id}\n\n"
             f"💰 **تم إعادة المبلغ إلى رصيدك:** {order['total_amount_syp']:,.0f} ل.س\n"
             f"⭐ لم تتم إضافة نقاط لهذا الطلب\n\n"
             f"🔸 **الأسباب المحتملة:**\n"
