@@ -10,13 +10,13 @@ def get_main_menu_keyboard(is_admin_user: bool = False):
     
     # الصف الأول
     builder.row(
-        types.InlineKeyboardButton(text="🛍️ الخدمات ", callback_data="show_categories")
+        types.InlineKeyboardButton(text="🛍️ الـخـدمـات ", callback_data="show_categories")
     )
     
     # الصف الثاني
     builder.row(
-        types.InlineKeyboardButton(text="💳 إيداع رصيد", callback_data="show_deposit_methods"),
-        types.InlineKeyboardButton(text="👤 حسابي", callback_data="show_profile")
+        types.InlineKeyboardButton(text="💳 إيـداع رصيــد", callback_data="show_deposit_methods"),
+        types.InlineKeyboardButton(text="👤 حـسـابـي", callback_data="show_profile")
     )
     
     # الصف الثالث (للمشرفين فقط)
