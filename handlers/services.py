@@ -558,7 +558,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     elif 'instagram' in app_name:
         instructions = "📸 **الرجاء إرسال اسم المستخدم على Instagram:**"
     elif any(x in app_name for x in ['TELEGRAM', '⭐ telegram']):
-        instructions = "الرجاء إرسال اسم المستخدم على TELEGRAM:"
+        instructions = "الرجاء إرسال معرف تيليجرام (🪪 username telegram) :"
     elif 'netflix' in app_name:
         instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
     
@@ -679,7 +679,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     if 'pubg 1' in app_name or 'pubg 2' in app_name:
         instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
     elif 'telegram' in app_name:
-        instructions = " الرجاء إرسال اسم المستخدم على TELEGRAM:"
+        instructions = " الرجاء إرسال معرف تيليجرام ( 🪪 username telegram):"
     elif 'instagram' in app_name or 'tiktok' in app_name:
         instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
@@ -1034,7 +1034,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     await callback.message.edit_text(
         f"✅ **تم إرسال طلبك بنجاح!**\n\n"
         f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
-        f"📋 **مدة تنفيذ الطلب من 5 إلى 30 دقيقة .**\n"
+        f"📋 **مدة تنفيذ الطلب من 1 إلى 15 دقيقة .**\n"
         f"⭐ **نقاط مضافة:** +{points}"
         f"{discount_text}\n\n"
         f"🔸 **رقم طلبك:** #{order_id}",
