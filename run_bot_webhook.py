@@ -29,11 +29,10 @@ from handlers import start, deposit, services, reports
 from admin import router as admin_router
 from handlers.middleware import BotStatusMiddleware, refresh_bot_status_cache
 from handlers.reports import send_daily_report
-from cache import clear_cache, get_cache_stats, Cache
+from cache import clear_cache, get_cache_stats
 
 # ============= إعداد التسجيل (Logging) =============
 
-# إعداد تنسيق التسجيل
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
     format=LOG_FORMAT,
@@ -78,7 +77,6 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="help", description="❓ مساعدة"),
     ]
     
-    # أوامر إضافية للمشرفين
     if ADMIN_ID:
         commands.append(BotCommand(command="admin", description="🛠 لوحة التحكم"))
     
@@ -94,85 +92,104 @@ async def init_database():
     
     logger.info("📦 جاري الاتصال بقاعدة البيانات...")
     
-    # إنشاء مجمع الاتصالات
-    db_pool = await get_pool()
-    
-    if not db_pool:
-        logger.error("❌ فشل بدء البوت: تعذر الاتصال بقاعدة البيانات")
-        return False
-
-    # تهيئة قاعدة البيانات
     try:
+        # ✅ إنشاء مجمع الاتصالات
+        db_pool = await get_pool()
+        
+        if not db_pool:
+            logger.error("❌ فشل إنشاء مجمع الاتصالات")
+            return False
+
+        # ✅ التحقق من الاتصال
+        async with db_pool.acquire() as conn:
+            test = await conn.fetchval("SELECT 1")
+            if test != 1:
+                logger.error("❌ فشل اختبار الاتصال بقاعدة البيانات")
+                return False
+            logger.info("✅ تم اختبار الاتصال بقاعدة البيانات بنجاح")
+
+        # ✅ تهيئة قاعدة البيانات
         await init_db(db_pool)
         logger.info("✅ تم تهيئة قاعدة البيانات")
+        
+        # ✅ إصلاح الجداول
+        try:
+            await fix_points_history_table(db_pool)
+            logger.info("✅ تم إصلاح جداول النقاط")
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في إصلاح جداول النقاط: {e}")
+        
+        # ✅ إصلاح الـ VIP اليدوي
+        try:
+            await fix_manual_vip_for_existing_users(db_pool)
+            logger.info("✅ تم إصلاح مستويات VIP اليدوية")
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في إصلاح VIP: {e}")
+        
+        return True
+        
     except Exception as e:
         logger.error(f"❌ خطأ في تهيئة قاعدة البيانات: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-    
-    # إصلاح الجداول
-    try:
-        await fix_points_history_table(db_pool)
-        logger.info("✅ تم إصلاح جداول النقاط")
-    except Exception as e:
-        logger.warning(f"⚠️ خطأ في إصلاح جداول النقاط: {e}")
-    
-    # إصلاح الـ VIP اليدوي
-    try:
-        await fix_manual_vip_for_existing_users(db_pool)
-        logger.info("✅ تم إصلاح مستويات VIP اليدوية")
-    except Exception as e:
-        logger.warning(f"⚠️ خطأ في إصلاح VIP: {e}")
-    
-    return True
 
 async def check_timezone():
     """التحقق من المنطقة الزمنية"""
-    async with db_pool.acquire() as conn:
-        db_time_now = await conn.fetchval("SELECT NOW()")
-        db_time_damascus = await conn.fetchval("SELECT NOW() AT TIME ZONE 'Asia/Damascus'")
-        current_local = datetime.now(DAMASCUS_TZ)
-        
-        logger.info(f"🕒 وقت السيرفر المحلي: {current_local.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"🕒 وقت DB (خام): {db_time_now}")
-        logger.info(f"🕒 وقت DB (دمشق): {db_time_damascus}")
+    try:
+        async with db_pool.acquire() as conn:
+            db_time_now = await conn.fetchval("SELECT NOW()")
+            db_time_damascus = await conn.fetchval("SELECT NOW() AT TIME ZONE 'Asia/Damascus'")
+            current_local = datetime.now(DAMASCUS_TZ)
+            
+            logger.info(f"🕒 وقت السيرفر المحلي: {current_local.strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"🕒 وقت DB (خام): {db_time_now}")
+            logger.info(f"🕒 وقت DB (دمشق): {db_time_damascus}")
+    except Exception as e:
+        logger.error(f"❌ خطأ في التحقق من الوقت: {e}")
 
 async def init_bot():
     """تهيئة البوت"""
     global bot, dp
     
-    # إنشاء البوت
-    bot = Bot(token=TOKEN)
-    
-    # إنشاء Dispatcher وتمرير db_pool
-    dp = Dispatcher()
-    dp["db_pool"] = db_pool
-    
-    # إضافة ميدل وير
-    dp.message.middleware(BotStatusMiddleware(db_pool))
-    dp.callback_query.middleware(BotStatusMiddleware(db_pool))
-    
-    # تسجيل الهاندلرز
-    dp.include_routers(
-        start.router,
-        admin_router,
-        deposit.router,
-        services.router,
-        reports.router
-    )
-    
-    logger.info("✅ تم تهيئة البوت والـ Dispatcher")
-    return True
+    try:
+        # ✅ إنشاء البوت
+        bot = Bot(token=TOKEN)
+        
+        # ✅ إنشاء Dispatcher
+        dp = Dispatcher()
+        dp["db_pool"] = db_pool
+        
+        # ✅ إضافة ميدل وير
+        dp.message.middleware(BotStatusMiddleware(db_pool))
+        dp.callback_query.middleware(BotStatusMiddleware(db_pool))
+        
+        # ✅ تسجيل الهاندلرز
+        dp.include_routers(
+            start.router,
+            admin_router,
+            deposit.router,
+            services.router,
+            reports.router
+        )
+        
+        logger.info("✅ تم تهيئة البوت والـ Dispatcher")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في تهيئة البوت: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 async def init_scheduler():
     """تهيئة جدولة التقرير اليومي"""
     global scheduler
     
     try:
-        # إيقاف الجدولة القديمة إذا كانت موجودة
         if scheduler and scheduler.running:
             scheduler.shutdown()
         
-        # جلب إعدادات الوقت من قاعدة البيانات
         settings = await get_report_settings(db_pool)
         report_time = settings.get('report_time', '00:00')
         hour, minute = map(int, report_time.split(':'))
@@ -187,7 +204,7 @@ async def init_scheduler():
             args=[bot, db_pool],
             id='daily_report',
             replace_existing=True,
-            misfire_grace_time=3600  # ساعة واحدة سماح
+            misfire_grace_time=3600
         )
         
         scheduler.start()
@@ -200,7 +217,6 @@ async def init_scheduler():
 async def setup_webhook():
     """إعداد webhook"""
     try:
-        # إعدادات webhook
         port = int(os.environ.get('PORT', WEBHOOK_PORT))
         host = os.environ.get('RENDER_EXTERNAL_URL', WEBHOOK_HOST)
         
@@ -211,13 +227,12 @@ async def setup_webhook():
         base_url = host.rstrip('/')
         webhook_url = f"{base_url}{WEBHOOK_PATH}"
         
-        # تعيين webhook
         await bot.set_webhook(
             webhook_url,
             max_connections=50,
             allowed_updates=["message", "callback_query", "chat_member"],
             drop_pending_updates=True,
-            secret_token=os.getenv("WEBHOOK_SECRET", "")  # أمان إضافي
+            secret_token=os.getenv("WEBHOOK_SECRET", "")
         )
         
         logger.info(f"✅ تم تعيين webhook: {webhook_url}")
@@ -232,22 +247,17 @@ async def create_web_app(base_url: str) -> web.Application:
     
     app = web.Application()
     
-    # إضافة مسار webhook
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
         **{"db_pool": db_pool}
     )
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
-    
-    # إعداد التطبيق
     setup_application(app, dp, bot=bot)
     
-    # مسار للتحقق من الصحة
     async def health(request):
         uptime = time.time() - start_time
         cache_stats = get_cache_stats()
-        
         return web.json_response({
             "status": "OK",
             "uptime": f"{uptime:.2f} seconds",
@@ -259,7 +269,6 @@ async def create_web_app(base_url: str) -> web.Application:
         })
     app.router.add_get('/health', health)
     
-    # مسار المعلومات
     async def info(request):
         return web.json_response({
             "name": "LINK Charger Bot",
@@ -269,12 +278,10 @@ async def create_web_app(base_url: str) -> web.Application:
         })
     app.router.add_get('/info', info)
     
-    # الصفحة الرئيسية
     async def index(request):
         uptime = time.time() - start_time
         hours = int(uptime // 3600)
         minutes = int((uptime % 3600) // 60)
-        
         return web.Response(
             text=f"""
             <html>
@@ -311,27 +318,21 @@ async def shutdown():
     """إيقاف التشغيل بشكل آمن"""
     logger.info("🛑 جاري إيقاف البوت...")
     
-    # إيقاف الجدولة
-    global scheduler
     if scheduler and scheduler.running:
         scheduler.shutdown()
         logger.info("✅ تم إيقاف الجدولة")
     
-    # إيقاف الـ runner
     if runner:
         await runner.cleanup()
         logger.info("✅ تم إيقاف خادم الويب")
     
-    # إغلاق مجمع الاتصالات
     if db_pool:
         await db_pool.close()
         logger.info("✅ تم إغلاق مجمع اتصالات قاعدة البيانات")
     
-    # مسح الكاش
     clear_cache()
     logger.info("✅ تم مسح الكاش")
     
-    # حذف webhook
     if bot:
         try:
             await bot.delete_webhook()
@@ -341,8 +342,6 @@ async def shutdown():
         await bot.session.close()
     
     logger.info("👋 تم إيقاف البوت بنجاح")
-    
-    # إنهاء العملية
     sys.exit(0)
 
 async def main():
@@ -354,53 +353,57 @@ async def main():
     logger.info(f"🔧 وضع التطوير: {'نعم' if DEBUG else 'لا'}")
     
     try:
-        # 1. تهيئة قاعدة البيانات
+        # ✅ 1. تهيئة قاعدة البيانات (مع التحقق)
         if not await init_database():
-            logger.error("❌ فشل تهيئة قاعدة البيانات")
-            return
+            logger.error("❌ فشل تهيئة قاعدة البيانات، إعادة المحاولة...")
+            # محاولة ثانية
+            await asyncio.sleep(2)
+            if not await init_database():
+                logger.critical("❌ فشل تهيئة قاعدة البيانات بعد المحاولتين")
+                return
         
-        # 2. التحقق من الوقت
+        # ✅ 2. التحقق من الوقت
         await check_timezone()
         
-        # 3. تحميل الإعدادات من قاعدة البيانات
+        # ✅ 3. تحميل الإعدادات
         try:
             await load_exchange_rate(db_pool)
             await load_bot_settings(db_pool)
         except Exception as e:
             logger.error(f"❌ خطأ في تحميل الإعدادات: {e}")
         
-        # 4. تهيئة البوت
+        # ✅ 4. تهيئة البوت
         if not await init_bot():
             logger.error("❌ فشل تهيئة البوت")
             return
         
-        # 5. تحديث كاش حالة البوت
+        # ✅ 5. تحديث كاش حالة البوت
         await refresh_bot_status_cache(db_pool)
         
-        # 6. مسح الكاش عند بدء التشغيل
+        # ✅ 6. مسح الكاش
         clear_cache()
         
-        # 7. تعيين الأوامر
+        # ✅ 7. تعيين الأوامر
         await set_bot_commands(bot)
         
-        # 8. تهيئة الجدولة
+        # ✅ 8. تهيئة الجدولة
         await init_scheduler()
         
-        # 9. إعداد webhook
+        # ✅ 9. إعداد webhook
         port, base_url = await setup_webhook()
         
-        # 10. إنشاء تطبيق الويب
+        # ✅ 10. إنشاء تطبيق الويب
         await create_web_app(base_url)
         
-        # 11. تشغيل الخادم
+        # ✅ 11. تشغيل الخادم
         await start_server(port)
         
-        # 12. إحصائيات البداية
+        # ✅ 12. إحصائيات البداية
         elapsed = time.time() - start_time
         logger.info(f"✅ تم بدء التشغيل بنجاح في {elapsed:.2f} ثانية")
         logger.info(f"📊 إحصائيات الكاش: {get_cache_stats()}")
         
-        # 13. الانتظار إلى أجل غير مسمى
+        # ✅ 13. الانتظار
         await asyncio.Event().wait()
         
     except asyncio.CancelledError:
@@ -412,14 +415,9 @@ async def main():
     finally:
         await shutdown()
 
-# ============= نقطة الدخول الرئيسية =============
-
 if __name__ == "__main__":
     try:
-        # إعداد معالجات الإشارات
         setup_signal_handlers()
-        
-        # تشغيل البوت
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("⏹️ تم إيقاف البوت بواسطة المستخدم")
