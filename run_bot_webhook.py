@@ -18,13 +18,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import (
     TOKEN, ADMIN_ID, DEBUG, LOG_LEVEL, LOG_FORMAT, LOG_FILE,
     WEBHOOK_PATH, WEBHOOK_PORT, WEBHOOK_HOST, WEBHOOK_URL,
-    load_exchange_rate, load_bot_settings, load_all_exchange_rates  # ✅ إضافة load_all_exchange_rates
+    load_exchange_rate, load_bot_settings, load_all_exchange_rates
 )
 from database.connection import get_pool, init_db, DAMASCUS_TZ
 from database.points import fix_points_history_table
 from database.stats import get_report_settings
 from database.admin import fix_manual_vip_for_existing_users
-from database.core import get_all_exchange_rates, get_active_global_offer, get_active_deposit_bonus  # ✅ إضافة دوال العروض
+from database.core import get_all_exchange_rates, get_active_deposit_bonus  # ✅ فقط مكافآت الإيداع
 from utils import api_client
 
 from handlers import start, deposit, services, reports
@@ -163,14 +163,12 @@ async def load_all_settings():
                 api_client.base_url = api_url.rstrip('/')
                 logger.info(f"🌐 تم تحميل رابط API: {api_client.base_url}")
         
-        # ✅ تحميل العروض النشطة
-        active_offer = await get_active_global_offer(db_pool)
-        if active_offer:
-            logger.info(f"🎁 عرض نشط: {active_offer['discount_percent']}% خصم حتى {active_offer['end_date']}")
-        
+        # ✅ تحميل مكافأة الإيداع النشطة فقط (بدون عروض عامة)
         active_bonus = await get_active_deposit_bonus(db_pool)
         if active_bonus:
-            logger.info(f"💰 مكافأة نشطة: {active_bonus['bonus_percent']}% على الإيداع")
+            logger.info(f"💰 مكافأة إيداع نشطة: {active_bonus['bonus_percent']}% على الإيداع (حتى {active_bonus['end_date'].strftime('%Y-%m-%d')})")
+        else:
+            logger.info("💰 لا توجد مكافأة إيداع نشطة حالياً")
         
         return True
     except Exception as e:
@@ -526,7 +524,7 @@ async def main():
         # ✅ 2. التحقق من الوقت
         await check_timezone()
         
-        # ✅ 3. تحميل جميع الإعدادات (أسعار الصرف، رابط API، العروض)
+        # ✅ 3. تحميل جميع الإعدادات (أسعار الصرف، رابط API، مكافآت الإيداع)
         await load_all_settings()
         
         # ✅ 4. تحميل الإعدادات القديمة للتوافق
