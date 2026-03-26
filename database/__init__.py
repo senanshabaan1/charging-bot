@@ -4,10 +4,9 @@ from .core import (
     get_bot_status, set_bot_status, get_maintenance_message,
     get_exchange_rate, set_exchange_rate, get_all_exchange_rates, update_exchange_rate,
     get_syriatel_numbers, set_syriatel_numbers,
-    get_active_global_offer, get_all_global_offers, create_global_offer, deactivate_global_offer,
     get_active_deposit_bonus, get_all_deposit_bonuses, create_deposit_bonus, deactivate_deposit_bonus,
     record_offer_usage, has_user_used_offer, get_offer_usage_stats,
-    get_offer_discount, get_deposit_bonus_percent
+    get_deposit_bonus_percent
 )
 from .users import get_user_profile, get_user_full_stats, get_user_by_id, update_user_balance, get_all_users, is_admin_user
 from .referrals import generate_referral_code, check_duplicate_referral, process_referral, get_referral_stats, detect_suspicious_referrals, get_user_referral_info
@@ -36,14 +35,13 @@ __all__ = [
     # connection
     'get_pool', 'init_db', 'set_database_timezone', 'update_old_records_timezone', 'DAMASCUS_TZ', 'format_local_time',
     
-    # core - أسعار الصرف والعروض
+    # core - مكافآت الإيداع فقط
     'get_bot_status', 'set_bot_status', 'get_maintenance_message',
     'get_exchange_rate', 'set_exchange_rate', 'get_all_exchange_rates', 'update_exchange_rate',
     'get_syriatel_numbers', 'set_syriatel_numbers',
-    'get_active_global_offer', 'get_all_global_offers', 'create_global_offer', 'deactivate_global_offer',
     'get_active_deposit_bonus', 'get_all_deposit_bonuses', 'create_deposit_bonus', 'deactivate_deposit_bonus',
     'record_offer_usage', 'has_user_used_offer', 'get_offer_usage_stats',
-    'get_offer_discount', 'get_deposit_bonus_percent',
+    'get_deposit_bonus_percent',
     
     # users
     'get_user_profile', 'get_user_full_stats', 'get_user_by_id', 'update_user_balance', 'get_all_users', 'is_admin_user',
@@ -51,7 +49,7 @@ __all__ = [
     # referrals
     'generate_referral_code', 'check_duplicate_referral', 'process_referral', 'get_referral_stats', 'detect_suspicious_referrals', 'get_user_referral_info',
     
-    # products - مع الدوال الجديدة
+    # products
     'get_app_variants', 'get_app_variant', 'delete_app_variant',
     'get_product_options', 'get_product_option', 'update_product_option', 'add_product_option',
     'get_product_options_cached', 'get_product_option_cached',
