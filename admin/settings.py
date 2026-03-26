@@ -11,12 +11,10 @@ from config import ADMIN_ID, MODERATORS
 from handlers.keyboards import get_confirmation_keyboard
 from utils import is_admin, is_owner, safe_edit_message, format_amount, get_formatted_damascus_time
 
-# ✅ استيراد الدوال من database.core
+# ✅ استيراد الدوال مباشرة من database.core
 from database.core import (
     get_exchange_rate,
     set_exchange_rate,
-    get_all_exchange_rates,
-    update_exchange_rate,
     get_syriatel_numbers,
     set_syriatel_numbers,
     get_maintenance_message,
@@ -32,15 +30,11 @@ class SettingsStates(StatesGroup):
     waiting_new_rate = State()
     waiting_maintenance_msg = State()
     waiting_new_syriatel_numbers = State()
-    waiting_purchase_rate = State()
-    waiting_deposit_rate = State()
-    waiting_points_rate = State()
 
-
-# ============= دوال مساعدة =============
+# ✅ دوال مساعدة بدون كاش - تجلب من قاعدة البيانات مباشرة
 async def get_db_exchange_rate(db_pool) -> float:
-    """جلب سعر الصرف من قاعدة البيانات مباشرة (للتوافق)"""
-    return await get_exchange_rate(db_pool, 'deposit')
+    """جلب سعر الصرف من قاعدة البيانات مباشرة"""
+    return await get_exchange_rate(db_pool)
 
 async def get_db_syriatel_numbers(db_pool) -> List[str]:
     """جلب أرقام سيرياتل من قاعدة البيانات مباشرة"""
@@ -54,286 +48,7 @@ async def get_db_bot_status(db_pool) -> bool:
     """جلب حالة البوت من قاعدة البيانات مباشرة"""
     return await get_bot_status(db_pool)
 
-
-# ============= قائمة إدارة أسعار الصرف =============
-@router.callback_query(F.data == "exchange_rates_menu")
-async def exchange_rates_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """عرض قائمة إدارة أسعار الصرف المنفصلة"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.answer()
-    
-    rates = await get_all_exchange_rates(db_pool)
-    
-    purchase_rate = rates.get('purchase', 118)
-    deposit_rate = rates.get('deposit', 118)
-    points_rate = rates.get('points', 118)
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(
-            text=f"🔒 سعر الشراء (مخفي): {purchase_rate:,.0f} ل.س",
-            callback_data="edit_purchase_rate"
-        )
-    )
-    builder.row(
-        types.InlineKeyboardButton(
-            text=f"💳 سعر الإيداع (ظاهر): {deposit_rate:,.0f} ل.س",
-            callback_data="edit_deposit_rate"
-        )
-    )
-    builder.row(
-        types.InlineKeyboardButton(
-            text=f"⭐ سعر النقاط: {points_rate:,.0f} ل.س",
-            callback_data="edit_points_rate"
-        )
-    )
-    builder.row(
-        types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data="back_to_admin"
-        )
-    )
-    
-    await safe_edit_message(
-        callback.message,
-        f"💰 **إدارة أسعار الصرف المنفصلة**\n\n"
-        f"🔹 **سعر الشراء (مخفي):** يستخدم لحساب أسعار الخدمات - لا يظهر للمستخدم\n"
-        f"🔹 **سعر الإيداع (ظاهر):** يظهر للمستخدم عند الشحن واستبدال النقاط\n"
-        f"🔹 **سعر النقاط:** يستخدم لحساب قيمة النقاط عند الاسترداد\n\n"
-        f"📊 **الأسعار الحالية:**\n"
-        f"• شراء: {purchase_rate:,.0f} ل.س = 1$\n"
-        f"• إيداع: {deposit_rate:,.0f} ل.س = 1$\n"
-        f"• نقاط: {points_rate:,.0f} ل.س = 1$\n\n"
-        f"🔽 **اختر السعر الذي تريد تعديله:**",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
-    )
-
-
-# ============= تعديل سعر الشراء =============
-@router.callback_query(F.data == "edit_purchase_rate")
-async def edit_purchase_rate_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل سعر الشراء (مخفي)"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.answer()
-    await state.set_state(SettingsStates.waiting_purchase_rate)
-    
-    current_rate = await get_exchange_rate(db_pool, 'purchase')
-    
-    await callback.message.answer(
-        f"🔒 **تعديل سعر الشراء (مخفي)**\n\n"
-        f"⚠️ **هذا السعر لا يظهر للمستخدمين!**\n"
-        f"يستخدم لحساب أسعار الخدمات داخلياً.\n\n"
-        f"💰 **السعر الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
-        f"📝 **أدخل السعر الجديد:**\n"
-        f"(مثال: 125)\n\n"
-        f"❌ للإلغاء أرسل /cancel",
-        parse_mode="Markdown"
-    )
-
-
-# ============= تعديل سعر الإيداع =============
-@router.callback_query(F.data == "edit_deposit_rate")
-async def edit_deposit_rate_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل سعر الإيداع (ظاهر للمستخدم)"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.answer()
-    await state.set_state(SettingsStates.waiting_deposit_rate)
-    
-    current_rate = await get_exchange_rate(db_pool, 'deposit')
-    
-    await callback.message.answer(
-        f"💳 **تعديل سعر الإيداع (ظاهر للمستخدم)**\n\n"
-        f"💰 **السعر الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
-        f"📝 **أدخل السعر الجديد:**\n"
-        f"(مثال: 125)\n\n"
-        f"⚠️ **ملاحظة:** هذا السعر سيظهر للمستخدمين عند الشحن\n\n"
-        f"❌ للإلغاء أرسل /cancel",
-        parse_mode="Markdown"
-    )
-
-
-# ============= تعديل سعر النقاط =============
-@router.callback_query(F.data == "edit_points_rate")
-async def edit_points_rate_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل سعر النقاط"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
-    await callback.answer()
-    await state.set_state(SettingsStates.waiting_points_rate)
-    
-    current_rate = await get_exchange_rate(db_pool, 'points')
-    
-    await callback.message.answer(
-        f"⭐ **تعديل سعر النقاط**\n\n"
-        f"💰 **السعر الحالي:** {current_rate:,.0f} ل.س = 1$\n\n"
-        f"📝 **أدخل السعر الجديد:**\n"
-        f"(مثال: 120)\n\n"
-        f"⚠️ **ملاحظة:** هذا السعر يستخدم لحساب قيمة النقاط عند الاسترداد\n\n"
-        f"❌ للإلغاء أرسل /cancel",
-        parse_mode="Markdown"
-    )
-
-
-# ============= حفظ الأسعار الجديدة =============
-@router.message(SettingsStates.waiting_purchase_rate)
-async def save_purchase_rate(message: types.Message, state: FSMContext, db_pool):
-    """حفظ سعر الشراء الجديد"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        new_rate = float(message.text.replace(',', '').strip())
-        if new_rate <= 0:
-            raise ValueError
-    except:
-        await message.answer(
-            "❌ **خطأ:** الرجاء إدخال رقم صحيح أكبر من 0.\n"
-            "مثال: 125",
-            parse_mode="Markdown"
-        )
-        return
-    
-    start_time = time.time()
-    success = await update_exchange_rate(db_pool, 'purchase', new_rate, message.from_user.id)
-    
-    if success:
-        elapsed_time = time.time() - start_time
-        await message.answer(
-            f"✅ **تم تحديث سعر الشراء بنجاح!**\n\n"
-            f"💰 **السعر الجديد:** {new_rate:,.0f} ل.س = 1$\n\n"
-            f"🔒 هذا السعر **مخفي** عن المستخدمين ويستخدم لحساب أسعار الخدمات.\n"
-            f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية",
-            parse_mode="Markdown"
-        )
-        
-        for mod_id in MODERATORS:
-            if mod_id and mod_id != message.from_user.id:
-                try:
-                    await message.bot.send_message(
-                        mod_id,
-                        f"ℹ️ **تم تغيير سعر الشراء (مخفي)**\n"
-                        f"💰 السعر الجديد: {new_rate:,.0f} ل.س = 1$\n"
-                        f"👤 بواسطة: @{message.from_user.username or 'مشرف'}\n"
-                        f"🕐 {get_formatted_damascus_time()}",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
-    else:
-        await message.answer("❌ **فشل تحديث السعر**", parse_mode="Markdown")
-    
-    await state.clear()
-
-
-@router.message(SettingsStates.waiting_deposit_rate)
-async def save_deposit_rate(message: types.Message, state: FSMContext, db_pool):
-    """حفظ سعر الإيداع الجديد"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        new_rate = float(message.text.replace(',', '').strip())
-        if new_rate <= 0:
-            raise ValueError
-    except:
-        await message.answer(
-            "❌ **خطأ:** الرجاء إدخال رقم صحيح أكبر من 0.\n"
-            "مثال: 125",
-            parse_mode="Markdown"
-        )
-        return
-    
-    start_time = time.time()
-    success = await update_exchange_rate(db_pool, 'deposit', new_rate, message.from_user.id)
-    
-    if success:
-        elapsed_time = time.time() - start_time
-        await message.answer(
-            f"✅ **تم تحديث سعر الإيداع بنجاح!**\n\n"
-            f"💰 **السعر الجديد:** {new_rate:,.0f} ل.س = 1$\n\n"
-            f"👁️ هذا السعر **سيظهر للمستخدمين** عند الشحن واستبدال النقاط.\n"
-            f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية",
-            parse_mode="Markdown"
-        )
-        
-        for mod_id in MODERATORS:
-            if mod_id and mod_id != message.from_user.id:
-                try:
-                    await message.bot.send_message(
-                        mod_id,
-                        f"ℹ️ **تم تغيير سعر الإيداع (ظاهر)**\n"
-                        f"💰 السعر الجديد: {new_rate:,.0f} ل.س = 1$\n"
-                        f"👤 بواسطة: @{message.from_user.username or 'مشرف'}\n"
-                        f"🕐 {get_formatted_damascus_time()}",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
-    else:
-        await message.answer("❌ **فشل تحديث السعر**", parse_mode="Markdown")
-    
-    await state.clear()
-
-
-@router.message(SettingsStates.waiting_points_rate)
-async def save_points_rate(message: types.Message, state: FSMContext, db_pool):
-    """حفظ سعر النقاط الجديد"""
-    if not is_admin(message.from_user.id):
-        return
-    
-    try:
-        new_rate = float(message.text.replace(',', '').strip())
-        if new_rate <= 0:
-            raise ValueError
-    except:
-        await message.answer(
-            "❌ **خطأ:** الرجاء إدخال رقم صحيح أكبر من 0.\n"
-            "مثال: 120",
-            parse_mode="Markdown"
-        )
-        return
-    
-    start_time = time.time()
-    success = await update_exchange_rate(db_pool, 'points', new_rate, message.from_user.id)
-    
-    if success:
-        elapsed_time = time.time() - start_time
-        await message.answer(
-            f"✅ **تم تحديث سعر النقاط بنجاح!**\n\n"
-            f"💰 **السعر الجديد:** {new_rate:,.0f} ل.س = 1$\n\n"
-            f"⭐ هذا السعر يستخدم لحساب قيمة النقاط عند الاسترداد.\n"
-            f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية",
-            parse_mode="Markdown"
-        )
-        
-        for mod_id in MODERATORS:
-            if mod_id and mod_id != message.from_user.id:
-                try:
-                    await message.bot.send_message(
-                        mod_id,
-                        f"ℹ️ **تم تغيير سعر النقاط**\n"
-                        f"💰 السعر الجديد: {new_rate:,.0f} ل.س = 1$\n"
-                        f"👤 بواسطة: @{message.from_user.username or 'مشرف'}\n"
-                        f"🕐 {get_formatted_damascus_time()}",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
-    else:
-        await message.answer("❌ **فشل تحديث السعر**", parse_mode="Markdown")
-    
-    await state.clear()
-
-
-# ============= تشغيل/إيقاف البوت =============
+# تشغيل/إيقاف البوت
 @router.callback_query(F.data == "toggle_bot")
 async def toggle_bot(callback: types.CallbackQuery, db_pool):
     """تشغيل أو إيقاف البوت"""
@@ -346,6 +61,7 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     await callback.answer()
     start_time = time.time()
     
+    # ✅ جلب القيمة الحقيقية من قاعدة البيانات مباشرة
     async with db_pool.acquire() as conn:
         db_status = await conn.fetchval(
             "SELECT value FROM bot_settings WHERE key = 'bot_status'"
@@ -354,9 +70,12 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
     
     new_status = not current_status
     
-    logger.info(f"🔄 تغيير حالة البوت: {current_status} -> {new_status}")
+    logger.info(f"🔄 تغيير حالة البوت: {current_status} ({'🟢' if current_status else '🔴'}) -> {new_status}")
     
+    # ✅ تحديث قاعدة البيانات
     await set_bot_status(db_pool, new_status)
+    
+    # ✅ تحديث كاش الميدل وير (لازم نشيله بعدين)
     await refresh_bot_status_cache(db_pool)
     
     status_text = "🟢 يعمل" if new_status else "🔴 متوقف"
@@ -371,6 +90,7 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
         f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية"
     )
     
+    # إشعار المشرفين
     admin_ids = [ADMIN_ID] + MODERATORS
     for admin_id in admin_ids:
         if admin_id and admin_id != callback.from_user.id:
@@ -384,8 +104,7 @@ async def toggle_bot(callback: types.CallbackQuery, db_pool):
             except:
                 pass
 
-
-# ============= رسالة الصيانة =============
+# رسالة الصيانة
 @router.callback_query(F.data == "edit_maintenance")
 async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء تعديل رسالة الصيانة"""
@@ -394,6 +113,7 @@ async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContex
     
     await callback.answer()
     
+    # ✅ عرض الرسالة الحالية من قاعدة البيانات مباشرة
     current_msg = await get_db_maintenance_message(db_pool)
     
     await callback.message.answer(
@@ -402,10 +122,10 @@ async def edit_maintenance_start(callback: types.CallbackQuery, state: FSMContex
         f"أرسل رسالة الصيانة الجديدة:\n\n"
         f"(هذه الرسالة ستظهر للمستخدمين عند إيقاف البوت)\n\n"
         f" أرسل /cancel للإلغاء",
+        
         parse_mode="Markdown"
     )
     await state.set_state(SettingsStates.waiting_maintenance_msg)
-
 
 @router.message(SettingsStates.waiting_maintenance_msg)
 async def save_maintenance_message(message: types.Message, state: FSMContext, db_pool):
@@ -429,8 +149,7 @@ async def save_maintenance_message(message: types.Message, state: FSMContext, db
     )
     await state.clear()
 
-
-# ============= أرقام سيرياتل =============
+# أرقام سيرياتل
 @router.callback_query(F.data == "edit_syriatel")
 async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء تعديل أرقام سيرياتل كاش"""
@@ -439,6 +158,7 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
     
     await callback.answer()
     
+    # ✅ استخدام قاعدة البيانات مباشرة
     current_nums = await get_db_syriatel_numbers(db_pool)
     
     nums_text = "\n".join([f"{i+1}. `{num}`" for i, num in enumerate(current_nums)])
@@ -454,7 +174,6 @@ async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, 
     await callback.message.answer(text, parse_mode="Markdown")
     await state.set_state(SettingsStates.waiting_new_syriatel_numbers)
 
-
 @router.message(SettingsStates.waiting_new_syriatel_numbers)
 async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
     """حفظ أرقام سيرياتل الجديدة"""
@@ -463,10 +182,12 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
     
     numbers = [line.strip() for line in message.text.split('\n') if line.strip()]
     
+    # ✅ التحقق من صحة الأرقام
     valid_numbers = []
     invalid_numbers = []
     
     for num in numbers:
+        # إزالة أي مسافات أو شرطات
         clean_num = num.replace(' ', '').replace('-', '').replace('+', '')
         if clean_num.isdigit() and len(clean_num) >= 8:
             valid_numbers.append(clean_num)
@@ -477,6 +198,7 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
         return await message.answer(
             f"❌ الأرقام التالية غير صحيحة:\n{', '.join(invalid_numbers)}\n\n"
             f"يرجى إدخال أرقام صحيحة (8 أرقام على الأقل).",
+            
         )
     
     success = await set_syriatel_numbers(db_pool, valid_numbers)
@@ -494,76 +216,121 @@ async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_po
     await message.answer(text, parse_mode="Markdown")
     await state.clear()
 
-
-# ============= سعر الصرف القديم (للتوافق) =============
+# سعر الصرف
 @router.callback_query(F.data == "edit_rate")
 async def start_edit_rate(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل سعر الصرف (يعدل سعر الإيداع فقط)"""
+    """بدء تعديل سعر الصرف"""
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.answer()
     
-    current_rate = await get_exchange_rate(db_pool, 'deposit')
+    # ✅ استخدام قاعدة البيانات مباشرة
+    current_rate = await get_db_exchange_rate(db_pool)
     
     await callback.message.answer(
-        f"💵 **تعديل سعر الإيداع**\n\n"
+        f"💵 **تعديل سعر الصرف**\n\n"
         f"السعر الحالي: {current_rate:,.0f} ل.س\n"
         f"🕐 آخر تحديث: {get_formatted_damascus_time()}\n\n"
         f"📝 **أدخل السعر الجديد:**\n\n"
         f" أرسل /cancel للإلغاء",
         parse_mode="Markdown",
+        
     )
     await state.set_state(SettingsStates.waiting_new_rate)
 
-
 @router.message(SettingsStates.waiting_new_rate)
 async def save_new_rate(message: types.Message, state: FSMContext, db_pool):
-    """حفظ سعر الصرف الجديد (يعدل سعر الإيداع)"""
+    """حفظ سعر الصرف الجديد"""
     if not is_admin(message.from_user.id):
         return
     
     try:
+        # تنظيف النص من الفواصل
         clean_text = message.text.replace(',', '').replace(' ', '')
         new_rate = float(clean_text)
         
         if new_rate <= 0:
             return await message.answer(
                 "⚠️ سعر الصرف يجب أن يكون أكبر من 0:",
+                
             )
         
-        await update_exchange_rate(db_pool, 'deposit', new_rate, message.from_user.id)
+        if new_rate > 10000:
+            # تأكيد إذا كان السعر مرتفع جداً
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                types.InlineKeyboardButton(text="✅ نعم، متابعة", callback_data=f"confirm_high_rate_{new_rate}"),
+                types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_rate_edit")
+            )
+            
+            await message.answer(
+                f"⚠️ **تحذير: سعر صرف مرتفع جداً**\n\n"
+                f"السعر الجديد: {new_rate:,.0f} ل.س\n"
+                f"هل أنت متأكد من متابعة التحديث؟",
+                reply_markup=builder.as_markup()
+            )
+            await state.update_data(temp_rate=new_rate)
+            return
         
-        elapsed_time = time.time() - start_time
-        
-        await message.answer(
-            f"✅ **تم تحديث سعر الإيداع بنجاح**\n\n"
-            f"💰 السعر الجديد: {new_rate:,.0f} ل.س\n"
-            f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية"
-        )
-        
-        for mod_id in MODERATORS:
-            if mod_id and mod_id != message.from_user.id:
-                try:
-                    await message.bot.send_message(
-                        mod_id,
-                        f"ℹ️ تم تغيير سعر الإيداع إلى {new_rate:,.0f} ل.س\n"
-                        f"👤 بواسطة: @{message.from_user.username or 'مشرف'}\n"
-                        f"🕐 {get_formatted_damascus_time()}",
-                        parse_mode="Markdown"
-                    )
-                except:
-                    pass
-        
-        await state.clear()
+        await update_exchange_rate(message, state, db_pool, new_rate)
         
     except ValueError:
         await message.answer(
             "⚠️ خطأ! يرجى إدخال رقم صحيح (مثال: 118):",
+            
         )
 
+@router.callback_query(F.data.startswith("confirm_high_rate_"))
+async def confirm_high_rate(callback: types.CallbackQuery, state: FSMContext, db_pool):
+    """تأكيد سعر الصرف المرتفع"""
+    await callback.answer()
+    
+    new_rate = float(callback.data.replace("confirm_high_rate_", ""))
+    await update_exchange_rate(callback.message, state, db_pool, new_rate)
 
-# ============= عرض الإعدادات الحالية =============
+@router.callback_query(F.data == "cancel_rate_edit")
+async def cancel_rate_edit(callback: types.CallbackQuery, state: FSMContext):
+    """إلغاء تعديل سعر الصرف"""
+    await callback.answer()
+    
+    await state.clear()
+    await safe_edit_message(callback.message, "✅ تم إلغاء تعديل سعر الصرف.")
+
+async def update_exchange_rate(message: types.Message, state: FSMContext, db_pool, new_rate: float):
+    """تحديث سعر الصرف في قاعدة البيانات"""
+    start_time = time.time()
+    
+    await set_exchange_rate(db_pool, new_rate)
+    
+    import config
+    config.USD_TO_SYP = new_rate
+    
+    elapsed_time = time.time() - start_time
+    
+    await message.answer(
+        f"✅ **تم تحديث سعر الصرف بنجاح**\n\n"
+        f"💰 السعر الجديد: {new_rate:,.0f} ل.س\n"
+        f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية"
+    )
+    
+    # إشعار المشرفين
+    for mod_id in MODERATORS:
+        if mod_id and mod_id != message.from_user.id:
+            try:
+                await message.bot.send_message(
+                    mod_id,
+                    f"ℹ️ تم تغيير سعر الصرف إلى {new_rate:,.0f} ل.س\n"
+                    f"👤 بواسطة: @{message.from_user.username or 'مشرف'}\n"
+                    f"🕐 {get_formatted_damascus_time()}",
+                    parse_mode="Markdown"
+                )
+            except:
+                pass
+    
+    await state.clear()
+
+# عرض الإعدادات الحالية
 @router.callback_query(F.data == "view_settings")
 async def view_settings(callback: types.CallbackQuery, db_pool):
     """عرض جميع الإعدادات الحالية"""
@@ -572,7 +339,8 @@ async def view_settings(callback: types.CallbackQuery, db_pool):
     
     await callback.answer()
     
-    rates = await get_all_exchange_rates(db_pool)
+    # جلب جميع الإعدادات من قاعدة البيانات مباشرة
+    rate = await get_db_exchange_rate(db_pool)
     syriatel = await get_db_syriatel_numbers(db_pool)
     maintenance = await get_db_maintenance_message(db_pool)
     bot_status = await get_db_bot_status(db_pool)
@@ -584,10 +352,7 @@ async def view_settings(callback: types.CallbackQuery, db_pool):
     text = (
         f"⚙️ **الإعدادات الحالية**\n\n"
         f"🤖 حالة البوت: {status_text}\n"
-        f"💰 **أسعار الصرف:**\n"
-        f"  • شراء (مخفي): {rates.get('purchase', 118):,.0f} ل.س\n"
-        f"  • إيداع (ظاهر): {rates.get('deposit', 118):,.0f} ل.س\n"
-        f"  • نقاط: {rates.get('points', 118):,.0f} ل.س\n"
+        f"💰 سعر الصرف: {rate:,.0f} ل.س\n"
         f"📞 أرقام سيرياتل:\n{syriatel_text}\n"
         f"📝 رسالة الصيانة:\n`{maintenance}`\n\n"
         f"🕐 {get_formatted_damascus_time()}"
@@ -595,7 +360,7 @@ async def view_settings(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     builder.row(
-        types.InlineKeyboardButton(text="💰 تعديل أسعار الصرف", callback_data="exchange_rates_menu"),
+        types.InlineKeyboardButton(text="📈 تعديل السعر", callback_data="edit_rate"),
         types.InlineKeyboardButton(text="📞 تعديل الأرقام", callback_data="edit_syriatel")
     )
     builder.row(
@@ -606,8 +371,7 @@ async def view_settings(callback: types.CallbackQuery, db_pool):
     
     await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
-
-# ============= إعادة تعيين الإعدادات الافتراضية =============
+# إعادة تعيين الإعدادات الافتراضية
 @router.callback_query(F.data == "reset_settings")
 async def reset_settings(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """إعادة تعيين الإعدادات الافتراضية"""
@@ -625,13 +389,12 @@ async def reset_settings(callback: types.CallbackQuery, state: FSMContext, db_po
         callback.message,
         "⚠️ **إعادة تعيين الإعدادات الافتراضية**\n\n"
         "سيتم إعادة تعيين:\n"
-        "• أسعار الصرف إلى 118 ل.س\n"
+        "• سعر الصرف إلى 118 ل.س\n"
         "• أرقام سيرياتل إلى الأرقام الافتراضية\n"
         "• رسالة الصيانة إلى الرسالة الافتراضية\n\n"
         "هل أنت متأكد؟",
         reply_markup=builder
     )
-
 
 @router.callback_query(F.data == "confirm_reset_settings")
 async def confirm_reset_settings(callback: types.CallbackQuery, db_pool):
@@ -644,19 +407,12 @@ async def confirm_reset_settings(callback: types.CallbackQuery, db_pool):
     start_time = time.time()
     
     default_syriatel = ["74091109", "63826779"]
-    default_rate = 118.0
     
     async with db_pool.acquire() as conn:
-        # إعادة تعيين أسعار الصرف
+        # إعادة تعيين سعر الصرف
         await conn.execute('''
-            UPDATE exchange_rates SET rate_value = $1 WHERE rate_type = 'purchase'
-        ''', default_rate)
-        await conn.execute('''
-            UPDATE exchange_rates SET rate_value = $1 WHERE rate_type = 'deposit'
-        ''', default_rate)
-        await conn.execute('''
-            UPDATE exchange_rates SET rate_value = $1 WHERE rate_type = 'points'
-        ''', default_rate)
+            UPDATE bot_settings SET value = '118' WHERE key = 'usd_to_syp'
+        ''')
         
         # إعادة تعيين أرقام سيرياتل
         await conn.execute('''
@@ -673,14 +429,14 @@ async def confirm_reset_settings(callback: types.CallbackQuery, db_pool):
     await safe_edit_message(
         callback.message,
         f"✅ **تم إعادة تعيين الإعدادات بنجاح!**\n\n"
-        f"💰 أسعار الصرف: 118 ل.س\n"
+        f"💰 سعر الصرف: 118 ل.س\n"
         f"📞 أرقام سيرياتل: {', '.join(default_syriatel)}\n"
         f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية"
     )
-
 
 @router.callback_query(F.data == "cancel_reset_settings")
 async def cancel_reset_settings(callback: types.CallbackQuery):
     """إلغاء إعادة تعيين الإعدادات"""
     await callback.answer()
+    
     await safe_edit_message(callback.message, "✅ تم إلغاء العملية.")
