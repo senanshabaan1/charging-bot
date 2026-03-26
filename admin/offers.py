@@ -8,10 +8,14 @@ from datetime import datetime, timedelta
 import pytz
 
 from database.users import is_admin_user
-from database.offers import (
-    get_active_global_offer, get_active_deposit_bonus,
-    create_global_offer, create_deposit_bonus,
-    get_all_offers, deactivate_offer,
+
+from database.core import (
+    get_active_global_offer,
+    get_active_deposit_bonus,
+    create_global_offer,
+    create_deposit_bonus,
+    get_all_offers,
+    deactivate_offer,
     get_offer_usage_stats
 )
 from handlers.keyboards import get_back_inline_keyboard
