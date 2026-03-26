@@ -1,3 +1,4 @@
+
 # admin/group_handlers.py
 from aiogram import Router, F, types, Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -8,7 +9,7 @@ from utils import get_formatted_damascus_time, format_amount
 from database.cache_utils import invalidate_user_cache
 from database.points import get_points_per_order
 from database.vip import update_user_vip
-from database.core import get_active_deposit_bonus, record_offer_usage, get_active_global_offer  # ✅ إضافة دوال العروض
+from database.core import get_active_deposit_bonus, record_offer_usage  # ✅ فقط مكافآت الإيداع
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_group")
@@ -88,6 +89,7 @@ async def process_deposit_approval(user_id: int, amount: float, callback: types.
             active_bonus = await get_active_deposit_bonus(db_pool, amount)
             bonus_amount = 0
             bonus_id = None
+            bonus_percent = 0
             
             if active_bonus:
                 bonus_percent = active_bonus['bonus_percent']
@@ -129,7 +131,7 @@ async def process_deposit_approval(user_id: int, amount: float, callback: types.
                     user_id=user_id,
                     offer_id=bonus_id,
                     offer_type='deposit',
-                    deposit_id=None  # يمكن جلب deposit_id إذا لزم
+                    deposit_id=None
                 )
             
             # ✅ مسح كاش المستخدم
@@ -137,15 +139,15 @@ async def process_deposit_approval(user_id: int, amount: float, callback: types.
         
         damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # إرسال إشعار للمستخدم (في الخلفية) مع المكافأة
+        # ✅ إرسال إشعار للمستخدم مع تفاصيل المكافأة
         asyncio.create_task(notify_user_deposit_approved(
-            bot, user_id, amount, bonus_amount, new_balance, damascus_time
+            bot, user_id, amount, bonus_percent, bonus_amount, new_balance, damascus_time
         ))
         
         # تحديث رسالة المجموعة
         try:
             current_text = callback.message.text or callback.message.caption or ""
-            bonus_text = f"\n🎁 **مكافأة إيداع:** +{bonus_amount:,.0f} ل.س" if bonus_amount > 0 else ""
+            bonus_text = f"\n🎁 **مكافأة إيداع:** +{bonus_amount:,.0f} ل.س ({bonus_percent}%)" if bonus_amount > 0 else ""
             new_text = current_text.replace("⏳ **جاري المعالجة...**", "") + f"\n\n✅ **تمت الموافقة على الطلب**{bonus_text}\n📅 **بتاريخ:** {damascus_time}"
             
             if callback.message.photo:
@@ -161,24 +163,203 @@ async def process_deposit_approval(user_id: int, amount: float, callback: types.
         processing_deposits.discard(f"{user_id}_{amount}")
 
 
-async def notify_user_deposit_approved(bot: Bot, user_id: int, amount: float, bonus_amount: float, new_balance: float, timestamp: str):
+async def notify_user_deposit_approved(bot: Bot, user_id: int, amount: float, bonus_percent: int, bonus_amount: float, new_balance: float, timestamp: str):
     """إرسال إشعار للمستخدم بموافقة الشحن مع المكافأة"""
     try:
         text = f"✅ **تم تأكيد عملية الشحن بنجاح!**\n\n"
         text += f"💰 **المبلغ المضاف:** {amount:,.0f} ل.س\n"
         
         if bonus_amount > 0:
-            text += f"🎁 **مكافأة إيداع:** +{bonus_amount:,.0f} ل.س\n"
+            text += f"🎁 **مكافأة إيداع {bonus_percent}%:** +{bonus_amount:,.0f} ل.س\n"
         
         text += f"💳 **الرصيد الحالي:** {new_balance:,.0f} ل.س\n"
         text += f"📅 **التاريخ:** {timestamp}\n\n"
         text += f"🔸 **شكراً لاستخدامك خدماتنا**"
         
         await bot.send_message(user_id, text, parse_mode="Markdown")
+        logger.info(f"✅ تم إرسال إشعار موافقة للمستخدم {user_id} (مكافأة: {bonus_amount:,.0f})")
     except Exception as e:
         logger.error(f"❌ فشل إرسال رسالة للمستخدم {user_id}: {e}")
 
 
+@router.callback_query(F.data.startswith("reje_dep_"))
+async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_pool):
+    """رفض طلب شحن من المجموعة"""
+    try:
+        logger.info(f"📩 استقبال رفض شحن: {callback.data}")
+        user_id = int(callback.data.split("_")[2])
+        
+        await callback.answer("❌ جاري رفض الطلب...", show_alert=False)
+        
+        try:
+            current_text = callback.message.text or callback.message.caption or ""
+            new_text = current_text + "\n\n⏳ **جاري الرفض...**"
+            
+            if callback.message.photo:
+                await callback.message.edit_caption(caption=new_text, reply_markup=None)
+            else:
+                await callback.message.edit_text(text=new_text, reply_markup=None)
+        except:
+            pass
+        
+        asyncio.create_task(process_deposit_rejection(user_id, callback, db_pool, bot))
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في رفض الشحن: {e}")
+        await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
+
+
+async def process_deposit_rejection(user_id: int, callback: types.CallbackQuery, db_pool, bot: Bot):
+    """معالجة رفض الشحن في الخلفية"""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE deposit_requests 
+                SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+                WHERE id = (
+                    SELECT id FROM deposit_requests 
+                    WHERE user_id = $1 AND status = 'pending'
+                    ORDER BY created_at DESC 
+                    LIMIT 1
+                )
+            ''', user_id)
+        
+        damascus_time = get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        asyncio.create_task(notify_user_deposit_rejected(bot, user_id, damascus_time))
+        
+        try:
+            current_text = callback.message.text or callback.message.caption or ""
+            new_text = current_text.replace("⏳ **جاري الرفض...**", "") + f"\n\n❌ **تم رفض الطلب**\n📅 **بتاريخ:** {damascus_time}"
+            
+            if callback.message.photo:
+                await callback.message.edit_caption(caption=new_text, reply_markup=None)
+            else:
+                await callback.message.edit_text(text=new_text, reply_markup=None)
+        except Exception as e:
+            logger.error(f"❌ فشل تحديث رسالة المجموعة: {e}")
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة رفض الشحن: {e}")
+
+
+async def notify_user_deposit_rejected(bot: Bot, user_id: int, timestamp: str):
+    """إرسال إشعار للمستخدم برفض الشحن"""
+    try:
+        await bot.send_message(
+            user_id,
+            f"❌ نعتذر، تم رفض طلب الشحن الخاص بك.\n\n"
+            f"📅 **تاريخ الرفض:** {timestamp}\n"
+            f"🔸 **الأسباب المحتملة:**\n"
+            f"• بيانات التحويل غير صحيحة\n"
+            f"• لم يتم العثور على التحويل\n"
+            f"• المشكلة فنية\n\n"
+            f"📞 **للمساعدة تواصل مع الدعم.**",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"❌ فشل إرسال رسالة الرفض للمستخدم {user_id}: {e}")
+
+
+# ============= معالجة طلبات التطبيقات من المجموعة =============
+# ✅ تم إزالة العروض العامة من طلبات التطبيقات
+
+@router.callback_query(F.data.startswith("appr_order_"))
+async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot):
+    """موافقة على طلب تطبيق من المجموعة"""
+    
+    order_id = int(callback.data.split("_")[2])
+    
+    if order_id in processing_orders:
+        await callback.answer("⚠️ الطلب قيد المعالجة بالفعل", show_alert=True)
+        return
+    
+    processing_orders.add(order_id)
+    
+    try:
+        await callback.answer("✅ جاري معالجة الطلب...", show_alert=False)
+        
+        try:
+            new_text = callback.message.text + "\n\n⏳ **جاري المعالجة...**"
+            await callback.message.edit_text(new_text, reply_markup=None)
+        except:
+            pass
+        
+        asyncio.create_task(process_order_approval(order_id, callback, db_pool, bot))
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في موافقة الطلب: {e}")
+        processing_orders.discard(order_id)
+
+
+async def process_order_approval(order_id: int, callback: types.CallbackQuery, db_pool, bot: Bot):
+    """معالجة الموافقة في الخلفية"""
+    try:
+        async with db_pool.acquire() as conn:
+            # جلب معلومات الطلب
+            order = await conn.fetchrow('''
+                SELECT o.*, u.user_id, u.username
+                FROM orders o
+                JOIN users u ON o.user_id = u.user_id
+                WHERE o.id = $1
+            ''', order_id)
+            
+            if not order:
+                await callback.message.answer("❌ الطلب غير موجود")
+                processing_orders.discard(order_id)
+                return
+            
+            # ✅ تحديث حالة الطلب (بدون خصم عرض)
+            await conn.execute(
+                "UPDATE orders SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1", 
+                order_id
+            )
+            
+            # ✅ مسح كاش المستخدم
+            await invalidate_user_cache(order['user_id'])
+        
+        # إرسال إشعار للمستخدم
+        asyncio.create_task(notify_user_order_approved(bot, order))
+        
+        # إنشاء أزرار جديدة
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="✅ تم التنفيذ", callback_data=f"compl_order_{order_id}"),
+            types.InlineKeyboardButton(text="❌ تعذر التنفيذ", callback_data=f"fail_order_{order_id}"),
+            width=2
+        )
+        
+        # تحديث رسالة المجموعة
+        await callback.message.edit_text(
+            callback.message.text.replace("⏳ **جاري المعالجة...**", "") + "\n\n🔄 **جاري التنفيذ...**",
+            reply_markup=builder.as_markup()
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ في معالجة الطلب: {e}")
+    finally:
+        processing_orders.discard(order_id)
+
+
+async def notify_user_order_approved(bot, order):
+    """إرسال إشعار للمستخدم بموافقة الطلب"""
+    try:
+        points = order['points_earned'] or 0
+        text = f"✅ تمت الموافقة على طلبك #{order['id']}\n\n"
+        text += f"📱 التطبيق: {order['app_name']}\n"
+        text += f"📦 الكمية: {order['quantity']}\n"
+        text += f"🎯 المستهدف: {order['target_id']}\n"
+        text += f"💰 المبلغ: {order['total_amount_syp']:,.0f} ل.س\n"
+        text += f"⭐ نقاط مكتسبة: +{points}\n\n"
+        text += f"⏳ جاري تنفيذ طلبك عبر النظام..."
+        
+        await bot.send_message(order['user_id'], text, parse_mode="Markdown")
+        logger.info(f"✅ تم إرسال إشعار موافقة للمستخدم {order['user_id']}")
+    except Exception as e:
+        logger.error(f"❌ فشل إرسال إشعار للمستخدم {order['user_id']}: {e}")
+
+ =============
+# ... (reje_order_, compl_order_, fail_order_ تبقى كما هي)
 @router.callback_query(F.data.startswith("reje_dep_"))
 async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_pool):
     """رفض طلب شحن من المجموعة"""
