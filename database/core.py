@@ -2,8 +2,33 @@
 import logging
 from cache import cached
 from typing import Optional, Dict, Any
+from datetime import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
+
+# ============= ثوابت المنطقة الزمنية =============
+DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
+
+
+# ============= دوال مساعدة للتواريخ =============
+def make_aware(dt):
+    """تحويل التاريخ إلى offset-aware باستخدام توقيت دمشق"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return DAMASCUS_TZ.localize(dt)
+    return dt
+
+
+def make_naive(dt):
+    """تحويل التاريخ إلى offset-naive (إزالة معلومات المنطقة الزمنية)"""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(DAMASCUS_TZ).replace(tzinfo=None)
+    return dt
+
 
 # ============= حالة البوت =============
 
@@ -46,7 +71,7 @@ async def get_maintenance_message(pool):
         return "البوت قيد الصيانة حالياً"
 
 
-# ============= أسعار الصرف المنفصلة (جديدة) =============
+# ============= أسعار الصرف المنفصلة =============
 
 @cached(ttl=30, key_prefix="exchange_rate")
 async def get_exchange_rate(pool, rate_type: str = 'deposit') -> float:
@@ -62,7 +87,6 @@ async def get_exchange_rate(pool, rate_type: str = 'deposit') -> float:
             )
             if rate:
                 return float(rate)
-            # إذا لم يوجد، استخدم القيمة الافتراضية
             return 118.0
     except Exception as e:
         logging.error(f"❌ خطأ في جلب سعر الصرف ({rate_type}): {e}")
@@ -96,12 +120,11 @@ async def update_exchange_rate(pool, rate_type: str, rate_value: float, updated_
         return False
 
 
-# ============= الدوال القديمة للتوافق (مع تعديل) =============
+# ============= الدوال القديمة للتوافق =============
 
 async def get_old_exchange_rate(pool):
     """جلب سعر الصرف القديم (للتوافق مع الكود القديم)"""
     return await get_exchange_rate(pool, 'deposit')
-
 
 async def set_exchange_rate(pool, rate):
     """تحديث سعر الصرف (يحدث سعر الإيداع فقط)"""
@@ -119,14 +142,13 @@ async def get_syriatel_numbers(pool):
             )
             if numbers_str:
                 return numbers_str.split(',')
-            else:
-                default_nums = ["74091109", "63826779"]
-                await conn.execute('''
-                    INSERT INTO bot_settings (key, value, description) 
-                    VALUES ('syriatel_nums', $1, 'أرقام سيرياتل كاش')
-                    ON CONFLICT (key) DO UPDATE SET value = $1
-                ''', ','.join(default_nums))
-                return default_nums
+            default_nums = ["74091109", "63826779"]
+            await conn.execute('''
+                INSERT INTO bot_settings (key, value, description) 
+                VALUES ('syriatel_nums', $1, 'أرقام سيرياتل كاش')
+                ON CONFLICT (key) DO UPDATE SET value = $1
+            ''', ','.join(default_nums))
+            return default_nums
     except Exception as e:
         logging.error(f"❌ خطأ في جلب أرقام سيرياتل: {e}")
         return ["74091109", "63826779"]
@@ -148,12 +170,26 @@ async def set_syriatel_numbers(pool, numbers):
         return False
 
 
-# ============= دوال العروض العامة =============
+# ============= دوال العروض العامة (مع إصلاح التواريخ) =============
+
+async def get_db_now(pool):
+    """جلب الوقت الحالي من قاعدة البيانات (offset-aware)"""
+    try:
+        async with pool.acquire() as conn:
+            now = await conn.fetchval("SELECT NOW()")
+            return now
+    except Exception as e:
+        logging.error(f"❌ خطأ في جلب الوقت: {e}")
+        return datetime.now(DAMASCUS_TZ)
+
 
 async def get_active_global_offer(pool) -> Optional[Dict]:
     """جلب العرض العام النشط حالياً"""
     try:
         now = await get_db_now(pool)
+        # ✅ تأكد من أن now هو offset-aware
+        now = make_aware(now)
+        
         async with pool.acquire() as conn:
             offer = await conn.fetchrow('''
                 SELECT * FROM global_offers 
@@ -191,6 +227,10 @@ async def create_global_offer(
 ) -> Optional[int]:
     """إنشاء عرض عام جديد"""
     try:
+        # ✅ تأكد من أن التواريخ offset-aware
+        start_date = make_aware(start_date)
+        end_date = make_aware(end_date)
+        
         async with pool.acquire() as conn:
             offer_id = await conn.fetchval('''
                 INSERT INTO global_offers 
@@ -220,12 +260,15 @@ async def deactivate_global_offer(pool, offer_id: int) -> bool:
         return False
 
 
-# ============= دوال مكافآت الإيداع =============
+# ============= دوال مكافآت الإيداع (مع إصلاح التواريخ) =============
 
 async def get_active_deposit_bonus(pool, deposit_amount: float = None) -> Optional[Dict]:
     """جلب مكافأة الإيداع النشطة حالياً"""
     try:
         now = await get_db_now(pool)
+        # ✅ تأكد من أن now هو offset-aware
+        now = make_aware(now)
+        
         async with pool.acquire() as conn:
             query = '''
                 SELECT * FROM deposit_bonuses 
@@ -272,6 +315,10 @@ async def create_deposit_bonus(
 ) -> Optional[int]:
     """إنشاء مكافأة إيداع جديدة"""
     try:
+        # ✅ تأكد من أن التواريخ offset-aware
+        start_date = make_aware(start_date)
+        end_date = make_aware(end_date)
+        
         async with pool.acquire() as conn:
             bonus_id = await conn.fetchval('''
                 INSERT INTO deposit_bonuses 
@@ -356,35 +403,6 @@ async def get_offer_usage_stats(pool, offer_id: int, offer_type: str) -> Dict:
         return {'total_uses': 0, 'unique_users': 0}
 
 
-# ============= دوال مساعدة =============
-
-async def get_db_now(pool):
-    """جلب الوقت الحالي من قاعدة البيانات"""
-    try:
-        async with pool.acquire() as conn:
-            now = await conn.fetchval("SELECT NOW()")
-            return now
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب الوقت: {e}")
-        from datetime import datetime
-        import pytz
-        return datetime.now(pytz.timezone('Asia/Damascus'))
-
-
-# ============= دوال للتوافق مع الكود القديم =============
-
-async def get_offer_discount(pool) -> int:
-    """جلب خصم العرض النشط (للتوافق)"""
-    offer = await get_active_global_offer(pool)
-    return offer['discount_percent'] if offer else 0
-
-
-async def get_deposit_bonus_percent(pool, amount: float = None) -> int:
-    """جلب نسبة مكافأة الإيداع (للتوافق)"""
-    bonus = await get_active_deposit_bonus(pool, amount)
-    return bonus['bonus_percent'] if bonus else 0
-
-# database/core.py - أضف هذه الدوال
 # ============= دوال التوافق =============
 
 async def deactivate_offer(pool, offer_id: int, offer_type: str) -> bool:
