@@ -358,7 +358,7 @@ async def notify_user_order_approved(bot, order):
     except Exception as e:
         logger.error(f"❌ فشل إرسال إشعار للمستخدم {order['user_id']}: {e}")
 
- =============
+ 
 # ... (reje_order_, compl_order_, fail_order_ تبقى كما هي)
 @router.callback_query(F.data.startswith("reje_dep_"))
 async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_pool):
