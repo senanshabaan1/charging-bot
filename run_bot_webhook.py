@@ -25,7 +25,7 @@ from database.points import fix_points_history_table
 from database.stats import get_report_settings
 from database.admin import fix_manual_vip_for_existing_users
 from database.core import get_all_exchange_rates, get_active_global_offer, get_active_deposit_bonus  # ✅ إضافة دوال العروض
-from utils.api_client import api_client  # ✅ استيراد عميل API
+from utils import api_client
 
 from handlers import start, deposit, services, reports
 from admin import router as admin_router
