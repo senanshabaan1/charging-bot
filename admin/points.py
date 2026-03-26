@@ -8,7 +8,8 @@ import time
 from typing import Optional, Dict, Any
 from utils import is_admin, format_amount, safe_edit_message, get_formatted_damascus_time
 from handlers.keyboards import get_confirmation_keyboard
-from cache import cached, clear_cache  # ✅ استيراد الكاش
+from database.core import get_exchange_rate  # ✅ استيراد الدالة المعدلة
+from cache import cached, clear_cache
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_points")
@@ -19,6 +20,7 @@ class PointsStates(StatesGroup):
 # ✅ ثوابت للأداء
 CACHE_TTL_SETTINGS = 60  # 60 ثانية
 CACHE_TTL_REDEMPTIONS = 30  # 30 ثانية
+
 
 # ✅ كاش لإعدادات النقاط
 @cached(ttl=CACHE_TTL_SETTINGS, key_prefix="points_settings")
@@ -37,12 +39,14 @@ async def get_cached_points_settings(db_pool) -> Dict[str, Any]:
             'redemption_rate': int(redemption_rate) if redemption_rate else 100
         }
 
+
 # ✅ كاش لطلبات الاسترداد المعلقة
 @cached(ttl=CACHE_TTL_REDEMPTIONS, key_prefix="pending_redemptions")
 async def get_cached_pending_redemptions(db_pool):
     """جلب طلبات الاسترداد المعلقة مع كاش 30 ثانية"""
     async with db_pool.acquire() as conn:
         return await conn.fetch("SELECT * FROM redemption_requests WHERE status = 'pending' ORDER BY created_at")
+
 
 # ✅ كاش لعدد طلبات الاسترداد المعلقة
 @cached(ttl=CACHE_TTL_REDEMPTIONS, key_prefix="pending_count")
@@ -51,6 +55,7 @@ async def get_cached_pending_count(db_pool) -> int:
     async with db_pool.acquire() as conn:
         return await conn.fetchval("SELECT COUNT(*) FROM redemption_requests WHERE status = 'pending'") or 0
 
+
 # إدارة النقاط
 @router.callback_query(F.data == "manage_points")
 async def manage_points(callback: types.CallbackQuery, db_pool):
@@ -58,12 +63,14 @@ async def manage_points(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     # ✅ استخدام الكاش
     settings = await get_cached_points_settings(db_pool)
     pending_count = await get_cached_pending_count(db_pool)
+    
+    # ✅ جلب سعر النقاط الحالي
+    points_rate = await get_exchange_rate(db_pool, 'points')
     
     text = (
         "⭐ **إدارة النقاط**\n\n"
@@ -72,6 +79,7 @@ async def manage_points(callback: types.CallbackQuery, db_pool):
         f"• نقاط لكل إحالة: {settings['points_per_referral']}\n"
         f"• {settings['points_to_usd']} نقطة = 1 دولار\n"
         f"• {settings['redemption_rate']} نقطة للاسترداد\n\n"
+        f"💰 **سعر النقاط الحالي:** {points_rate:,.0f} ل.س = 1$\n\n"
         f"**طلبات الاسترداد المعلقة:** {pending_count}\n"
         f"🕐 {get_formatted_damascus_time()}"
     )
@@ -84,6 +92,7 @@ async def manage_points(callback: types.CallbackQuery, db_pool):
     
     await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
+
 # إحصائيات النقاط
 @router.callback_query(F.data == "points_statistics")
 async def points_statistics(callback: types.CallbackQuery, db_pool):
@@ -91,8 +100,10 @@ async def points_statistics(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
+    
+    # ✅ جلب سعر النقاط الحالي
+    points_rate = await get_exchange_rate(db_pool, 'points')
     
     async with db_pool.acquire() as conn:
         stats = await conn.fetchrow('''
@@ -114,13 +125,17 @@ async def points_statistics(callback: types.CallbackQuery, db_pool):
             WHERE DATE(created_at) = CURRENT_DATE
         ''')
     
+    # حساب القيمة الإجمالية للنقاط
+    total_points_value = (stats['total_points'] / 100) * points_rate if points_rate else 0
+    
     text = (
         f"📊 **إحصائيات النقاط**\n\n"
-        f"**إجمالي النقاط:** {stats['total_points']:,.0f}\n"
+        f"**إجمالي النقاط:** {stats['total_points']:,.0f} ≈ {total_points_value:,.0f} ل.س\n"
         f"**نقاط مكتسبة:** {stats['total_earned']:,.0f}\n"
         f"**نقاط مستردة:** {stats['total_redeemed']:,.0f}\n"
         f"**مستخدمين لديهم نقاط:** {stats['users_with_points']}\n"
         f"**متوسط النقاط:** {stats['avg_points']:.1f}\n\n"
+        f"**سعر النقاط الحالي:** {points_rate:,.0f} ل.س = 1$\n\n"
         f"**إحصائيات اليوم:**\n"
         f"• نقاط ممنوحة: {today_stats['points_given_today']:,.0f}\n"
         f"• نقاط مستردة: {today_stats['points_redeemed_today']:,.0f}\n"
@@ -133,6 +148,7 @@ async def points_statistics(callback: types.CallbackQuery, db_pool):
     
     await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
 
+
 # تعديل إعدادات النقاط
 @router.callback_query(F.data == "edit_points_settings")
 async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -140,7 +156,6 @@ async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext,
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     # ✅ عرض الإعدادات الحالية
@@ -153,14 +168,15 @@ async def edit_points_settings(callback: types.CallbackQuery, state: FSMContext,
         f"• نقاط لكل إحالة: {settings['points_per_referral']}\n"
         f"• {settings['points_to_usd']} نقطة = 1 دولار\n"
         f"• {settings['redemption_rate']} نقطة للاسترداد\n\n"
+        f"⚠️ **ملاحظة:** سعر النقاط (ل.س = 1$) يتم تعديله من قسم إدارة أسعار الصرف\n\n"
         f"أدخل القيم الجديدة بالصيغة التالية:\n"
         f"`نقاط_الطلب نقاط_الإحالة نقاط_الدولار معدل_الاسترداد`\n\n"
         f"مثال: `1 1 100 100`\n\n"
         f"أو أرسل /cancel للإلغاء",
         parse_mode="Markdown",
-        
     )
     await state.set_state(PointsStates.waiting_points_settings)
+
 
 @router.message(PointsStates.waiting_points_settings)
 async def save_points_settings(message: types.Message, state: FSMContext, db_pool):
@@ -202,12 +218,14 @@ async def save_points_settings(message: types.Message, state: FSMContext, db_poo
             f"• نقاط لكل طلب: {points_order}\n"
             f"• نقاط لكل إحالة: {points_referral}\n"
             f"• {points_usd} نقطة = 1 دولار\n"
-            f"• {redemption_rate} نقطة للاسترداد"
+            f"• {redemption_rate} نقطة للاسترداد\n\n"
+            f"⚠️ **ملاحظة:** سعر النقاط (ل.س = 1$) يتم تعديله من قسم إدارة أسعار الصرف"
         )
         await state.clear()
     except Exception as e:
         await message.answer(f"❌ **حدث خطأ:** {str(e)}")
         await state.clear()
+
 
 # طلبات الاسترداد
 @router.callback_query(F.data == "view_redemptions")
@@ -216,7 +234,6 @@ async def view_redemptions(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     # ✅ استخدام الكاش
@@ -226,7 +243,6 @@ async def view_redemptions(callback: types.CallbackQuery, db_pool):
         await callback.answer("📭 لا توجد طلبات استرداد معلقة", show_alert=True)
         return
     
-    # ✅ حذف الرسالة الحالية وإرسال الطلبات
     await callback.message.delete()
     
     for r in redemptions:
@@ -249,10 +265,10 @@ async def view_redemptions(callback: types.CallbackQuery, db_pool):
             reply_markup=builder.as_markup()
         )
 
+
 @router.callback_query(F.data.startswith("appr_red_"))
 async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
     """الموافقة على طلب استرداد نقاط"""
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     start_time = time.time()
@@ -261,9 +277,10 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
         req_id = int(callback.data.split("_")[2])
         
         from database.points import approve_redemption
-        from database.core import get_exchange_rate
         
-        current_rate = await get_exchange_rate(db_pool)
+        # ✅ استخدام سعر النقاط المنفصل
+        points_rate = await get_exchange_rate(db_pool, 'points')
+        
         success, error = await approve_redemption(db_pool, req_id, callback.from_user.id)
         
         if success:
@@ -280,7 +297,7 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
             await safe_edit_message(
                 callback.message,
                 callback.message.text + f"\n\n✅ **تمت الموافقة على الطلب**\n"
-                f"💰 بسعر صرف: {current_rate:,.0f} ل.س\n"
+                f"💰 بسعر صرف النقاط: {points_rate:,.0f} ل.س\n"
                 f"⚡ وقت المعالجة: {elapsed_time:.2f} ثانية",
                 reply_markup=None
             )
@@ -291,7 +308,7 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
                     f"✅ **تمت الموافقة على طلب استرداد النقاط!**\n\n"
                     f"⭐ النقاط: {req['points']}\n"
                     f"💰 المبلغ: {req['amount_syp']:,.0f} ل.س\n"
-                    f"💵 بسعر صرف: {current_rate:,.0f} ل.س\n\n"
+                    f"💵 بسعر النقاط: {points_rate:,.0f} ل.س = 1$\n\n"
                     f"تم إضافة المبلغ إلى رصيدك.",
                     parse_mode="Markdown"
                 )
@@ -304,10 +321,10 @@ async def approve_redemption(callback: types.CallbackQuery, state: FSMContext, d
         logger.error(f"❌ خطأ في الموافقة على الاسترداد: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
+
 @router.callback_query(F.data.startswith("reje_red_"))
 async def reject_redemption(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
     """رفض طلب استرداد نقاط"""
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     try:
@@ -351,6 +368,7 @@ async def reject_redemption(callback: types.CallbackQuery, state: FSMContext, db
         logger.error(f"❌ خطأ في رفض الاسترداد: {e}")
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
+
 # تحديث قائمة الطلبات
 @router.callback_query(F.data == "refresh_redemptions")
 async def refresh_redemptions(callback: types.CallbackQuery, db_pool):
@@ -358,15 +376,14 @@ async def refresh_redemptions(callback: types.CallbackQuery, db_pool):
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer("🔄 جاري التحديث...")
     
     # ✅ مسح الكاش
     clear_cache("pending_redemptions")
     clear_cache("pending_count")
     
-    # ✅ العودة لعرض الطلبات
     await view_redemptions(callback, db_pool)
+
 
 # تصدير تقرير النقاط
 @router.callback_query(F.data == "export_points_report")
@@ -375,12 +392,13 @@ async def export_points_report(callback: types.CallbackQuery, db_pool, bot: Bot)
     if not is_admin(callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
-    # ✅ إطفاء الزر فوراً
     await callback.answer("📊 جاري إنشاء التقرير...")
     
     try:
+        # ✅ جلب سعر النقاط الحالي
+        points_rate = await get_exchange_rate(db_pool, 'points')
+        
         async with db_pool.acquire() as conn:
-            # جلب جميع المستخدمين الذين لديهم نقاط
             users = await conn.fetch('''
                 SELECT user_id, username, first_name, total_points, 
                        total_points_earned, total_points_redeemed,
@@ -391,7 +409,6 @@ async def export_points_report(callback: types.CallbackQuery, db_pool, bot: Bot)
                 LIMIT 100
             ''')
             
-            # جلب آخر 50 عملية نقاط
             history = await conn.fetch('''
                 SELECT ph.*, u.username 
                 FROM points_history ph
@@ -400,15 +417,16 @@ async def export_points_report(callback: types.CallbackQuery, db_pool, bot: Bot)
                 LIMIT 50
             ''')
         
-        # إنشاء نص التقرير
         report = "📊 **تقرير النقاط التفصيلي**\n\n"
         report += f"تاريخ التقرير: {get_formatted_damascus_time()}\n"
+        report += f"💰 سعر النقاط الحالي: {points_rate:,.0f} ل.س = 1$\n"
         report += "=" * 50 + "\n\n"
         
         report += "**أكثر المستخدمين نقاطاً:**\n"
         for i, user in enumerate(users[:10], 1):
             username = user['username'] or user['first_name'] or f"ID:{user['user_id']}"
-            report += f"{i}. {username} - {user['total_points']} نقطة (VIP {user['vip_level']})\n"
+            points_value = (user['total_points'] / 100) * points_rate
+            report += f"{i}. {username} - {user['total_points']} نقطة (≈ {points_value:,.0f} ل.س) VIP {user['vip_level']}\n"
         
         report += "\n**آخر عمليات النقاط:**\n"
         for h in history[:10]:
@@ -423,7 +441,6 @@ async def export_points_report(callback: types.CallbackQuery, db_pool, bot: Bot)
             date = h['created_at'].strftime('%Y-%m-%d %H:%M')
             report += f"• {username}: {h['points']:+d} نقطة ({action}) - {date}\n"
         
-        # إرسال الملف
         from io import BytesIO
         file = BytesIO()
         file.write(report.encode('utf-8'))
@@ -433,7 +450,7 @@ async def export_points_report(callback: types.CallbackQuery, db_pool, bot: Bot)
         
         await callback.message.answer_document(
             types.BufferedInputFile(file=file.getvalue(), filename=filename),
-            caption="✅ تم إنشاء تقرير النقاط"
+            caption=f"✅ تم إنشاء تقرير النقاط\n💰 سعر النقاط: {points_rate:,.0f} ل.س = 1$"
         )
         
     except Exception as e:
