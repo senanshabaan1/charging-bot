@@ -15,6 +15,11 @@ from .broadcast import router as broadcast_router
 from .group_handlers import router as group_router
 from .reset import router as reset_router
 
+# ✅ إضافة الرواترز الجديدة
+from .api_services import router as api_services_router
+from .offers import router as offers_router
+from .option_profits import router as option_profits_router
+
 router = Router(name="admin")
 
 # ✅ Make sure each router is included only once
@@ -31,7 +36,11 @@ router.include_routers(
     vip_router,
     broadcast_router,
     group_router,
-    reset_router
+    reset_router,
+    # ✅ الرواترز الجديدة
+    api_services_router,
+    offers_router,
+    option_profits_router
 )
 
 __all__ = ['router']
