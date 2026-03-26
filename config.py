@@ -121,10 +121,20 @@ else:
         "user": os.getenv("DB_USER", "postgres"),
         "password": os.getenv("DB_PASSWORD", ""),
         "min_size": get_env_int("DB_POOL_MIN_SIZE", 1),
-        "max_size": get_env_int("DB_POOL_MAX_SIZE", 5),  # أقل للخطة المجانية
+        "max_size": get_env_int("DB_POOL_MAX_SIZE", 5),
         "command_timeout": get_env_int("DB_COMMAND_TIMEOUT", 60),
     }
     print(f"✅ استخدام قاعدة بيانات محلية: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+
+# ============= إعدادات API الخارجي =============
+
+# توكن API لموقع Mousa Card
+MOUSA_API_TOKEN = os.getenv("MOUSA_API_TOKEN", "")
+if not MOUSA_API_TOKEN:
+    print("⚠️ تحذير: MOUSA_API_TOKEN غير محدد، لن تعمل خدمات API الخارجية")
+
+# رابط API الأساسي
+API_BASE_URL = os.getenv("API_BASE_URL", "https://mousa-card.com")
 
 # ============= أرقام الدفع =============
 
@@ -146,7 +156,7 @@ DEBUG = get_env_bool("DEBUG", False)
 # إعدادات الويب (للـ webhook)
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
-WEBHOOK_PORT = get_env_int("PORT", 8000)  # Render يستخدم PORT
+WEBHOOK_PORT = get_env_int("PORT", 8000)
 WEBHOOK_HOST = os.getenv("RENDER_EXTERNAL_URL", os.getenv("WEBHOOK_HOST", ""))
 
 WEB_USERNAME = os.getenv("WEB_USERNAME", "admin")
@@ -154,8 +164,13 @@ WEB_PASSWORD = os.getenv("WEB_PASSWORD", "admin")
 
 # ============= إعدادات البوت =============
 
-# سعر الصرف الافتراضي (سيتم تحديثه من قاعدة البيانات لاحقاً)
+# أسعار الصرف الافتراضية (سيتم تحديثها من قاعدة البيانات لاحقاً)
 DEFAULT_USD_TO_SYP = get_env_float("DEFAULT_USD_TO_SYP", 118)
+PURCHASE_RATE = DEFAULT_USD_TO_SYP   # سعر الشراء (مخفي)
+DEPOSIT_RATE = DEFAULT_USD_TO_SYP    # سعر الإيداع (يظهر للمستخدم)
+POINTS_RATE = DEFAULT_USD_TO_SYP     # سعر استبدال النقاط
+
+# للتوافق مع الكود القديم
 USD_TO_SYP = DEFAULT_USD_TO_SYP
 
 # حالة البوت الافتراضية
@@ -178,18 +193,38 @@ LOG_FILE = os.getenv("LOG_FILE", "")
 # ============= دوال تحميل الإعدادات الديناميكية =============
 
 async def load_exchange_rate(pool) -> bool:
-    """تحميل سعر الصرف من قاعدة البيانات"""
+    """تحميل سعر الصرف من قاعدة البيانات (للتوافق مع الكود القديم - يحمل سعر الإيداع)"""
     from database import get_exchange_rate
-    global USD_TO_SYP
+    global USD_TO_SYP, DEPOSIT_RATE
     try:
-        db_rate = await get_exchange_rate(pool)
+        db_rate = await get_exchange_rate(pool, 'deposit')
         if db_rate:
             USD_TO_SYP = db_rate
-            print(f"💵 تم تحميل سعر الصرف من قاعدة البيانات: {USD_TO_SYP} ل.س")
+            DEPOSIT_RATE = db_rate
+            print(f"💵 تم تحميل سعر الإيداع من قاعدة البيانات: {USD_TO_SYP} ل.س")
         return True
     except Exception as e:
         print(f"❌ خطأ في تحميل سعر الصرف: {e}")
         return False
+
+
+async def load_all_exchange_rates(pool) -> bool:
+    """تحميل جميع أسعار الصرف المنفصلة من قاعدة البيانات"""
+    from database import get_all_exchange_rates
+    global PURCHASE_RATE, DEPOSIT_RATE, POINTS_RATE, USD_TO_SYP
+    try:
+        rates = await get_all_exchange_rates(pool)
+        PURCHASE_RATE = rates.get('purchase', DEFAULT_USD_TO_SYP)
+        DEPOSIT_RATE = rates.get('deposit', DEFAULT_USD_TO_SYP)
+        POINTS_RATE = rates.get('points', DEFAULT_USD_TO_SYP)
+        USD_TO_SYP = DEPOSIT_RATE  # للتوافق مع الكود القديم
+        
+        print(f"💵 تم تحميل أسعار الصرف: شراء={PURCHASE_RATE}, إيداع={DEPOSIT_RATE}, نقاط={POINTS_RATE}")
+        return True
+    except Exception as e:
+        print(f"❌ خطأ في تحميل أسعار الصرف: {e}")
+        return False
+
 
 async def load_bot_settings(pool) -> bool:
     """تحميل جميع إعدادات البوت من قاعدة البيانات"""
@@ -201,6 +236,23 @@ async def load_bot_settings(pool) -> bool:
         return True
     except Exception as e:
         print(f"❌ خطأ في تحميل حالة البوت: {e}")
+        return False
+
+
+async def load_api_settings(pool) -> bool:
+    """تحميل إعدادات API من قاعدة البيانات"""
+    global API_BASE_URL
+    try:
+        async with pool.acquire() as conn:
+            api_url = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'api_base_url'"
+            )
+            if api_url:
+                API_BASE_URL = api_url.rstrip('/')
+                print(f"🌐 تم تحميل رابط API: {API_BASE_URL}")
+        return True
+    except Exception as e:
+        print(f"❌ خطأ في تحميل إعدادات API: {e}")
         return False
 
 # ============= التحقق من صحة الإعدادات =============
@@ -242,6 +294,10 @@ def validate_config() -> List[str]:
         if not DB_CONFIG.get('password'):
             warnings.append("⚠️ DB_PASSWORD غير محددة (قد تحتاجها للاتصال المحلي)")
     
+    # تحقق من توكن API
+    if not MOUSA_API_TOKEN:
+        warnings.append("⚠️ MOUSA_API_TOKEN غير محدد (لن تعمل خدمات API)")
+    
     return errors, warnings
 
 # ============= طباعة ملخص الإعدادات =============
@@ -261,6 +317,10 @@ def print_config_summary():
         print(f"   ✅ رابط خارجي")
     else:
         print(f"   📍 محلية: {DB_CONFIG.get('host')}:{DB_CONFIG.get('port')}")
+    
+    print(f"\n🔌 API الخارجي:")
+    print(f"   🔑 MOUSA_API_TOKEN: {'✅ موجود' if MOUSA_API_TOKEN else '❌ مفقود'}")
+    print(f"   🌐 API_BASE_URL: {API_BASE_URL}")
     
     print(f"\n💰 طرق الدفع:")
     print(f"   📞 سيرياتل: {len(SYRIATEL_NUMS)} رقم")
@@ -304,6 +364,8 @@ __all__ = [
     'MODERATORS',
     'DATABASE_URL',
     'DB_CONFIG',
+    'MOUSA_API_TOKEN',
+    'API_BASE_URL',
     'SYRIATEL_NUMS',
     'SHAM_CASH_NUM',
     'SHAM_CASH_NUM_USD',
@@ -318,6 +380,9 @@ __all__ = [
     'WEB_PASSWORD',
     'DEBUG',
     'USD_TO_SYP',
+    'PURCHASE_RATE',
+    'DEPOSIT_RATE',
+    'POINTS_RATE',
     'DEFAULT_USD_TO_SYP',
     'BOT_STATUS',
     'CACHE_CONFIG',
@@ -325,5 +390,7 @@ __all__ = [
     'LOG_FORMAT',
     'LOG_FILE',
     'load_exchange_rate',
-    'load_bot_settings'
-]
+    'load_all_exchange_rates',
+    'load_bot_settings',
+    'load_api_settings'
+        ]
