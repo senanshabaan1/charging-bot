@@ -1,7 +1,6 @@
 # utils.py
 import re
 import logging
-import pytz
 import traceback
 import aiohttp
 import uuid
@@ -11,7 +10,6 @@ from typing import Union, Optional, List, Tuple, Any, Dict
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import ADMIN_ID, MODERATORS
-from handlers.time_utils import get_damascus_time_now, DAMASCUS_TZ, format_damascus_time
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +53,7 @@ def get_admin_ids() -> List[int]:
     return list(set(admin_ids))  # إزالة التكرار
 
 
-# ============= دوال التوقيت =============
+# ============= دوال التوقيت (استيراد محلي لتجنب الـ circular import) =============
 
 def get_formatted_damascus_time() -> str:
     """
@@ -64,6 +62,7 @@ def get_formatted_damascus_time() -> str:
     Returns:
         str: الوقت الحالي بصيغة YYYY-MM-DD HH:MM:SS
     """
+    from handlers.time_utils import get_damascus_time_now
     return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 
@@ -81,6 +80,7 @@ def format_datetime(
     Returns:
         str: التاريخ المنسق
     """
+    from handlers.time_utils import format_damascus_time
     return format_damascus_time(dt, format_str)
 
 
