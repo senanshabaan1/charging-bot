@@ -202,12 +202,14 @@ async def handle_edit_syriatel(callback: types.CallbackQuery, state: FSMContext,
     await edit_syriatel_start(callback, state, db_pool)
 
 
+# admin/main.py - السطر 210 تقريباً
+
 @router.callback_query(F.data == "reset_bot")
 async def handle_reset_bot(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """توجيه إلى تصفير البوت"""
     await callback.answer()
     from admin.reset import reset_bot_start
-    await reset_bot_start(callback, state, db_pool)
+    await reset_bot_start(callback, state)  # ✅ فقط callback و state
 
 
 @router.callback_query(F.data == "bot_stats")
