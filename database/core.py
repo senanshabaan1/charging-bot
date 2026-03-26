@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 
-# ============= دوال مساعدة للتواريخ (حل جذري) =============
+# ============= دوال مساعدة للتواريخ =============
 def get_current_time_naive():
     """الحصول على الوقت الحالي بدون منطقة زمنية (offset-naive)"""
     return datetime.now(DAMASCUS_TZ).replace(tzinfo=None)
@@ -171,7 +171,7 @@ async def set_syriatel_numbers(pool, numbers):
         return False
 
 
-# ============= دوال العروض العامة (بعد الإصلاح الجذري) =============
+# ============= دوال مكافآت الإيداع فقط =============
 
 async def get_db_now_naive(pool):
     """جلب الوقت الحالي من قاعدة البيانات بدون منطقة زمنية"""
@@ -183,82 +183,6 @@ async def get_db_now_naive(pool):
         logging.error(f"❌ خطأ في جلب الوقت: {e}")
         return get_current_time_naive()
 
-
-async def get_active_global_offer(pool) -> Optional[Dict]:
-    """جلب العرض العام النشط حالياً"""
-    try:
-        now = await get_db_now_naive(pool)
-        
-        async with pool.acquire() as conn:
-            offer = await conn.fetchrow('''
-                SELECT * FROM global_offers 
-                WHERE is_active = TRUE 
-                AND start_date <= $1::timestamp 
-                AND end_date >= $1::timestamp
-                ORDER BY discount_percent DESC
-                LIMIT 1
-            ''', now)
-            return dict(offer) if offer else None
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب العرض العام: {e}")
-        return None
-
-
-async def get_all_global_offers(pool) -> list:
-    """جلب جميع العروض العامة"""
-    try:
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM global_offers ORDER BY created_at DESC")
-            return [dict(row) for row in rows]
-    except Exception as e:
-        logging.error(f"❌ خطأ في جلب العروض العامة: {e}")
-        return []
-
-
-async def create_global_offer(
-    pool,
-    name: str,
-    discount_percent: int,
-    start_date,
-    end_date,
-    description: str = None,
-    created_by: int = None
-) -> Optional[int]:
-    """إنشاء عرض عام جديد"""
-    try:
-        start_date = make_naive(start_date)
-        end_date = make_naive(end_date)
-        
-        async with pool.acquire() as conn:
-            offer_id = await conn.fetchval('''
-                INSERT INTO global_offers 
-                (name, discount_percent, start_date, end_date, description, created_by)
-                VALUES ($1, $2, $3::timestamp, $4::timestamp, $5, $6)
-                RETURNING id
-            ''', name, discount_percent, start_date, end_date, description, created_by)
-            logging.info(f"✅ تم إنشاء عرض عام #{offer_id}: {discount_percent}%")
-            return offer_id
-    except Exception as e:
-        logging.error(f"❌ خطأ في إنشاء العرض العام: {e}")
-        return None
-
-
-async def deactivate_global_offer(pool, offer_id: int) -> bool:
-    """إلغاء تنشيط عرض عام"""
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE global_offers SET is_active = FALSE WHERE id = $1",
-                offer_id
-            )
-            logging.info(f"✅ تم إلغاء تنشيط العرض العام #{offer_id}")
-            return True
-    except Exception as e:
-        logging.error(f"❌ خطأ في إلغاء تنشيط العرض العام: {e}")
-        return False
-
-
-# ============= دوال مكافآت الإيداع (بعد الإصلاح الجذري) =============
 
 async def get_active_deposit_bonus(pool, deposit_amount: float = None) -> Optional[Dict]:
     """جلب مكافأة الإيداع النشطة حالياً"""
@@ -343,7 +267,7 @@ async def deactivate_deposit_bonus(pool, bonus_id: int) -> bool:
         return False
 
 
-# ============= دوال سجل استخدام العروض =============
+# ============= دوال سجل استخدام المكافآت =============
 
 async def record_offer_usage(
     pool,
@@ -353,7 +277,7 @@ async def record_offer_usage(
     order_id: int = None,
     deposit_id: int = None
 ) -> bool:
-    """تسجيل استخدام عرض/مكافأة"""
+    """تسجيل استخدام مكافأة"""
     try:
         async with pool.acquire() as conn:
             await conn.execute('''
@@ -363,12 +287,12 @@ async def record_offer_usage(
             logging.info(f"✅ تم تسجيل استخدام {offer_type} #{offer_id} للمستخدم {user_id}")
             return True
     except Exception as e:
-        logging.error(f"❌ خطأ في تسجيل استخدام العرض: {e}")
+        logging.error(f"❌ خطأ في تسجيل استخدام المكافأة: {e}")
         return False
 
 
 async def has_user_used_offer(pool, user_id: int, offer_id: int, offer_type: str) -> bool:
-    """التحقق مما إذا كان المستخدم قد استخدم عرضاً معيناً"""
+    """التحقق مما إذا كان المستخدم قد استخدم مكافأة معينة"""
     try:
         async with pool.acquire() as conn:
             count = await conn.fetchval('''
@@ -377,12 +301,12 @@ async def has_user_used_offer(pool, user_id: int, offer_id: int, offer_type: str
             ''', user_id, offer_id, offer_type)
             return count > 0
     except Exception as e:
-        logging.error(f"❌ خطأ في التحقق من استخدام العرض: {e}")
+        logging.error(f"❌ خطأ في التحقق من استخدام المكافأة: {e}")
         return False
 
 
 async def get_offer_usage_stats(pool, offer_id: int, offer_type: str) -> Dict:
-    """جلب إحصائيات استخدام عرض/مكافأة"""
+    """جلب إحصائيات استخدام مكافأة"""
     try:
         async with pool.acquire() as conn:
             stats = await conn.fetchrow('''
@@ -394,38 +318,18 @@ async def get_offer_usage_stats(pool, offer_id: int, offer_type: str) -> Dict:
             ''', offer_id, offer_type)
             return dict(stats) if stats else {'total_uses': 0, 'unique_users': 0}
     except Exception as e:
-        logging.error(f"❌ خطأ في جلب إحصائيات العرض: {e}")
+        logging.error(f"❌ خطأ في جلب إحصائيات المكافأة: {e}")
         return {'total_uses': 0, 'unique_users': 0}
 
 
-# ============= دوال التوافق =============
-
-async def deactivate_offer(pool, offer_id: int, offer_type: str) -> bool:
-    """إلغاء تنشيط عرض/مكافأة (واجهة موحدة)"""
-    if offer_type == 'global':
-        return await deactivate_global_offer(pool, offer_id)
-    elif offer_type == 'deposit':
-        return await deactivate_deposit_bonus(pool, offer_id)
-    else:
-        logger.error(f"❌ نوع عرض غير معروف: {offer_type}")
-        return False
-
-
-async def get_all_offers(pool, offer_type: str = 'global') -> list:
-    """جلب جميع العروض/المكافآت (للتوافق مع admin/offers.py)"""
-    if offer_type == 'global':
-        return await get_all_global_offers(pool)
-    else:
-        return await get_all_deposit_bonuses(pool)
-
-
-async def get_offer_discount(pool) -> int:
-    """جلب خصم العرض النشط (للتوافق)"""
-    offer = await get_active_global_offer(pool)
-    return offer['discount_percent'] if offer else 0
-
+# ============= دوال التوافق (للمكافآت فقط) =============
 
 async def get_deposit_bonus_percent(pool, amount: float = None) -> int:
-    """جلب نسبة مكافأة الإيداع (للتوافق)"""
+    """جلب نسبة مكافأة الإيداع"""
     bonus = await get_active_deposit_bonus(pool, amount)
     return bonus['bonus_percent'] if bonus else 0
+
+
+# ============= الدوال المهملة (للعروض العامة - غير مستخدمة) =============
+# تم إزالة دوال العروض العامة لأنها غير مستخدمة حالياً
+# إذا احتجتها لاحقاً، يمكن إضافتها مرة أخرى
