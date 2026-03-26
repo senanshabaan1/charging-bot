@@ -6,7 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
 from utils import is_admin
 from database.core import get_bot_status, set_bot_status, update_exchange_rate
-from handlers.time_utils import get_formatted_damascus_time
+from utils import get_formatted_damascus_time
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_reset")
