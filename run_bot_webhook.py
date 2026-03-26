@@ -18,12 +18,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import (
     TOKEN, ADMIN_ID, DEBUG, LOG_LEVEL, LOG_FORMAT, LOG_FILE,
     WEBHOOK_PATH, WEBHOOK_PORT, WEBHOOK_HOST, WEBHOOK_URL,
-    load_exchange_rate, load_bot_settings
+    load_exchange_rate, load_bot_settings, load_all_exchange_rates  # ✅ إضافة load_all_exchange_rates
 )
 from database.connection import get_pool, init_db, DAMASCUS_TZ
 from database.points import fix_points_history_table
 from database.stats import get_report_settings
 from database.admin import fix_manual_vip_for_existing_users
+from database.core import get_all_exchange_rates, get_active_global_offer, get_active_deposit_bonus  # ✅ إضافة دوال العروض
+from utils.api_client import api_client  # ✅ استيراد عميل API
 
 from handlers import start, deposit, services, reports
 from admin import router as admin_router
@@ -53,12 +55,13 @@ app: Optional[web.Application] = None
 runner: Optional[web.AppRunner] = None
 start_time = time.time()
 
-# ============= معالجة إشارات الإيقاف =============
 
+# ============= معالجة إشارات الإيقاف =============
 def handle_exit_signal():
     """معالجة إشارات الإيقاف"""
     logger.info("📥 استقبال إشارة إيقاف...")
     asyncio.create_task(shutdown())
+
 
 def setup_signal_handlers():
     """إعداد معالجات الإشارات"""
@@ -67,8 +70,8 @@ def setup_signal_handlers():
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, handle_exit_signal)
 
-# ============= دوال التشغيل الأساسية =============
 
+# ============= دوال التشغيل الأساسية =============
 async def set_bot_commands(bot: Bot):
     """تعيين أوامر البوت في القائمة الجانبية"""
     commands = [
@@ -86,6 +89,7 @@ async def set_bot_commands(bot: Bot):
     except Exception as e:
         logger.error(f"❌ خطأ في تعيين الأوامر: {e}")
 
+
 async def init_database():
     """تهيئة قاعدة البيانات"""
     global db_pool
@@ -93,14 +97,12 @@ async def init_database():
     logger.info("📦 جاري الاتصال بقاعدة البيانات...")
     
     try:
-        # ✅ إنشاء مجمع الاتصالات
         db_pool = await get_pool()
         
         if not db_pool:
             logger.error("❌ فشل إنشاء مجمع الاتصالات")
             return False
 
-        # ✅ التحقق من الاتصال
         async with db_pool.acquire() as conn:
             test = await conn.fetchval("SELECT 1")
             if test != 1:
@@ -108,18 +110,15 @@ async def init_database():
                 return False
             logger.info("✅ تم اختبار الاتصال بقاعدة البيانات بنجاح")
 
-        # ✅ تهيئة قاعدة البيانات
         await init_db(db_pool)
         logger.info("✅ تم تهيئة قاعدة البيانات")
         
-        # ✅ إصلاح الجداول
         try:
             await fix_points_history_table(db_pool)
             logger.info("✅ تم إصلاح جداول النقاط")
         except Exception as e:
             logger.warning(f"⚠️ خطأ في إصلاح جداول النقاط: {e}")
         
-        # ✅ إصلاح الـ VIP اليدوي
         try:
             await fix_manual_vip_for_existing_users(db_pool)
             logger.info("✅ تم إصلاح مستويات VIP اليدوية")
@@ -133,6 +132,7 @@ async def init_database():
         import traceback
         traceback.print_exc()
         return False
+
 
 async def check_timezone():
     """التحقق من المنطقة الزمنية"""
@@ -148,23 +148,49 @@ async def check_timezone():
     except Exception as e:
         logger.error(f"❌ خطأ في التحقق من الوقت: {e}")
 
+
+async def load_all_settings():
+    """تحميل جميع الإعدادات من قاعدة البيانات"""
+    try:
+        # ✅ تحميل أسعار الصرف المنفصلة
+        rates = await get_all_exchange_rates(db_pool)
+        logger.info(f"💰 تم تحميل أسعار الصرف: شراء={rates.get('purchase', 118)}, إيداع={rates.get('deposit', 118)}, نقاط={rates.get('points', 118)}")
+        
+        # ✅ تحميل رابط API
+        async with db_pool.acquire() as conn:
+            api_url = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'api_base_url'")
+            if api_url:
+                api_client.base_url = api_url.rstrip('/')
+                logger.info(f"🌐 تم تحميل رابط API: {api_client.base_url}")
+        
+        # ✅ تحميل العروض النشطة
+        active_offer = await get_active_global_offer(db_pool)
+        if active_offer:
+            logger.info(f"🎁 عرض نشط: {active_offer['discount_percent']}% خصم حتى {active_offer['end_date']}")
+        
+        active_bonus = await get_active_deposit_bonus(db_pool)
+        if active_bonus:
+            logger.info(f"💰 مكافأة نشطة: {active_bonus['bonus_percent']}% على الإيداع")
+        
+        return True
+    except Exception as e:
+        logger.error(f"❌ خطأ في تحميل الإعدادات: {e}")
+        return False
+
+
 async def init_bot():
     """تهيئة البوت"""
     global bot, dp
     
     try:
-        # ✅ إنشاء البوت
         bot = Bot(token=TOKEN)
         
-        # ✅ إنشاء Dispatcher
         dp = Dispatcher()
         dp["db_pool"] = db_pool
         
-        # ✅ إضافة ميدل وير
         dp.message.middleware(BotStatusMiddleware(db_pool))
         dp.callback_query.middleware(BotStatusMiddleware(db_pool))
         
-        # ✅ تسجيل الهاندلرز
         dp.include_routers(
             start.router,
             admin_router,
@@ -182,8 +208,105 @@ async def init_bot():
         traceback.print_exc()
         return False
 
+
+# ============= مهام التحديث التلقائي =============
+async def auto_sync_services():
+    """تحديث قائمة الخدمات تلقائياً"""
+    try:
+        async with db_pool.acquire() as conn:
+            auto_sync = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'auto_sync_services'"
+            )
+            
+            if auto_sync == "enabled":
+                logger.info("🔄 بدء التحديث التلقائي للخدمات...")
+                products = await api_client.get_products(force_refresh=True)
+                if products:
+                    logger.info(f"✅ تم تحديث {len(products)} خدمة تلقائياً")
+                else:
+                    logger.warning("⚠️ فشل التحديث التلقائي للخدمات")
+    except Exception as e:
+        logger.error(f"❌ خطأ في التحديث التلقائي: {e}")
+
+
+async def check_pending_orders_auto():
+    """التحقق من الطلبات المعلقة وتحديث حالتها تلقائياً"""
+    try:
+        async with db_pool.acquire() as conn:
+            orders = await conn.fetch('''
+                SELECT id, api_order_id, user_id, app_name
+                FROM orders 
+                WHERE status IN ('processing', 'pending') 
+                AND api_order_id IS NOT NULL
+                AND api_order_id != ''
+                AND api_order_id != 'null'
+            ''')
+            
+            if orders:
+                order_ids = [order['api_order_id'] for order in orders]
+                api_result = await api_client.check_orders(order_ids)
+                
+                if api_result:
+                    for order in orders:
+                        if isinstance(api_result, list):
+                            order_data = next((item for item in api_result if str(item.get('order_id')) == str(order['api_order_id'])), None)
+                        else:
+                            order_data = api_result.get(order['api_order_id'])
+                        
+                        if order_data and isinstance(order_data, dict):
+                            status = order_data.get('status', '')
+                            
+                            if status in ['completed', 'done', 'finished']:
+                                await conn.execute(
+                                    "UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+                                    order['id']
+                                )
+                                
+                                points = await conn.fetchval(
+                                    "SELECT value::integer FROM bot_settings WHERE key = 'points_per_order'"
+                                ) or 1
+                                
+                                await conn.execute(
+                                    "UPDATE users SET total_points = total_points + $1 WHERE user_id = $2",
+                                    points, order['user_id']
+                                )
+                                
+                                await bot.send_message(
+                                    order['user_id'],
+                                    f"✅ **تم اكتمال طلبك #{order['id']} بنجاح!**\n\n"
+                                    f"📱 **التطبيق:** {order['app_name']}\n"
+                                    f"⭐ **نقاط مكتسبة:** +{points}\n"
+                                    f"🎉 شكراً لاستخدامك خدماتنا",
+                                    parse_mode="Markdown"
+                                )
+                                
+                                logger.info(f"✅ تم تحديث الطلب #{order['id']} إلى completed تلقائياً")
+                                
+    except Exception as e:
+        logger.error(f"❌ خطأ في تحديث الطلبات التلقائي: {e}")
+
+
+async def check_api_balance_alert():
+    """مراقبة الرصيد وإشعار عند انخفاضه"""
+    try:
+        balance = await api_client.get_balance()
+        
+        if balance is not None:
+            if balance < 10:
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"⚠️ **تحذير: رصيد API منخفض!**\n\n"
+                    f"💰 الرصيد الحالي: ${balance:.2f}\n"
+                    f"🔴 يرجى شحن الرصيد قريباً لتجنب توقف الخدمات.",
+                    parse_mode="Markdown"
+                )
+                logger.warning(f"⚠️ رصيد API منخفض: ${balance:.2f}")
+    except Exception as e:
+        logger.error(f"❌ خطأ في مراقبة رصيد API: {e}")
+
+
 async def init_scheduler():
-    """تهيئة جدولة التقرير اليومي"""
+    """تهيئة جدولة المهام"""
     global scheduler
     
     try:
@@ -194,8 +317,15 @@ async def init_scheduler():
         report_time = settings.get('report_time', '00:00')
         hour, minute = map(int, report_time.split(':'))
         
+        # جلب فترة التحديث التلقائي
+        async with db_pool.acquire() as conn:
+            sync_interval = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'sync_interval'"
+            ) or "60"
+        
         scheduler = AsyncIOScheduler(timezone='Asia/Damascus')
         
+        # التقرير اليومي
         scheduler.add_job(
             send_daily_report,
             'cron',
@@ -207,12 +337,40 @@ async def init_scheduler():
             misfire_grace_time=3600
         )
         
+        # تحديث الطلبات التلقائي (كل دقيقتين)
+        scheduler.add_job(
+            check_pending_orders_auto,
+            'interval',
+            minutes=2,
+            id='check_orders_auto',
+            replace_existing=True
+        )
+        
+        # تحديث الخدمات التلقائي
+        scheduler.add_job(
+            auto_sync_services,
+            'interval',
+            minutes=int(sync_interval),
+            id='auto_sync_services',
+            replace_existing=True
+        )
+        
+        # مراقبة رصيد API (كل ساعة)
+        scheduler.add_job(
+            check_api_balance_alert,
+            'interval',
+            hours=1,
+            id='check_api_balance',
+            replace_existing=True
+        )
+        
         scheduler.start()
-        logger.info(f"✅ تم تفعيل التقرير اليومي (الساعة {report_time})")
+        logger.info(f"✅ تم تفعيل الجدولة (التقرير الساعة {report_time}، تحديث الخدمات كل {sync_interval} دقيقة)")
         return True
     except Exception as e:
         logger.error(f"❌ خطأ في تهيئة الجدولة: {e}")
         return False
+
 
 async def setup_webhook():
     """إعداد webhook"""
@@ -240,6 +398,7 @@ async def setup_webhook():
     except Exception as e:
         logger.error(f"❌ خطأ في إعداد webhook: {e}")
         raise
+
 
 async def create_web_app(base_url: str) -> web.Application:
     """إنشاء تطبيق الويب"""
@@ -302,6 +461,7 @@ async def create_web_app(base_url: str) -> web.Application:
     logger.info(f"✅ تم إنشاء تطبيق الويب على {base_url}")
     return app
 
+
 async def start_server(port: int):
     """تشغيل الخادم"""
     global runner
@@ -313,6 +473,7 @@ async def start_server(port: int):
     
     logger.info(f"✅ الخادم يعمل على المنفذ {port}")
     return runner
+
 
 async def shutdown():
     """إيقاف التشغيل بشكل آمن"""
@@ -344,6 +505,7 @@ async def shutdown():
     logger.info("👋 تم إيقاف البوت بنجاح")
     sys.exit(0)
 
+
 async def main():
     """الدالة الرئيسية لتشغيل البوت"""
     global start_time
@@ -353,10 +515,9 @@ async def main():
     logger.info(f"🔧 وضع التطوير: {'نعم' if DEBUG else 'لا'}")
     
     try:
-        # ✅ 1. تهيئة قاعدة البيانات (مع التحقق)
+        # ✅ 1. تهيئة قاعدة البيانات
         if not await init_database():
             logger.error("❌ فشل تهيئة قاعدة البيانات، إعادة المحاولة...")
-            # محاولة ثانية
             await asyncio.sleep(2)
             if not await init_database():
                 logger.critical("❌ فشل تهيئة قاعدة البيانات بعد المحاولتين")
@@ -365,45 +526,48 @@ async def main():
         # ✅ 2. التحقق من الوقت
         await check_timezone()
         
-        # ✅ 3. تحميل الإعدادات
+        # ✅ 3. تحميل جميع الإعدادات (أسعار الصرف، رابط API، العروض)
+        await load_all_settings()
+        
+        # ✅ 4. تحميل الإعدادات القديمة للتوافق
         try:
             await load_exchange_rate(db_pool)
             await load_bot_settings(db_pool)
         except Exception as e:
-            logger.error(f"❌ خطأ في تحميل الإعدادات: {e}")
+            logger.error(f"❌ خطأ في تحميل الإعدادات القديمة: {e}")
         
-        # ✅ 4. تهيئة البوت
+        # ✅ 5. تهيئة البوت
         if not await init_bot():
             logger.error("❌ فشل تهيئة البوت")
             return
         
-        # ✅ 5. تحديث كاش حالة البوت
+        # ✅ 6. تحديث كاش حالة البوت
         await refresh_bot_status_cache(db_pool)
         
-        # ✅ 6. مسح الكاش
+        # ✅ 7. مسح الكاش
         clear_cache()
         
-        # ✅ 7. تعيين الأوامر
+        # ✅ 8. تعيين الأوامر
         await set_bot_commands(bot)
         
-        # ✅ 8. تهيئة الجدولة
+        # ✅ 9. تهيئة الجدولة
         await init_scheduler()
         
-        # ✅ 9. إعداد webhook
+        # ✅ 10. إعداد webhook
         port, base_url = await setup_webhook()
         
-        # ✅ 10. إنشاء تطبيق الويب
+        # ✅ 11. إنشاء تطبيق الويب
         await create_web_app(base_url)
         
-        # ✅ 11. تشغيل الخادم
+        # ✅ 12. تشغيل الخادم
         await start_server(port)
         
-        # ✅ 12. إحصائيات البداية
+        # ✅ 13. إحصائيات البداية
         elapsed = time.time() - start_time
         logger.info(f"✅ تم بدء التشغيل بنجاح في {elapsed:.2f} ثانية")
         logger.info(f"📊 إحصائيات الكاش: {get_cache_stats()}")
         
-        # ✅ 13. الانتظار
+        # ✅ 14. الانتظار
         await asyncio.Event().wait()
         
     except asyncio.CancelledError:
@@ -414,6 +578,7 @@ async def main():
         traceback.print_exc()
     finally:
         await shutdown()
+
 
 if __name__ == "__main__":
     try:
