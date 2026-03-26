@@ -1,5 +1,5 @@
 # handlers/services.py - كامل مع جميع التعديلات
-# يشمل: أسعار صرف منفصلة، عروض عامة، وصف من API، تنفيذ تلقائي
+# بدون عروض عامة (فقط خصم VIP)، بدون عرض نسبة الربح للمستخدم
 
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
@@ -13,7 +13,7 @@ from datetime import datetime
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from handlers.keyboards import get_main_menu_keyboard
 from database.users import is_admin_user
-from database.core import get_exchange_rate, get_active_global_offer, record_offer_usage
+from database.core import get_exchange_rate
 from database.vip import get_user_vip
 from database.points import get_points_per_order
 from database.products import get_product_options, get_product_option, calculate_option_price
@@ -56,12 +56,9 @@ async def get_cached_categories(db_pool):
         return await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
 
 
-  # handlers/services.py - استبدل دالة send_order_to_group بهذه النسخة
-
 async def send_order_to_group(bot: Bot, order_data: dict):
     """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
-        # ✅ استخدام HTML بدلاً من Markdown لتجنب مشاكل التنسيق
         caption = (
             "🆕 <b>طلب تطبيق جديد</b>\n\n"
             f"👤 <b>المستخدم:</b> @{order_data['username']}\n"
@@ -98,7 +95,7 @@ async def send_order_to_group(bot: Bot, order_data: dict):
             chat_id=ORDERS_GROUP,
             text=caption,
             reply_markup=builder.as_markup(),
-            parse_mode="HTML"  # ✅ تغيير إلى HTML
+            parse_mode="HTML"
         )
         
         logger.info(f"✅ تم إرسال الطلب #{order_data['order_id']} للمجموعة")
@@ -106,7 +103,7 @@ async def send_order_to_group(bot: Bot, order_data: dict):
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال الطلب للمجموعة: {e}")
         return None
-# handlers/services.py - استبدل دالة send_auto_fail_notification بهذه النسخة
+
 
 async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message: str = None):
     """إرسال إشعار للمجموعة عند فشل التنفيذ التلقائي"""
@@ -155,7 +152,7 @@ async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message:
             chat_id=ORDERS_GROUP,
             text=caption,
             reply_markup=builder.as_markup(),
-            parse_mode="HTML"  # ✅ تغيير إلى HTML
+            parse_mode="HTML"
         )
         
         logger.info(f"⚠️ تم إرسال إشعار فشل الطلب #{order_data['order_id']} للمجموعة")
@@ -163,6 +160,7 @@ async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message:
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال إشعار الفشل: {e}")
         return None
+
 
 async def execute_order_automatically(bot: Bot, db_pool, order_data: dict, order_id: int, total_syp: float, points: int):
     """تنفيذ الطلب تلقائياً عبر API الخارجي"""
@@ -777,8 +775,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     details += f"📦 **الخيار:** {option['name']}\n"
     details += f"🔢 **الكمية:** {quantity}\n"
     
-    if price_data['profit_percentage'] > 0:
-        details += f"📊 **نسبة ربح الخيار:** {price_data['profit_percentage']:.0f}%\n"
+    # ✅ تم إزالة عرض نسبة الربح نهائياً
     
     if discount > 0:
         saved = price_data['price_with_profit_usd'] * purchase_rate - price_data['final_price_syp']
@@ -1039,7 +1036,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
 # ============= تنفيذ الطلب =============
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """تنفيذ الطلب - إما تلقائياً عبر API أو يدوياً حسب وجود api_service_id"""
+    """تنفيذ الطلب - إما تلقائياً عبر API أو يدوياً"""
     data = await state.get_data()
     
     if not data:
@@ -1053,13 +1050,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     total_syp = float(data['total_syp'])
     api_service_id = data.get('api_service_id')
     
-    active_offer = await get_active_global_offer(db_pool)
-    offer_discount = active_offer['discount_percent'] if active_offer else 0
-    offer_id = active_offer['id'] if active_offer else None
-    
-    if offer_discount > 0:
-        total_syp = total_syp * (1 - offer_discount / 100)
-        logger.info(f"🎁 تم تطبيق خصم العرض {offer_discount}% على الطلب")
+    # ✅ تم إزالة العروض العامة نهائياً
     
     async with db_pool.acquire() as conn:
         async with conn.transaction():
@@ -1084,8 +1075,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, variant_id, variant_name, 
                      quantity, duration_days, unit_price_usd, total_amount_syp, target_id, 
-                     status, points_earned, offer_discount, offer_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                     status, points_earned)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
                     RETURNING id
                 ''',
                 callback.from_user.id,
@@ -1099,10 +1090,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 float(data.get('final_price_usd', 0)),
                 total_syp,
                 data['target_id'],
-                'pending',
-                points,
-                offer_discount,
-                offer_id
+                points
                 )
                 
                 order_data = {
@@ -1120,8 +1108,8 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, quantity, unit_price_usd, 
-                     total_amount_syp, target_id, status, points_earned, offer_discount, offer_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11)
+                     total_amount_syp, target_id, status, points_earned)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
                     RETURNING id
                 ''',
                 callback.from_user.id,
@@ -1132,9 +1120,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 data.get('discounted_unit_price_usd', 0),
                 total_syp,
                 data['target_id'],
-                points,
-                offer_discount,
-                offer_id
+                points
                 )
                 
                 order_data = {
@@ -1147,15 +1133,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'total_syp': total_syp,
                     'target_id': data['target_id'],
                 }
-            
-            if offer_id:
-                await record_offer_usage(
-                    pool=db_pool,
-                    user_id=callback.from_user.id,
-                    offer_id=offer_id,
-                    offer_type='global',
-                    order_id=order_id
-                )
     
     auto_executed = False
     api_error = None
@@ -1180,9 +1157,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     if discount > 0:
         saved_amount = data.get('original_total_syp', total_syp) - total_syp
         discount_text = f"\n🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
-    
-    if offer_discount > 0:
-        discount_text += f"\n🎁 **خصم العرض:** {offer_discount}%"
     
     if auto_executed:
         await callback.message.edit_text(
