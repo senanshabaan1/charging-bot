@@ -21,15 +21,15 @@ CACHE_TTL_BOT_STATUS = 30  # 30 ثانية
 # ✅ قائمة أزرار لوحة التحكم (محدثة)
 ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("📈 سعر الصرف", "edit_rate"),
-    ("💰 إدارة أسعار الصرف", "exchange_rates_menu"),  # ✅ جديد
+    ("💰 إدارة أسعار الصرف", "exchange_rates_menu"),
     ("📊 الإحصائيات", "bot_stats"),
     ("📢 رسالة للكل", "broadcast"),
     ("👤 معلومات مستخدم", "user_info"),
     ("⭐ إدارة النقاط", "manage_points"),
     ("📊 تقارير ونسخ", "reports_menu"),
-    ("🔌 إدارة خدمات API", "api_services_menu"),  # ✅ جديد
-    ("🎁 العروض والمكافآت", "offers_menu"),  # ✅ جديد
-    ("📊 إدارة نسب ربح الخيارات", "manage_option_profits"),  # ✅ جديد
+    ("🔌 إدارة خدمات API", "api_services_menu"),
+    ("🎁 العروض والمكافآت", "offers_menu"),
+    ("📊 إدارة نسب ربح الخيارات", "manage_option_profits"),
     ("✏️ تعديل منتج", "edit_product"),
     ("🗑️ حذف منتج", "delete_product"),
     ("📱 عرض المنتجات", "list_products"),
@@ -137,13 +137,12 @@ async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
 # ============= معالجات الأزرار الجديدة =============
 
 @router.callback_query(F.data == "exchange_rates_menu")
-async def handle_exchange_rates_menu(callback: types.CallbackQuery, state: FSMContext):
+async def handle_exchange_rates_menu(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """توجيه إلى قائمة أسعار الصرف"""
     await callback.answer()
     
-    # استيراد الدالة من admin/settings.py
     from admin.settings import exchange_rates_menu
-    await exchange_rates_menu(callback, state)
+    await exchange_rates_menu(callback, state, db_pool)  # ✅ تمرير db_pool
 
 
 @router.callback_query(F.data == "api_services_menu")
@@ -151,7 +150,6 @@ async def handle_api_services_menu(callback: types.CallbackQuery, db_pool):
     """توجيه إلى قائمة إدارة API"""
     await callback.answer()
     
-    # استيراد الدالة من admin/api_services.py
     from admin.api_services import api_services_menu
     await api_services_menu(callback, db_pool)
 
@@ -161,7 +159,6 @@ async def handle_offers_menu(callback: types.CallbackQuery, db_pool):
     """توجيه إلى قائمة العروض والمكافآت"""
     await callback.answer()
     
-    # استيراد الدالة من admin/offers.py
     from admin.offers import offers_menu
     await offers_menu(callback, db_pool)
 
@@ -171,7 +168,6 @@ async def handle_manage_option_profits(callback: types.CallbackQuery, db_pool):
     """توجيه إلى إدارة نسب ربح الخيارات"""
     await callback.answer()
     
-    # استيراد الدالة من admin/option_profits.py
     from admin.option_profits import manage_option_profits_start
     await manage_option_profits_start(callback, db_pool)
 
