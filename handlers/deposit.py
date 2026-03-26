@@ -323,14 +323,14 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
                 photo=photo_file_id,
                 caption=caption,
                 reply_markup=builder.as_markup(),
-                parse_mode="Markdown"
+                parse_mode="none"
             )
         else:
             msg = await bot.send_message(
                 chat_id=config.DEPOSIT_GROUP,
                 text=caption,
                 reply_markup=builder.as_markup(),
-                parse_mode="Markdown"
+                parse_mode="none"
             )
         
         logger.info(f"✅ تم إرسال طلب الشحن للمجموعة، message_id: {msg.message_id}")
