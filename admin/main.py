@@ -9,7 +9,7 @@ from typing import List, Tuple
 from config import ADMIN_ID, MODERATORS
 from handlers.keyboards import get_main_menu_keyboard
 from utils import is_admin, safe_edit_message, get_formatted_damascus_time
-from cache import cached, clear_cache  # ✅ استيراد الكاش
+from cache import cached, clear_cache
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_main")
@@ -18,14 +18,18 @@ router = Router(name="admin_main")
 ADMIN_BUTTONS_PER_ROW = 3
 CACHE_TTL_BOT_STATUS = 30  # 30 ثانية
 
-# ✅ قائمة أزرار لوحة التحكم (ثابتة)
+# ✅ قائمة أزرار لوحة التحكم (محدثة)
 ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("📈 سعر الصرف", "edit_rate"),
+    ("💰 إدارة أسعار الصرف", "exchange_rates_menu"),  # ✅ جديد
     ("📊 الإحصائيات", "bot_stats"),
     ("📢 رسالة للكل", "broadcast"),
     ("👤 معلومات مستخدم", "user_info"),
     ("⭐ إدارة النقاط", "manage_points"),
     ("📊 تقارير ونسخ", "reports_menu"),
+    ("🔌 إدارة خدمات API", "api_services_menu"),  # ✅ جديد
+    ("🎁 العروض والمكافآت", "offers_menu"),  # ✅ جديد
+    ("📊 إدارة نسب ربح الخيارات", "manage_option_profits"),  # ✅ جديد
     ("✏️ تعديل منتج", "edit_product"),
     ("🗑️ حذف منتج", "delete_product"),
     ("📱 عرض المنتجات", "list_products"),
@@ -49,6 +53,7 @@ async def get_cached_bot_status(db_pool) -> Tuple[bool, str]:
     status = await get_bot_status(db_pool)
     return status, "🟢 يعمل" if status else "🔴 متوقف"
 
+
 # معالج الإلغاء العام
 @router.message(F.text.in_(["❌ إلغاء", "/cancel", "/الغاء", "/رجوع"]))
 async def global_cancel_handler(message: types.Message, state: FSMContext, db_pool):
@@ -66,6 +71,7 @@ async def global_cancel_handler(message: types.Message, state: FSMContext, db_po
         reply_markup=get_main_menu_keyboard(is_admin_user_flag)
     )
 
+
 # لوحة التحكم الرئيسية
 @router.message(Command("admin"))
 async def admin_panel(message: types.Message, db_pool):
@@ -76,10 +82,8 @@ async def admin_panel(message: types.Message, db_pool):
 
     start_time = time.time()
     
-    # ✅ استخدام الكاش لحالة البوت
     bot_status, status_text = await get_cached_bot_status(db_pool)
     
-    # ✅ إنشاء الكيبورد
     builder = InlineKeyboardBuilder()
     for text, callback in ADMIN_BUTTONS:
         builder.add(types.InlineKeyboardButton(text=text, callback_data=callback))
@@ -98,20 +102,18 @@ async def admin_panel(message: types.Message, db_pool):
         parse_mode="Markdown"
     )
 
+
 # العودة للوحة التحكم
 @router.callback_query(F.data == "back_to_admin")
 @router.callback_query(F.data == "back_to_admin_panel")
 async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
     """العودة للوحة التحكم الرئيسية"""
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     start_time = time.time()
     
-    # ✅ استخدام الكاش لحالة البوت
     bot_status, status_text = await get_cached_bot_status(db_pool)
     
-    # ✅ إنشاء الكيبورد
     builder = InlineKeyboardBuilder()
     for text, callback_data in ADMIN_BUTTONS:
         builder.add(types.InlineKeyboardButton(text=text, callback_data=callback_data))
@@ -119,7 +121,6 @@ async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
     
     elapsed_time = time.time() - start_time
     
-    # ✅ تعديل النص والكيبورد بطلب واحد
     await safe_edit_message(
         callback.message,
         f"🛠 **لوحة تحكم الإدارة**\n\n"
@@ -133,7 +134,46 @@ async def back_to_admin_panel(callback: types.CallbackQuery, db_pool):
     logger.info(f"✅ عودة للوحة التحكم للمشرف {callback.from_user.id} في {elapsed_time:.3f} ثانية")
 
 
+# ============= معالجات الأزرار الجديدة =============
 
+@router.callback_query(F.data == "exchange_rates_menu")
+async def handle_exchange_rates_menu(callback: types.CallbackQuery, state: FSMContext):
+    """توجيه إلى قائمة أسعار الصرف"""
+    await callback.answer()
+    
+    # استيراد الدالة من admin/settings.py
+    from admin.settings import exchange_rates_menu
+    await exchange_rates_menu(callback, state)
+
+
+@router.callback_query(F.data == "api_services_menu")
+async def handle_api_services_menu(callback: types.CallbackQuery, db_pool):
+    """توجيه إلى قائمة إدارة API"""
+    await callback.answer()
+    
+    # استيراد الدالة من admin/api_services.py
+    from admin.api_services import api_services_menu
+    await api_services_menu(callback, db_pool)
+
+
+@router.callback_query(F.data == "offers_menu")
+async def handle_offers_menu(callback: types.CallbackQuery, db_pool):
+    """توجيه إلى قائمة العروض والمكافآت"""
+    await callback.answer()
+    
+    # استيراد الدالة من admin/offers.py
+    from admin.offers import offers_menu
+    await offers_menu(callback, db_pool)
+
+
+@router.callback_query(F.data == "manage_option_profits")
+async def handle_manage_option_profits(callback: types.CallbackQuery, db_pool):
+    """توجيه إلى إدارة نسب ربح الخيارات"""
+    await callback.answer()
+    
+    # استيراد الدالة من admin/option_profits.py
+    from admin.option_profits import manage_option_profits_start
+    await manage_option_profits_start(callback, db_pool)
 
 
 # معالج للأوامر غير المعروفة في وضع المشرف
@@ -147,5 +187,3 @@ async def unknown_admin_command(message: types.Message):
         "❌ أمر غير معروف\n"
         "استخدم /admin للعودة للوحة التحكم"
     )
-
-
