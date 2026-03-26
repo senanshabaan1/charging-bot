@@ -1,4 +1,4 @@
-# admin/offers.py - فقط مكافآت الإيداع (بدون عروض عامة)
+# admin/offers.py - مكافآت الإيداع فقط
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -24,7 +24,7 @@ router = Router()
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 
-class OfferStates(StatesGroup):
+class BonusStates(StatesGroup):
     waiting_bonus_name = State()
     waiting_bonus_percent = State()
     waiting_min_deposit = State()
@@ -43,7 +43,6 @@ async def offers_menu(callback: types.CallbackQuery, db_pool):
     
     await callback.answer()
     
-    # جلب المكافأة النشطة الحالية
     active_bonus = await get_active_deposit_bonus(db_pool)
     
     builder = InlineKeyboardBuilder()
@@ -61,10 +60,13 @@ async def offers_menu(callback: types.CallbackQuery, db_pool):
     if active_bonus:
         end_date = active_bonus['end_date'].strftime('%Y-%m-%d %H:%M')
         min_deposit = active_bonus.get('min_deposit_amount', 0)
+        max_bonus = active_bonus.get('max_bonus_amount', 0)
         status_text += f"💰 **مكافأة نشطة:** {active_bonus['bonus_percent']}% على الإيداع"
         if min_deposit:
-            status_text += f" (حد أدنى {min_deposit:,.0f} ل.س)"
-        status_text += f"\n   حتى {end_date}\n"
+            status_text += f"\n   📌 الحد الأدنى: {min_deposit:,.0f} ل.س"
+        if max_bonus:
+            status_text += f"\n   📌 الحد الأقصى للمكافأة: {max_bonus:,.0f} ل.س"
+        status_text += f"\n   🕐 تنتهي في: {end_date}\n"
     else:
         status_text += "💰 **لا توجد مكافأة إيداع نشطة حالياً**\n"
     
@@ -72,14 +74,15 @@ async def offers_menu(callback: types.CallbackQuery, db_pool):
         f"💰 **نظام مكافآت الإيداع**\n\n"
         f"📊 **الحالة الحالية:**{status_text}\n\n"
         f"🔹 **مكافأة الإيداع:** نسبة إضافية على المبلغ المودع\n"
-        f"🔹 يتم تطبيقها تلقائياً عند الموافقة على طلب الإيداع\n\n"
+        f"🔹 يتم تطبيقها تلقائياً عند الموافقة على طلب الإيداع\n"
+        f"🔹 تنطبق على جميع طرق الدفع (سيرياتل، شام كاش، USDT)\n\n"
         f"اختر الإجراء المطلوب:",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
 
 
-# ============= إنشاء مكافأة إيداع =============
+# ============= إنشاء مكافأة إيداع جديدة =============
 @router.callback_query(F.data == "new_deposit_bonus")
 async def new_deposit_bonus_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """بدء إنشاء مكافأة إيداع جديدة"""
@@ -87,19 +90,20 @@ async def new_deposit_bonus_start(callback: types.CallbackQuery, state: FSMConte
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.answer()
-    await state.set_state(OfferStates.waiting_bonus_name)
+    await state.set_state(BonusStates.waiting_bonus_name)
     
     await callback.message.edit_text(
         "💰 **إنشاء مكافأة إيداع جديدة**\n\n"
         "📝 **أدخل اسم المكافأة:**\n"
-        "(مثال: مكافأة الودائع 10%)\n\n"
+        "(مثال: مكافأة الودائع 10%)\n"
+        "🔹 هذا الاسم يظهر للمشرفين فقط للإدارة\n\n"
         "❌ للإلغاء أرسل /cancel",
         reply_markup=get_back_inline_keyboard("offers_menu"),
         parse_mode="Markdown"
     )
 
 
-@router.message(OfferStates.waiting_bonus_name)
+@router.message(BonusStates.waiting_bonus_name)
 async def get_bonus_name(message: types.Message, state: FSMContext, db_pool):
     """استلام اسم المكافأة"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -111,17 +115,18 @@ async def get_bonus_name(message: types.Message, state: FSMContext, db_pool):
         return
     
     await state.update_data(bonus_name=name)
-    await state.set_state(OfferStates.waiting_bonus_percent)
+    await state.set_state(BonusStates.waiting_bonus_percent)
     
     await message.answer(
         "📊 **أدخل نسبة المكافأة:**\n"
         "(مثال: 10 يعني 10% من قيمة الإيداع)\n\n"
-        "🔹 **ملاحظة:** تضاف تلقائياً عند الموافقة على طلب الإيداع",
+        "🔹 **ملاحظة:** تضاف تلقائياً عند الموافقة على طلب الإيداع\n"
+        "🔹 تحسب كالتالي: المبلغ المودع × (النسبة / 100)",
         parse_mode="Markdown"
     )
 
 
-@router.message(OfferStates.waiting_bonus_percent)
+@router.message(BonusStates.waiting_bonus_percent)
 async def get_bonus_percent(message: types.Message, state: FSMContext, db_pool):
     """استلام نسبة المكافأة"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -136,17 +141,18 @@ async def get_bonus_percent(message: types.Message, state: FSMContext, db_pool):
         return
     
     await state.update_data(bonus_percent=percent)
-    await state.set_state(OfferStates.waiting_min_deposit)
+    await state.set_state(BonusStates.waiting_min_deposit)
     
     await message.answer(
         "💰 **أدخل الحد الأدنى للإيداع (اختياري):**\n"
         "(مثال: 5000 يعني أقل إيداع للحصول على المكافأة)\n"
+        "🔹 إذا كان المبلغ أقل من هذا الحد، لا يحصل المستخدم على مكافأة\n"
         "💡 اضغط /skip للتخطي (لا يوجد حد أدنى)",
         parse_mode="Markdown"
     )
 
 
-@router.message(OfferStates.waiting_min_deposit)
+@router.message(BonusStates.waiting_min_deposit)
 async def get_min_deposit(message: types.Message, state: FSMContext, db_pool):
     """استلام الحد الأدنى للإيداع"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -164,17 +170,18 @@ async def get_min_deposit(message: types.Message, state: FSMContext, db_pool):
             return
     
     await state.update_data(min_deposit=min_deposit)
-    await state.set_state(OfferStates.waiting_max_bonus)
+    await state.set_state(BonusStates.waiting_max_bonus)
     
     await message.answer(
         "💰 **أدخل الحد الأقصى للمكافأة (اختياري):**\n"
         "(مثال: 10000 يعني أقصى مكافأة 10,000 ل.س)\n"
+        "🔹 إذا تجاوزت المكافأة هذا الحد، يتم تطبيق الحد الأقصى فقط\n"
         "💡 اضغط /skip للتخطي (لا يوجد حد أقصى)",
         parse_mode="Markdown"
     )
 
 
-@router.message(OfferStates.waiting_max_bonus)
+@router.message(BonusStates.waiting_max_bonus)
 async def get_max_bonus(message: types.Message, state: FSMContext, db_pool):
     """استلام الحد الأقصى للمكافأة"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -192,7 +199,7 @@ async def get_max_bonus(message: types.Message, state: FSMContext, db_pool):
             return
     
     await state.update_data(max_bonus=max_bonus)
-    await state.set_state(OfferStates.waiting_start_date)
+    await state.set_state(BonusStates.waiting_start_date)
     
     now = get_damascus_time_now()
     default_start = now.strftime('%Y-%m-%d %H:%M')
@@ -208,7 +215,7 @@ async def get_max_bonus(message: types.Message, state: FSMContext, db_pool):
     )
 
 
-@router.message(OfferStates.waiting_start_date)
+@router.message(BonusStates.waiting_start_date)
 async def get_bonus_start_date(message: types.Message, state: FSMContext, db_pool):
     """استلام تاريخ البداية للمكافأة"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -225,7 +232,7 @@ async def get_bonus_start_date(message: types.Message, state: FSMContext, db_poo
             return
     
     await state.update_data(start_date=start_date)
-    await state.set_state(OfferStates.waiting_end_date)
+    await state.set_state(BonusStates.waiting_end_date)
     
     default_end = (start_date + timedelta(days=30)).strftime('%Y-%m-%d %H:%M')
     
@@ -238,7 +245,7 @@ async def get_bonus_start_date(message: types.Message, state: FSMContext, db_poo
     )
 
 
-@router.message(OfferStates.waiting_end_date)
+@router.message(BonusStates.waiting_end_date)
 async def get_bonus_end_date(message: types.Message, state: FSMContext, db_pool):
     """استلام تاريخ النهاية وإنشاء المكافأة"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -261,16 +268,17 @@ async def get_bonus_end_date(message: types.Message, state: FSMContext, db_pool)
         return
     
     await state.update_data(end_date=end_date)
-    await state.set_state(OfferStates.waiting_description)
+    await state.set_state(BonusStates.waiting_description)
     
     await message.answer(
         "📝 **أدخل وصف للمكافأة (اختياري):**\n"
-        "(يمكنك تركها فارغة بالضغط /skip)",
+        "(يمكنك تركها فارغة بالضغط /skip)\n"
+        "🔹 هذا الوصف يظهر للمشرفين فقط عند عرض التفاصيل",
         parse_mode="Markdown"
     )
 
 
-@router.message(OfferStates.waiting_description)
+@router.message(BonusStates.waiting_description)
 async def get_bonus_description(message: types.Message, state: FSMContext, db_pool):
     """استلام الوصف وإنشاء المكافأة"""
     if not await is_admin_user(db_pool, message.from_user.id):
@@ -305,7 +313,8 @@ async def get_bonus_description(message: types.Message, state: FSMContext, db_po
         text += f"📅 **من:** {data['start_date'].strftime('%Y-%m-%d %H:%M')}\n"
         text += f"📅 **إلى:** {data['end_date'].strftime('%Y-%m-%d %H:%M')}\n"
         text += f"📝 **الوصف:** {description or 'لا يوجد'}\n\n"
-        text += f"🔹 **الآن كل إيداع مؤهل يحصل على {data['bonus_percent']}% إضافية!**"
+        text += f"🔹 **الآن كل إيداع مؤهل يحصل على {data['bonus_percent']}% إضافية!**\n"
+        text += f"🔹 تنطبق على جميع طرق الدفع (سيرياتل، شام كاش، USDT)"
         
         await message.answer(text, reply_markup=get_back_inline_keyboard("offers_menu"), parse_mode="Markdown")
     else:
@@ -349,8 +358,8 @@ async def list_deposit_bonuses(callback: types.CallbackQuery, db_pool):
     
     await callback.message.edit_text(
         f"📋 **قائمة مكافآت الإيداع**\n\n"
-        f"🟢 نشط | 🔴 منتهي\n\n"
-        f"🔹 اضغط على أي مكافأة لعرض تفاصيلها أو إلغائها:",
+        f"🟢 نشطة | 🔴 منتهية\n\n"
+        f"🔹 اضغط على أي مكافأة لعرض تفاصيلها أو إلغائها أو حذفها:",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -438,7 +447,7 @@ async def deactivate_bonus(callback: types.CallbackQuery, db_pool):
 # ============= حذف المكافأة نهائياً =============
 @router.callback_query(F.data.startswith("delete_bonus_"))
 async def delete_bonus(callback: types.CallbackQuery, db_pool):
-    """حذف مكافأة إيداع نهائياً"""
+    """بدء عملية حذف مكافأة إيداع"""
     if not await is_admin_user(db_pool, callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
     
@@ -455,13 +464,13 @@ async def delete_bonus(callback: types.CallbackQuery, db_pool):
     
     builder = get_confirmation_keyboard(f"confirm_delete_bonus_{bonus_id}", f"view_bonus_{bonus_id}")
     
-    text = f"⚠️ **تأكيد حذف مكافأة الإيداع**\n\n"
+    text = f"⚠️ **تأكيد حذف مكافأة الإيداع نهائياً**\n\n"
     text += f"🔹 **الاسم:** {bonus['name']}\n"
     text += f"📊 **النسبة:** {bonus['bonus_percent']}%\n"
     text += f"📅 **الفترة:** {bonus['start_date'].strftime('%Y-%m-%d')} → {bonus['end_date'].strftime('%Y-%m-%d')}\n"
     text += f"📈 **إحصائيات الاستخدام:**\n"
-    text += f"   • عدد المستخدمين: {stats.get('unique_users', 0)}\n"
-    text += f"   • إجمالي الاستخدامات: {stats.get('total_uses', 0)}\n\n"
+    text += f"   • عدد المستخدمين الذين استفادوا: {stats.get('unique_users', 0)}\n"
+    text += f"   • إجمالي مرات الاستخدام: {stats.get('total_uses', 0)}\n\n"
     text += f"⚠️ **هذا الإجراء لا يمكن التراجع عنه!**\n"
     text += f"سيتم حذف جميع سجلات استخدام هذه المكافأة نهائياً."
     
@@ -489,7 +498,8 @@ async def confirm_delete_bonus(callback: types.CallbackQuery, db_pool):
         await callback.answer("✅ تم الحذف بنجاح", show_alert=True)
         await callback.message.edit_text(
             f"✅ **تم حذف المكافأة نهائياً!**\n\n"
-            f"🔹 تم حذف جميع سجلات الاستخدام المرتبطة بها.",
+            f"🔹 تم حذف جميع سجلات الاستخدام المرتبطة بها.\n"
+            f"🔹 لن تظهر في القائمة بعد الآن.",
             reply_markup=get_back_inline_keyboard("list_deposit_bonuses"),
             parse_mode="Markdown"
         )
