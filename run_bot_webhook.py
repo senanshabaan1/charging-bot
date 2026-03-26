@@ -1,10 +1,9 @@
-# run_bot_webhook.py - النسخة المعدلة
+# run_bot_webhook.py - النسخة النهائية بدون إشارات
 
 import asyncio
 import logging
 import os
 import sys
-import signal
 import time
 from typing import Optional
 from datetime import datetime
@@ -54,32 +53,11 @@ dp: Optional[Dispatcher] = None
 app: Optional[web.Application] = None
 runner: Optional[web.AppRunner] = None
 start_time = time.time()
-shutdown_event = asyncio.Event()  # ✅ إضافة حدث للإيقاف
+running = True
 
 
-# ============= معالجة إشارات الإيقاف (محسنة) =============
-def handle_exit_signal():
-    """معالجة إشارات الإيقاف"""
-    logger.info("📥 استقبال إشارة إيقاف...")
-    # ✅ عدم إنشاء task مباشرة، استخدام asyncio.run_coroutine_threadsafe
-    if asyncio.get_event_loop().is_running():
-        asyncio.create_task(shutdown())
-    else:
-        asyncio.run(shutdown())
-
-
-def setup_signal_handlers():
-    """إعداد معالجات الإشارات بشكل آمن"""
-    try:
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, handle_exit_signal)
-                logger.info(f"✅ تم إعداد معالج للإشارة {sig}")
-            except Exception as e:
-                logger.warning(f"⚠️ لم نتمكن من إعداد معالج للإشارة {sig}: {e}")
-    except Exception as e:
-        logger.warning(f"⚠️ فشل إعداد معالجات الإشارات: {e}")
+# ============= لا نستخدم معالجات الإشارات في Render =============
+# تم إزالة setup_signal_handlers بالكامل
 
 
 # ============= دوال التشغيل الأساسية =============
@@ -108,7 +86,6 @@ async def init_database():
     logger.info("📦 جاري الاتصال بقاعدة البيانات...")
     
     try:
-        # ✅ تقليل حجم المجمع لتحسين الاستقرار
         db_pool = await get_pool()
         
         if not db_pool:
@@ -318,7 +295,7 @@ async def init_scheduler():
     
     try:
         if scheduler and scheduler.running:
-            scheduler.shutdown()
+            scheduler.shutdown(wait=False)
         
         settings = await get_report_settings(db_pool)
         report_time = settings.get('report_time', '00:00')
@@ -416,7 +393,6 @@ async def create_web_app(base_url: str) -> web.Application:
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
     
-    # ✅ Health check سريع
     async def health(request):
         return web.json_response({
             "status": "OK",
@@ -425,7 +401,6 @@ async def create_web_app(base_url: str) -> web.Application:
         })
     app.router.add_get('/health', health)
     
-    # ✅ إضافة ping endpoint للتأكد من الاستجابة
     async def ping(request):
         return web.Response(text="pong")
     app.router.add_get('/ping', ping)
@@ -478,6 +453,9 @@ async def start_server(port: int):
 
 async def shutdown():
     """إيقاف التشغيل بشكل آمن"""
+    global running
+    running = False
+    
     logger.info("🛑 جاري إيقاف البوت...")
     
     if scheduler and scheduler.running:
@@ -502,21 +480,19 @@ async def shutdown():
             logger.error(f"❌ خطأ في حذف webhook: {e}")
         await bot.session.close()
     
-    shutdown_event.set()
     logger.info("👋 تم إيقاف البوت")
-    sys.exit(0)
 
 
 async def keep_alive():
     """الحفاظ على البوت حياً"""
-    while not shutdown_event.is_set():
+    while running:
         await asyncio.sleep(30)
         logger.debug("🔄 البوت لا يزال يعمل...")
 
 
 async def main():
     """الدالة الرئيسية"""
-    global start_time
+    global start_time, running
     start_time = time.time()
     
     logger.info("🚀 بدأ تشغيل البوت...")
@@ -569,6 +545,7 @@ async def main():
         logger.info(f"✅ تم بدء التشغيل في {elapsed:.2f} ثانية")
         logger.info(f"📊 إحصائيات الكاش: {get_cache_stats()}")
         logger.info(f"🌐 الخادم يعمل على {base_url}")
+        logger.info(f"🕐 الوقت الحالي: {datetime.now(DAMASCUS_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
         
         # 12. الحفاظ على التشغيل
         await keep_alive()
@@ -585,7 +562,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        setup_signal_handlers()
+        # ✅ لا نستخدم معالجات الإشارات
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("⏹️ تم إيقاف البوت بواسطة المستخدم")
