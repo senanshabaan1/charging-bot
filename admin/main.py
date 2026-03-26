@@ -1,4 +1,5 @@
-# admin/main.py
+# admin/main.py - تأكد من وجود كل هذه المعالجات
+
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -168,7 +169,7 @@ async def handle_manage_option_profits(callback: types.CallbackQuery, db_pool):
     await manage_option_profits_start(callback, db_pool)
 
 
-# ✅ إضافة معالجات للأزرار التي كانت لا تعمل
+# ✅ إضافة معالجات للأزرار الأساسية
 
 @router.callback_query(F.data == "toggle_bot")
 async def handle_toggle_bot(callback: types.CallbackQuery, db_pool):
@@ -202,22 +203,20 @@ async def handle_edit_syriatel(callback: types.CallbackQuery, state: FSMContext,
     await edit_syriatel_start(callback, state, db_pool)
 
 
-# admin/main.py - السطر 210 تقريباً
-
 @router.callback_query(F.data == "reset_bot")
 async def handle_reset_bot(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """توجيه إلى تصفير البوت"""
     await callback.answer()
     from admin.reset import reset_bot_start
-    await reset_bot_start(callback, state)  # ✅ فقط callback و state
+    await reset_bot_start(callback, state)
 
 
 @router.callback_query(F.data == "bot_stats")
 async def handle_bot_stats(callback: types.CallbackQuery, db_pool):
     """توجيه إلى إحصائيات البوت"""
     await callback.answer()
-    from admin.stats import bot_stats
-    await bot_stats(callback, db_pool)
+    from admin.stats import show_bot_stats
+    await show_bot_stats(callback, db_pool)
 
 
 @router.callback_query(F.data == "manage_points")
@@ -288,8 +287,8 @@ async def handle_manage_apps_status(callback: types.CallbackQuery, db_pool):
 async def handle_broadcast(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """توجيه إلى رسالة للكل"""
     await callback.answer()
-    from admin.broadcast import broadcast_start
-    await broadcast_start(callback, state, db_pool)
+    from admin.broadcast import start_broadcast
+    await start_broadcast(callback, state, db_pool)
 
 
 @router.callback_query(F.data == "user_info")
@@ -297,15 +296,15 @@ async def handle_user_info(callback: types.CallbackQuery, state: FSMContext, db_
     """توجيه إلى معلومات مستخدم"""
     await callback.answer()
     from admin.users import user_info_start
-    await user_info_start(callback, state, db_pool)
+    await user_info_start(callback, state)
 
 
 @router.callback_query(F.data == "send_custom_message")
 async def handle_send_custom_message(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """توجيه إلى رسالة لمستخدم"""
     await callback.answer()
-    from admin.users import send_custom_message_start
-    await send_custom_message_start(callback, state, db_pool)
+    from admin.broadcast import send_custom_message_start
+    await send_custom_message_start(callback, state)
 
 
 # معالج للأوامر غير المعروفة
