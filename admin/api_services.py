@@ -7,7 +7,7 @@ import logging
 import json
 from typing import Optional, Dict, Any
 
-from utils import api_client
+from utils import api_client, safe_edit_message
 from database.users import is_admin_user
 from handlers.keyboards import get_back_inline_keyboard
 from database.core import get_exchange_rate
@@ -40,7 +40,7 @@ async def api_services_menu(callback: types.CallbackQuery, db_pool):
     )
     builder.row(
         types.InlineKeyboardButton(text="🔍 بحث في الخدمات", callback_data="search_api_services"),
-        types.InlineKeyboardButton(text="📊 تصنيف الخدمات", callback_data="categorize_services")
+        types.InlineKeyboardButton(text="📊 تصنيف الخ services", callback_data="categorize_services")
     )
     builder.row(
         types.InlineKeyboardButton(text="🔧 اختبار API", callback_data="test_api_connection"),
@@ -61,7 +61,8 @@ async def api_services_menu(callback: types.CallbackQuery, db_pool):
     products = await api_client.get_products()
     total_services = len(products) if products else 0
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🔌 **إدارة خدمات API - Mousa Card**\n\n"
         f"📊 **إحصائيات:**\n"
         f"• عدد الخدمات المتاحة: {total_services}\n"
@@ -103,7 +104,8 @@ async def list_api_services(callback: types.CallbackQuery, db_pool):
         ''')
     
     if not apps:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "⚠️ **لا توجد تطبيقات مرتبطة بخدمات API**\n\n"
             "لإضافة service_id لأحد التطبيقات:\n"
             "1. اختر '➕ إضافة service_id' من القائمة\n"
@@ -136,7 +138,8 @@ async def list_api_services(callback: types.CallbackQuery, db_pool):
     
     text += "\n🔹 اضغط على أي تطبيق لتعديل service_id الخاص به"
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         text,
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
@@ -153,12 +156,13 @@ async def search_api_services_start(callback: types.CallbackQuery, state: FSMCon
     await callback.answer()
     await state.set_state(APIServiceStates.waiting_search_keyword)
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🔍 **البحث في خدمات API**\n\n"
         "أدخل الكلمة المفتاحية للبحث (مثال: instagram, تيك توك, telegram)\n\n"
         "🔹 سيبحث في:\n"
         "• اسم الخدمة\n"
-        "• وصف الخ service\n"
+        "• وصف الخدمة\n"
         "• الفئة\n\n"
         "❌ للإلغاء أرسل /cancel",
         reply_markup=get_back_inline_keyboard("api_services_menu"),
@@ -236,12 +240,18 @@ async def view_product_detail(callback: types.CallbackQuery, state: FSMContext, 
     service_id = int(callback.data.split("_")[3])
     
     await callback.answer()
-    await callback.message.edit_text("⏳ جاري جلب تفاصيل الخدمة...")
+    
+    # ✅ استخدام safe_edit_message بدلاً من edit_text مباشرة
+    await safe_edit_message(
+        callback.message,
+        "⏳ جاري جلب تفاصيل الخدمة..."
+    )
     
     product = await api_client.get_product_details(service_id)
     
     if not product:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             f"❌ لم يتم العثور على خدمة بالمعرف {service_id}",
             reply_markup=get_back_inline_keyboard("api_services_menu")
         )
@@ -255,11 +265,13 @@ async def view_product_detail(callback: types.CallbackQuery, state: FSMContext, 
     description = product.get('description', 'لا يوجد وصف')
     category = product.get('category', 'غير مصنف')
     
-    price_syp = price * 118
+    # جلب سعر الصرف الحالي لحساب السعر بالليرة
+    exchange_rate = await get_exchange_rate(db_pool, 'deposit')
+    price_syp = price * exchange_rate
     
     builder = InlineKeyboardBuilder()
     builder.row(
-        types.InlineKeyboardButton(text="➕ ربط هذا الخدمة بتطبيق", callback_data=f"link_to_app_{product_id}"),
+        types.InlineKeyboardButton(text="➕ ربط هذه الخدمة بتطبيق", callback_data=f"link_to_app_{product_id}"),
         types.InlineKeyboardButton(text="📝 معاينة الوصف", callback_data=f"preview_description_{product_id}")
     )
     builder.row(
@@ -267,7 +279,8 @@ async def view_product_detail(callback: types.CallbackQuery, state: FSMContext, 
         types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="api_services_menu")
     )
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📦 **تفاصيل الخدمة**\n\n"
         f"🔹 **الاسم:** {name}\n"
         f"🔢 **service_id:** `{product_id}`\n"
@@ -277,7 +290,7 @@ async def view_product_detail(callback: types.CallbackQuery, state: FSMContext, 
         f"📈 **الحد الأقصى:** {max_qty}\n"
         f"📝 **الوصف:** {description[:300]}{'...' if len(description) > 300 else ''}\n\n"
         f"🔹 **لربط هذه الخدمة بتطبيق في البوت:**\n"
-        f"اضغط على 'ربط هذا الخدمة بتطبيق'",
+        f"اضغط على 'ربط هذه الخدمة بتطبيق'",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -321,7 +334,8 @@ async def link_service_to_app_start(callback: types.CallbackQuery, state: FSMCon
         ''')
     
     if not apps:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "⚠️ لا توجد تطبيقات في النظام. قم بإضافة تطبيقات أولاً.",
             reply_markup=get_back_inline_keyboard("api_services_menu")
         )
@@ -341,7 +355,8 @@ async def link_service_to_app_start(callback: types.CallbackQuery, state: FSMCon
         callback_data=f"view_product_detail_{service_id}"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"🔢 **service_id:** `{service_id}`\n\n"
         f"🔽 **اختر التطبيق الذي تريد ربطه بهذه الخدمة:**\n\n"
         f"✅ = مرتبط مسبقاً\n"
@@ -384,7 +399,8 @@ async def confirm_link_app(callback: types.CallbackQuery, db_pool):
         callback_data="api_services_menu"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"✅ **تم الربط بنجاح!**\n\n"
         f"📱 **التطبيق:** {app['name']}\n"
         f"🔢 **service_id:** {service_id}\n\n"
@@ -412,7 +428,8 @@ async def start_add_api_service(callback: types.CallbackQuery, state: FSMContext
         ''')
     
     if not apps:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "⚠️ لا توجد تطبيقات في النظام. قم بإضافة تطبيقات أولاً.",
             reply_markup=get_back_inline_keyboard("api_services_menu")
         )
@@ -432,7 +449,8 @@ async def start_add_api_service(callback: types.CallbackQuery, state: FSMContext
         callback_data="api_services_menu"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🔽 **اختر التطبيق الذي تريد ربطه بخدمة API:**\n\n"
         "✅ = مرتبط مسبقاً\n"
         "❌ = غير مرتبط\n\n"
@@ -462,7 +480,8 @@ async def select_app_for_api(callback: types.CallbackQuery, state: FSMContext, d
     
     current_id = f" (الحالي: {app['api_service_id']})" if app['api_service_id'] else ""
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📱 **التطبيق:** {app['name']}{current_id}\n\n"
         f"🔢 **أدخل service_id من موقع Mousa Card:**\n\n"
         f"📌 مثال: في الرابط `newOrder/364/params` الرقم 364 هو service_id\n\n"
@@ -551,7 +570,8 @@ async def edit_api_service(callback: types.CallbackQuery, state: FSMContext, db_
         callback_data="list_api_services"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📱 **التطبيق:** {app['name']}\n"
         f"🔢 **service_id الحالي:** `{app['api_service_id']}`\n\n"
         f"✏️ **أدخل service_id الجديد:**\n\n"
@@ -580,7 +600,8 @@ async def delete_api_service(callback: types.CallbackQuery, db_pool):
     
     await callback.answer("✅ تم حذف service_id")
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"✅ **تم حذف service_id من التطبيق:** {app['name']}\n\n"
         f"لن يتم إرسال طلبات هذا التطبيق تلقائياً إلى API.",
         reply_markup=get_back_inline_keyboard("list_api_services")
@@ -595,12 +616,13 @@ async def categorize_services(callback: types.CallbackQuery, db_pool):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.answer()
-    await callback.message.edit_text("⏳ جاري تصنيف الخدمات...")
+    await safe_edit_message(callback.message, "⏳ جاري تصنيف الخدمات...")
     
     categories = await api_client.get_service_categories()
     
     if not categories:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "❌ فشل جلب تصنيف الخدمات",
             reply_markup=get_back_inline_keyboard("api_services_menu")
         )
@@ -620,7 +642,8 @@ async def categorize_services(callback: types.CallbackQuery, db_pool):
         callback_data="api_services_menu"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📂 **تصنيف الخدمات حسب الفئات**\n\n"
         f"إجمالي الخدمات: {sum(len(p) for p in categories.values())}\n"
         f"عدد الفئات: {len(categories)}\n\n"
@@ -668,7 +691,8 @@ async def show_category_products(callback: types.CallbackQuery, db_pool):
         callback_data="categorize_services"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📂 **فئة: {category}**\n\n"
         f"عدد الخدمات: {len(products)}\n\n"
         f"🔹 اضغط على أي خدمة لعرض تفاصيلها:",
@@ -685,7 +709,7 @@ async def test_api_connection(callback: types.CallbackQuery, db_pool):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.answer()
-    await callback.message.edit_text("⏳ جاري اختبار الاتصال بـ API...")
+    await safe_edit_message(callback.message, "⏳ جاري اختبار الاتصال بـ API...")
     
     async with db_pool.acquire() as conn:
         api_url = await conn.fetchval(
@@ -711,13 +735,15 @@ async def test_api_connection(callback: types.CallbackQuery, db_pool):
         if len(products) > 5:
             text += f"   ... و {len(products) - 5} منتج آخر\n"
         
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             text,
             reply_markup=get_back_inline_keyboard("api_services_menu"),
             parse_mode="Markdown"
         )
     else:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             f"❌ **فشل الاتصال بـ API**\n\n"
             f"🌐 **رابط API:** {api_client.base_url}\n\n"
             f"🔍 **أسباب محتملة:**\n"
@@ -737,20 +763,34 @@ async def show_api_balance(callback: types.CallbackQuery, db_pool):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.answer()
-    await callback.message.edit_text("⏳ جاري جلب الرصيد...")
+    await safe_edit_message(callback.message, "⏳ جاري جلب الرصيد...")
     
+    # ✅ جلب الرصيد مباشرة من API
     balance = await api_client.get_balance()
     
     if balance is not None:
-        await callback.message.edit_text(
-            f"💰 **رصيد API الحالي:**\n\n"
-            f"💵 **{balance:,.2f} $**\n\n"
-            f"📊 يمكنك استخدام هذا الرصيد لتنفيذ الطلبات التلقائية.",
+        # ✅ جلب معلومات الحساب أيضاً
+        profile = await api_client.get_profile()
+        
+        text = f"💰 **رصيد API الحالي:**\n\n"
+        text += f"💵 **{balance:,.2f} $**\n\n"
+        
+        if profile:
+            text += f"📊 **معلومات الحساب:**\n"
+            text += f"• اسم الحساب: {profile.get('name', 'غير معروف')}\n"
+            text += f"• البريد الإلكتروني: {profile.get('email', 'غير معروف')}\n"
+        
+        text += f"\n📌 **ملاحظة:** هذا هو الرصيد المتاح لتنفيذ الطلبات التلقائية."
+        
+        await safe_edit_message(
+            callback.message,
+            text,
             reply_markup=get_back_inline_keyboard("api_services_menu"),
             parse_mode="Markdown"
         )
     else:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "❌ **فشل جلب الرصيد**\n\n"
             "تأكد من:\n"
             "• صحة رابط API\n"
@@ -789,7 +829,8 @@ async def api_settings(callback: types.CallbackQuery, db_pool):
         callback_data="api_services_menu"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"⚙️ **إعدادات API العامة**\n\n"
         f"🌐 **رابط API:** `{api_url}`\n"
         f"🔑 **التوكن:** `{api_client.token[:20]}...`\n\n"
@@ -808,7 +849,8 @@ async def change_api_url_start(callback: types.CallbackQuery, state: FSMContext,
     await callback.answer()
     await state.set_state(APIServiceStates.waiting_api_url)
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🔗 **تغيير رابط API**\n\n"
         "أدخل رابط API الجديد (مثال: https://mousa-card.com)\n\n"
         "⚠️ **ملاحظة:** لا تضيف / في النهاية\n\n"
@@ -870,7 +912,8 @@ async def reset_api_settings(callback: types.CallbackQuery, db_pool):
     api_client.base_url = "https://mousa-card.com"
     api_client.clear_cache()
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "✅ **تم إعادة تعيين إعدادات API**\n\n"
         f"🌐 **الرابط:** https://mousa-card.com\n\n"
         "يمكنك الآن اختبار الاتصال من القائمة.",
@@ -887,12 +930,13 @@ async def sync_services_from_api(callback: types.CallbackQuery, db_pool):
         return await callback.answer("غير مصرح", show_alert=True)
     
     await callback.answer()
-    await callback.message.edit_text("⏳ جاري جلب قائمة الخدمات من API...")
+    await safe_edit_message(callback.message, "⏳ جاري جلب قائمة الخدمات من API...")
     
     products = await api_client.get_products(force_refresh=True)
     
     if not products:
-        await callback.message.edit_text(
+        await safe_edit_message(
+            callback.message,
             "❌ **فشل جلب الخدمات من API**\n\n"
             "تأكد من صحة الاتصال بالـ API أولاً.",
             reply_markup=get_back_inline_keyboard("api_services_menu"),
@@ -915,7 +959,8 @@ async def sync_services_from_api(callback: types.CallbackQuery, db_pool):
         callback_data="api_services_menu"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"📋 **الخدمات المتاحة في API**\n\n"
         f"عدد الخدمات: {len(products)}\n\n"
         "🔹 اضغط على أي خدمة لعرض تفاصيلها وربطها بتطبيقك",
@@ -935,7 +980,8 @@ async def clear_products_cache(callback: types.CallbackQuery, db_pool):
     
     await callback.answer("🗑️ تم مسح الكاش", show_alert=True)
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "✅ **تم مسح كاش الخدمات بنجاح!**\n\n"
         "في المرة القادمة التي تطلب فيها الخدمات، سيتم جلبها من API مباشرة.",
         reply_markup=get_back_inline_keyboard("api_services_menu"),
@@ -988,7 +1034,8 @@ async def auto_sync_settings(callback: types.CallbackQuery, db_pool):
     
     status = "🟢 **مفعل**" if auto_sync != "disabled" else "🔴 **معطل**"
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"⚙️ **إعدادات التحديث التلقائي**\n\n"
         f"حالة التحديث: {status}\n"
         f"الفترة: كل {sync_interval} دقيقة\n\n"
@@ -1051,7 +1098,8 @@ async def search_more(callback: types.CallbackQuery, state: FSMContext, db_pool)
         callback_data="back_to_search"
     ))
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"🔍 **نتائج البحث عن '{keyword}' (الصفحة 2):**\n\n"
         f"عرض {min(40, len(results))} من {len(results)} نتيجة",
         reply_markup=builder.as_markup(),
@@ -1065,7 +1113,8 @@ async def back_to_search(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(APIServiceStates.waiting_search_keyword)
     
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         "🔍 **البحث في خدمات API**\n\n"
         "أدخل الكلمة المفتاحية للبحث (مثال: instagram, تيك توك, telegram)\n\n"
         "❌ للإلغاء أرسل /cancel",
