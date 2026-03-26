@@ -7,7 +7,7 @@ import logging
 import json
 from typing import Optional, Dict, Any
 
-from utils.api_client import api_client
+from utils import api_client
 from database.users import is_admin_user
 from handlers.keyboards import get_back_inline_keyboard
 from database.core import get_exchange_rate
