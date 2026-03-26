@@ -1,22 +1,16 @@
 # utils.py
 import re
 import logging
+import pytz
 import traceback
-import aiohttp
-import uuid
-import os
 from datetime import datetime
-from typing import Union, Optional, List, Tuple, Any, Dict
+from typing import Union, Optional, List, Tuple, Any
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import ADMIN_ID, MODERATORS
+from handlers.time_utils import get_damascus_time_now, DAMASCUS_TZ, format_damascus_time
 
 logger = logging.getLogger(__name__)
-
-# ============= متغيرات API =============
-MOUSA_API_TOKEN = os.getenv("MOUSA_API_TOKEN", "")
-API_BASE_URL = os.getenv("API_BASE_URL", "https://mousa-card.com")
-
 
 # ============= دوال المشرفين =============
 
@@ -53,7 +47,7 @@ def get_admin_ids() -> List[int]:
     return list(set(admin_ids))  # إزالة التكرار
 
 
-# ============= دوال التوقيت (استيراد محلي لتجنب الـ circular import) =============
+# ============= دوال التوقيت =============
 
 def get_formatted_damascus_time() -> str:
     """
@@ -62,7 +56,6 @@ def get_formatted_damascus_time() -> str:
     Returns:
         str: الوقت الحالي بصيغة YYYY-MM-DD HH:MM:SS
     """
-    from handlers.time_utils import get_damascus_time_now
     return get_damascus_time_now().strftime('%Y-%m-%d %H:%M:%S')
 
 
@@ -80,7 +73,6 @@ def format_datetime(
     Returns:
         str: التاريخ المنسق
     """
-    from handlers.time_utils import format_damascus_time
     return format_damascus_time(dt, format_str)
 
 
@@ -152,6 +144,7 @@ def parse_amount(amount_str: str) -> Optional[float]:
         Optional[float]: الرقم أو None إذا فشل
     """
     try:
+        # إزالة الفواصل والمسافات وعلامة $
         clean = amount_str.replace(',', '').replace(' ', '').replace('$', '').replace('ل.س', '')
         return float(clean)
     except (ValueError, TypeError):
@@ -384,6 +377,7 @@ def validate_target_id(target_id: str, min_length: int = 1, max_length: int = 10
     if len(target_id) > max_length:
         return False, f"❌ الطول يجب أن لا يتجاوز {max_length} أحرف"
     
+    # التحقق من عدم وجود رموز خطيرة
     dangerous_chars = ['<', '>', '"', "'", ';', '--']
     for char in dangerous_chars:
         if char in target_id:
@@ -578,322 +572,37 @@ def extract_numbers(text: str) -> List[int]:
     return [int(num) for num in re.findall(r'\d+', text)]
 
 
-# ============= عميل API =============
-
-class MousaCardAPI:
-    """عميل API للتعامل مع موقع Mousa Card"""
-
-    def __init__(self, base_url: str = None):
-        self.base_url = base_url or API_BASE_URL
-        self.token = MOUSA_API_TOKEN
-        self.headers = {
-            "api-token": self.token,
-            "Content-Type": "application/json"
-        }
-        self._products_cache = None
-        self._products_cache_time = None
-        self._cache_ttl = 300  # 5 دقائق
-
-    async def set_base_url(self, pool):
-        """جلب رابط الـ API من قاعدة البيانات"""
-        try:
-            async with pool.acquire() as conn:
-                url = await conn.fetchval(
-                    "SELECT value FROM bot_settings WHERE key = 'api_base_url'"
-                )
-                if url:
-                    self.base_url = url.rstrip('/')
-                    logger.info(f"✅ تم تحميل رابط API: {self.base_url}")
-        except Exception as e:
-            logger.error(f"⚠️ فشل تحميل رابط API: {e}")
-
-    async def get_profile(self) -> Optional[Dict]:
-        """جلب معلومات الحساب والرصيد"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/client/api/profile",
-                    headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"✅ تم جلب معلومات الحساب")
-                        return data
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ فشل جلب الملف الشخصي: {response.status}")
-                        return None
-        except Exception as e:
-            logger.error(f"❌ خطأ في جلب الملف الشخصي: {e}")
-            return None
-
-    async def get_products(self, force_refresh: bool = False) -> Optional[List[Dict]]:
-        """جلب قائمة المنتجات المتاحة مع كاش"""
-        if not force_refresh and self._products_cache and self._products_cache_time:
-            cache_age = (datetime.now() - self._products_cache_time).total_seconds()
-            if cache_age < self._cache_ttl:
-                logger.info(f"📦 استخدام كاش المنتجات (عمره {cache_age:.0f} ثانية)")
-                return self._products_cache
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/client/api/products",
-                    headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        self._products_cache = data
-                        self._products_cache_time = datetime.now()
-                        logger.info(f"✅ تم جلب {len(data)} منتجاً من API")
-                        return data
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ فشل جلب المنتجات: {response.status}")
-                        return None
-        except Exception as e:
-            logger.error(f"❌ خطأ في جلب المنتجات: {e}")
-            return None
-
-    async def search_products(self, keyword: str) -> List[Dict]:
-        """البحث عن منتجات حسب الكلمة المفتاحية"""
-        products = await self.get_products()
-        if not products:
-            return []
-        
-        keyword_lower = keyword.lower()
-        results = []
-        
-        for product in products:
-            name = product.get('name', '').lower()
-            description = product.get('description', '').lower()
-            category = product.get('category', '').lower()
-            
-            if (keyword_lower in name or 
-                keyword_lower in description or 
-                keyword_lower in category):
-                results.append(product)
-        
-        logger.info(f"🔍 تم العثور على {len(results)} منتج للبحث عن '{keyword}'")
-        return results
-
-    async def get_product_details(self, service_id: int) -> Optional[Dict]:
-        """جلب تفاصيل منتج معين حسب service_id"""
-        products = await self.get_products()
-        if not products:
-            return None
-        
-        for product in products:
-            pid = product.get('id', product.get('service_id'))
-            if pid == service_id:
-                return product
-        
-        return None
-
-    async def get_product_description(self, service_id: int) -> Optional[str]:
-        """جلب وصف الخدمة من API حسب service_id"""
-        product = await self.get_product_details(service_id)
-        if product:
-            description = product.get('description', '')
-            clean_description = clean_html(description)
-            return clean_description.strip()
-        return None
-
-    async def get_product_price(self, service_id: int) -> Optional[float]:
-        """جلب سعر الخدمة من API"""
-        product = await self.get_product_details(service_id)
-        if product:
-            return product.get('price', 0)
-        return None
-
-    async def get_product_min_max(self, service_id: int) -> tuple:
-        """جلب الحد الأدنى والأقصى للخدمة"""
-        product = await self.get_product_details(service_id)
-        if product:
-            return product.get('min', 1), product.get('max', 99999)
-        return 1, 99999
-
-    async def create_order(
-        self,
-        service_id: int,
-        quantity: int,
-        player_id: str,
-        order_uuid: str = None
-    ) -> Optional[Dict]:
-        """إنشاء طلب جديد في الموقع"""
-        try:
-            if not order_uuid:
-                order_uuid = str(uuid.uuid4())
-
-            payload = {
-                "qty": quantity,
-                "playerId": player_id,
-                "order_uuid": order_uuid
-            }
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/client/api/newOrder/{service_id}/params",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"✅ تم إنشاء طلب API (service_id={service_id})")
-                        return data
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ فشل إنشاء طلب API: {response.status}")
-                        return None
-
-        except Exception as e:
-            logger.error(f"❌ خطأ في الاتصال بـ API: {e}")
-            return None
-
-    async def create_order_get(
-        self,
-        service_id: int,
-        quantity: int,
-        player_id: str,
-        order_uuid: str = None
-    ) -> Optional[Dict]:
-        """إنشاء طلب جديد باستخدام GET (بديل عن POST)"""
-        try:
-            if not order_uuid:
-                order_uuid = str(uuid.uuid4())
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/client/api/newOrder/{service_id}/params",
-                    headers=self.headers,
-                    params={
-                        "qty": quantity,
-                        "playerId": player_id,
-                        "order_uuid": order_uuid
-                    },
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"✅ تم إنشاء طلب API (GET): {data}")
-                        return data
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ فشل إنشاء طلب API (GET): {response.status}")
-                        return None
-
-        except Exception as e:
-            logger.error(f"❌ خطأ في الاتصال بـ API: {e}")
-            return None
-
-    async def check_orders(self, order_ids: List[str]) -> Optional[Dict]:
-        """التحقق من حالة عدة طلبات"""
-        try:
-            orders_param = ",".join(order_ids)
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/client/api/check",
-                    headers=self.headers,
-                    params={"orders": orders_param},
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"✅ تم جلب حالة {len(order_ids)} طلب")
-                        return data
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ فشل جلب حالة الطلبات: {response.status}")
-                        return None
-
-        except Exception as e:
-            logger.error(f"❌ خطأ في جلب حالة الطلبات: {e}")
-            return None
-
-    async def get_balance(self) -> Optional[float]:
-        """جلب الرصيد المتاح في API"""
-        profile = await self.get_profile()
-        if profile:
-            return profile.get('balance', 0)
-        return None
-
-    async def get_service_categories(self) -> Dict[str, List[Dict]]:
-        """تصنيف الخدمات حسب الفئات"""
-        products = await self.get_products()
-        if not products:
-            return {}
-        
-        categories = {}
-        for product in products:
-            category = product.get('category', 'أخرى')
-            if category not in categories:
-                categories[category] = []
-            categories[category].append(product)
-        
-        return categories
-
-    def clear_cache(self):
-        """مسح كاش المنتجات"""
-        self._products_cache = None
-        self._products_cache_time = None
-        logger.info("🗑️ تم مسح كاش المنتجات")
-
-
-# إنشاء عميل واحد للتطبيق
-api_client = MousaCardAPI()
-
-
-# ============= تصدير الدوال الرئيسية =============
+# تصدير الدوال الرئيسية
 __all__ = [
-    # دوال المشرفين
     'is_admin',
     'is_owner',
     'get_admin_ids',
-    # دوال التوقيت
     'get_formatted_damascus_time',
     'format_datetime',
     'get_timestamp',
-    # دوال تنسيق العملة
     'format_syp',
     'format_usd',
     'format_amount',
     'parse_amount',
-    # دوال معالجة الرسائل
     'safe_edit_message',
     'format_message_text',
     'escape_markdown',
-    # دوال FSM
     'get_state_data_field',
     'clear_state_and_return',
     'update_state_data',
-    # دوال التحقق
     'is_valid_number',
     'is_valid_positive_number',
     'parse_number',
     'validate_target_id',
-    # دوال الكيبورد
     'create_inline_keyboard',
     'create_url_keyboard',
     'split_into_chunks',
-    # دوال الأخطاء
     'log_error',
     'get_error_message',
-    # دوال الإحصائيات
     'calculate_percentage',
     'format_percentage',
     'calculate_discount',
-    # دوال مساعدة
     'truncate_text',
     'clean_html',
-    'extract_numbers',
-    # دوال API
-    'api_client',
-    'MousaCardAPI',
+    'extract_numbers'
 ]
