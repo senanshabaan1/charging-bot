@@ -385,6 +385,18 @@ async def get_deposit_bonus_percent(pool, amount: float = None) -> int:
     return bonus['bonus_percent'] if bonus else 0
 
 # database/core.py - أضف هذه الدوال
+# ============= دوال التوافق =============
+
+async def deactivate_offer(pool, offer_id: int, offer_type: str) -> bool:
+    """إلغاء تنشيط عرض/مكافأة (واجهة موحدة)"""
+    if offer_type == 'global':
+        return await deactivate_global_offer(pool, offer_id)
+    elif offer_type == 'deposit':
+        return await deactivate_deposit_bonus(pool, offer_id)
+    else:
+        logger.error(f"❌ نوع عرض غير معروف: {offer_type}")
+        return False
+
 
 async def get_all_offers(pool, offer_type: str = 'global') -> list:
     """جلب جميع العروض/المكافآت (للتوافق مع admin/offers.py)"""
@@ -392,3 +404,15 @@ async def get_all_offers(pool, offer_type: str = 'global') -> list:
         return await get_all_global_offers(pool)
     else:
         return await get_all_deposit_bonuses(pool)
+
+
+async def get_offer_discount(pool) -> int:
+    """جلب خصم العرض النشط (للتوافق)"""
+    offer = await get_active_global_offer(pool)
+    return offer['discount_percent'] if offer else 0
+
+
+async def get_deposit_bonus_percent(pool, amount: float = None) -> int:
+    """جلب نسبة مكافأة الإيداع (للتوافق)"""
+    bonus = await get_active_deposit_bonus(pool, amount)
+    return bonus['bonus_percent'] if bonus else 0
