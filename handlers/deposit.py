@@ -9,10 +9,9 @@ from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAM
 from datetime import datetime
 from handlers.keyboards import get_main_menu_keyboard
 from database.users import is_admin_user
-from database.core import get_exchange_rate  # ✅ استيراد الدالة المعدلة
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number, parse_number
 
-# ✅ استيراد config لبعض الإعدادات فقط (أرقام سيرياتل، المحافظ)
+# ✅ استيراد config مباشرة
 import config
 
 logger = logging.getLogger(__name__)
@@ -24,11 +23,14 @@ class DepStates(StatesGroup):
     waiting_photo = State()
     confirm = State()
 
+# ✅ دوال مساعدة - تجلب من config مباشرة
+def get_current_exchange_rate():
+    """جلب سعر الصرف من config مباشرة (فوري)"""
+    return config.USD_TO_SYP
 
 def get_current_syriatel_numbers():
     """جلب أرقام سيرياتل من config مباشرة (فوري)"""
     return config.SYRIATEL_NUMS
-
 
 def get_payment_methods():
     """جلب طرق الدفع المتاحة"""
@@ -39,7 +41,6 @@ def get_payment_methods():
         {"name": "USDT BEP20 ($)", "callback": "m_usdt"},
     ]
 
-
 # ============= معالج الكولباك للقائمة الرئيسية =============
 @router.callback_query(F.data == "show_deposit_methods")
 async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
@@ -48,6 +49,7 @@ async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
+    # ✅ استخدام الدالة المساعدة مباشرة
     methods = get_payment_methods()
     
     kb = []
@@ -58,11 +60,11 @@ async def show_deposit_methods_callback(callback: types.CallbackQuery, db_pool):
         )])
     kb.append([types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")])
     
+    # ✅ تعديل الرسالة الحالية
     await callback.message.edit_text(
         "💳 اختر وسيلة الدفع المناسبة:", 
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
     )
-
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_callback(callback: types.CallbackQuery, db_pool):
@@ -76,8 +78,8 @@ async def back_to_main_callback(callback: types.CallbackQuery, db_pool):
         reply_markup=get_main_menu_keyboard(is_admin)
     )
 
-
 # ============= معالج الرجوع الموحد =============
+
 @router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]))
 async def deposit_back_handler(message: types.Message, state: FSMContext, db_pool):
     """الرجوع من عملية الشحن"""
@@ -93,13 +95,14 @@ async def deposit_back_handler(message: types.Message, state: FSMContext, db_poo
         reply_markup=get_main_menu_keyboard(is_admin)
     )
 
-
 # ============= قائمة طرق الدفع =============
+
 @router.message(F.text == "💳 إيداع رصيد")
 async def choose_meth(message: types.Message, db_pool):
     """عرض قائمة طرق الدفع - تعدل الرسالة الحالية"""
     is_admin = await is_admin_user(db_pool, message.from_user.id)
     
+    # ✅ استخدام الدالة المساعدة مباشرة
     methods = get_payment_methods()
     
     kb = []
@@ -110,31 +113,33 @@ async def choose_meth(message: types.Message, db_pool):
         )])
     kb.append([types.InlineKeyboardButton(text="🔙 رجوع", callback_data="back_to_main")])
     
+    # ✅ تعديل الرسالة الحالية بدلاً من إرسال جديدة
     try:
         await message.edit_text(
             "💳 اختر وسيلة الدفع المناسبة:", 
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
         )
     except:
+        # إذا فشل التعديل (مثلاً لأنها أول رسالة)، نرسل رسالة جديدة
         await message.answer(
             "💳 اختر وسيلة الدفع المناسبة:", 
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb)
         )
 
-
 # ============= بدء عملية الشحن =============
+
 @router.callback_query(F.data.startswith("m_"))
 async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء عملية الشحن - مع جلب سعر الإيداع من قاعدة البيانات"""
+    """بدء عملية الشحن - مع جلب سعر الصرف من config"""
     method = callback.data
     
     await callback.answer()
     
-    # ✅ جلب سعر الإيداع من قاعدة البيانات (يظهر للمستخدم)
-    current_rate = await get_exchange_rate(db_pool, 'deposit')
-    logger.info(f"💰 سعر الإيداع الحالي: {current_rate}")
+    # ✅ جلب سعر الصرف من config مباشرة (فوري)
+    current_rate = get_current_exchange_rate()
+    logger.info(f"💰 سعر الصرف الحالي للشحن: {current_rate}")
     
-    # جلب أرقام سيرياتل من config
+    # ✅ جلب أرقام سيرياتل من config مباشرة (فوري)
     syriatel_nums = get_current_syriatel_numbers()
     
     # تحديد اسم المحفظة حسب الطريقة
@@ -172,16 +177,20 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     else:
         msg += "أدخل المبلغ بالدولار (مثال: 5):"
     
-    await callback.message.answer(msg)
-
+    await callback.message.answer(
+        msg,
+        
+    )
 
 # ============= استلام المبلغ =============
+
 @router.message(DepStates.waiting_amount)
-async def get_amount(message: types.Message, state: FSMContext, db_pool):
+async def get_amount(message: types.Message, state: FSMContext):
     """استلام المبلغ والتحقق من صحته"""
     if message.text in ["🔙 رجوع للقائمة", "/رجوع", "/cancel", "❌ إلغاء"]:
         await state.clear()
-        is_admin = await is_admin_user(db_pool, message.from_user.id)
+        from database.users import is_admin_user
+        is_admin = await is_admin_user(None, message.from_user.id)
         await message.answer(
             "✅ تم إلغاء عملية الشحن.",
             reply_markup=get_main_menu_keyboard(is_admin)
@@ -193,6 +202,7 @@ async def get_amount(message: types.Message, state: FSMContext, db_pool):
     
     # التحقق من صحة الرقم
     try:
+        # السماح بالأرقام العشرية
         if '.' in text:
             if not text.replace('.', '').isdigit() or text.count('.') > 1:
                 raise ValueError
@@ -202,19 +212,27 @@ async def get_amount(message: types.Message, state: FSMContext, db_pool):
         
         amt = float(text)
         
+        # التحقق من أن المبلغ أكبر من 0
         if amt <= 0:
             return await message.answer(
-                "⚠️ المبلغ يجب أن يكون أكبر من 0.\nالرجاء إدخال مبلغ صحيح:"
+                "⚠️ المبلغ يجب أن يكون أكبر من 0.\n"
+                "الرجاء إدخال مبلغ صحيح:",
+                
             )
         
+        # التحقق من الحد الأدنى للمبلغ
         if amt < 1:
             return await message.answer(
-                "⚠️ الحد الأدنى للمبلغ هو 1.\nالرجاء إدخال مبلغ أكبر:"
+                "⚠️ الحد الأدنى للمبلغ هو 1.\n"
+                "الرجاء إدخال مبلغ أكبر:",
+                
             )
         
     except ValueError:
         return await message.answer(
-            "⚠️ خطأ في الصيغة!\nالرجاء إدخال رقم صحيح (مثال: 500 أو 50.5):"
+            "⚠️ خطأ في الصيغة!\n"
+            "الرجاء إدخال رقم صحيح (مثال: 500 أو 50.5):",
+            
         )
     
     data = await state.get_data()
@@ -236,6 +254,7 @@ async def get_amount(message: types.Message, state: FSMContext, db_pool):
     
     # عرض تعليمات التحويل حسب الطريقة
     if data['method'] == "m_syr":
+        # ✅ جلب الأرقام المحدثة من config مباشرة
         syriatel_nums = get_current_syriatel_numbers()
         
         nums_text = ""
@@ -277,8 +296,8 @@ async def get_amount(message: types.Message, state: FSMContext, db_pool):
         )
         await state.set_state(DepStates.waiting_photo)
 
-
 # ============= إرسال الطلب للمجموعة =============
+
 async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id: str = None):
     """إرسال طلب الشحن للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
@@ -292,6 +311,7 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
         
         tx_info_text = f"🔢 رقم العملية: `{tx_info}`\n" if tx_info else ""
         
+        # استخدام توقيت دمشق
         current_time = get_formatted_damascus_time()
         
         caption = (
@@ -304,6 +324,7 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
             "🔹 **الإجراءات:**"
         )
         
+        # أزرار الموافقة والرفض
         builder = InlineKeyboardBuilder()
         builder.row(
             types.InlineKeyboardButton(
@@ -323,14 +344,14 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
                 photo=photo_file_id,
                 caption=caption,
                 reply_markup=builder.as_markup(),
-                parse_mode="none"
+                parse_mode="Markdown"
             )
         else:
             msg = await bot.send_message(
                 chat_id=config.DEPOSIT_GROUP,
                 text=caption,
                 reply_markup=builder.as_markup(),
-                parse_mode="none"
+                parse_mode="Markdown"
             )
         
         logger.info(f"✅ تم إرسال طلب الشحن للمجموعة، message_id: {msg.message_id}")
@@ -339,7 +360,6 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال للمجموعة: {e}")
         return None
-
 
 # ============= معالجة رقم العملية =============
 @router.message(DepStates.waiting_tx)
@@ -359,6 +379,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
     
     # التحقق من صحة رقم العملية لسيرياتل كاش
     if data['method'] == "m_syr":
+        # إزالة أي مسافات أو شرطات
         clean_tx = tx.replace(' ', '').replace('-', '')
         if not clean_tx.isdigit() or len(clean_tx) < 12:
             return await message.answer(
@@ -367,7 +388,10 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
                 parse_mode="Markdown"
             )
     
+    # حفظ رقم العملية في الـ state
     await state.update_data(tx_info=tx)
+    
+    # تجهيز رسالة التأكيد
     data = await state.get_data()
     
     text = (
@@ -378,6 +402,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
         f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
     )
     
+    # أزرار التأكيد والإلغاء
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="✅ تأكيد وإرسال", callback_data="confirm_deposit"),
@@ -390,7 +415,6 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
         parse_mode="Markdown"
     )
     await state.set_state(DepStates.confirm)
-
 
 @router.callback_query(F.data == "confirm_deposit")
 async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
@@ -406,7 +430,9 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
     
     tx = data['tx_info']
     
+    # حفظ الطلب في قاعدة البيانات
     async with db_pool.acquire() as conn:
+        # إضافة أو تحديث المستخدم
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
             VALUES ($1, $2, 0, CURRENT_TIMESTAMP) 
@@ -415,6 +441,7 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
                 last_activity = CURRENT_TIMESTAMP
         ''', callback.from_user.id, callback.from_user.username)
         
+        # إنشاء طلب الشحن
         deposit_id = await conn.fetchval('''
             INSERT INTO deposit_requests 
             (user_id, username, method, amount, amount_syp, tx_info, status, created_at)
@@ -429,6 +456,7 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
         tx
         )
         
+        # تجهيز بيانات الإرسال للمجموعة
         channel_data = {
             'user_id': callback.from_user.id,
             'username': callback.from_user.username or 'غير معروف',
@@ -437,8 +465,10 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
             'method_name': data['method_name'],
         }
         
+        # إرسال للمجموعة
         group_msg_id = await send_to_group(bot, channel_data, tx)
         
+        # تحديث معرف رسالة المجموعة
         if group_msg_id:
             await conn.execute(
                 "UPDATE deposit_requests SET group_message_id = $1 WHERE id = $2",
@@ -447,6 +477,7 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
+    # ✅ تعديل رسالة التأكيد
     await callback.message.edit_text(
         f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
@@ -456,13 +487,13 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
         parse_mode="Markdown"
     )
     
+    # إرسال رسالة منفصلة مع القائمة الرئيسية
     await callback.message.answer(
         "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
         reply_markup=get_main_menu_keyboard(is_admin)
     )
     
     await state.clear()
-
 
 @router.callback_query(F.data == "cancel_deposit")
 async def cancel_deposit(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -483,7 +514,6 @@ async def cancel_deposit(callback: types.CallbackQuery, state: FSMContext, db_po
         reply_markup=get_main_menu_keyboard(is_admin)
     )
 
-
 # ============= معالجة الصور =============
 @router.message(DepStates.waiting_photo, F.photo)
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_pool):
@@ -498,9 +528,14 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
         return
     
     data = await state.get_data()
+    
+    # استخدام أعلى جودة للصورة
     photo_file_id = message.photo[-1].file_id
     
+    # حفظ معلومات الصورة في الـ state
     await state.update_data(photo_file_id=photo_file_id)
+    
+    # تجهيز رسالة التأكيد
     data = await state.get_data()
     
     text = (
@@ -511,6 +546,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
         f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
     )
     
+    # أزرار التأكيد والإلغاء
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="✅ تأكيد وإرسال", callback_data="confirm_deposit_photo"),
@@ -523,7 +559,6 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
         parse_mode="Markdown"
     )
     await state.set_state(DepStates.confirm)
-
 
 @router.callback_query(F.data == "confirm_deposit_photo")
 async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext, bot: Bot, db_pool):
@@ -539,7 +574,9 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
     
     photo_file_id = data['photo_file_id']
     
+    # حفظ الطلب في قاعدة البيانات
     async with db_pool.acquire() as conn:
+        # إضافة أو تحديث المستخدم
         await conn.execute('''
             INSERT INTO users (user_id, username, balance, created_at) 
             VALUES ($1, $2, 0, CURRENT_TIMESTAMP) 
@@ -548,6 +585,7 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
                 last_activity = CURRENT_TIMESTAMP
         ''', callback.from_user.id, callback.from_user.username)
         
+        # إنشاء طلب الشحن مع الصورة
         deposit_id = await conn.fetchval('''
             INSERT INTO deposit_requests 
             (user_id, username, method, amount, amount_syp, tx_info, photo_file_id, status, created_at)
@@ -563,6 +601,7 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
         photo_file_id
         )
         
+        # تجهيز بيانات الإرسال للمجموعة
         channel_data = {
             'user_id': callback.from_user.id,
             'username': callback.from_user.username or 'غير معروف',
@@ -571,8 +610,10 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
             'method_name': data['method_name'],
         }
         
+        # إرسال للمجموعة مع الصورة
         group_msg_id = await send_to_group(bot, channel_data, photo_file_id=photo_file_id)
         
+        # تحديث معرف رسالة المجموعة
         if group_msg_id:
             await conn.execute(
                 "UPDATE deposit_requests SET group_message_id = $1 WHERE id = $2",
@@ -581,6 +622,7 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
+    # ✅ تعديل رسالة التأكيد
     await callback.message.edit_text(
         f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
         f"💰 **المبلغ:** {data['display_amount']}\n"
@@ -590,6 +632,7 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
         parse_mode="Markdown"
     )
     
+    # إرسال رسالة منفصلة مع القائمة الرئيسية
     await callback.message.answer(
         "👋 مرحباً بك في القائمة الرئيسية. يمكنك اختيار ما تريد من الأزرار أدناه:",
         reply_markup=get_main_menu_keyboard(is_admin)
@@ -597,11 +640,13 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
     
     await state.clear()
 
+# ============= معالج الصور غير الصالحة =============
 
 @router.message(DepStates.waiting_photo)
 async def invalid_photo(message: types.Message):
     """معالج إذا أرسل المستخدم نص بدل صورة"""
     await message.answer(
         "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n",
+        
         parse_mode="Markdown"
     )
