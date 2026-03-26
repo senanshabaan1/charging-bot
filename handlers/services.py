@@ -1,14 +1,12 @@
-# handlers/services.py - كامل مع جميع التعديلات
-# بدون عروض عامة (فقط خصم VIP)، بدون عرض نسبة الربح للمستخدم
+# handlers/services.py - التعديلات النهائية
 
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import config
-from config import ORDERS_GROUP
+from config import ORDERS_GROUP, USD_TO_SYP
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import logging
-import asyncio
 from datetime import datetime
 from handlers.time_utils import get_damascus_time_now, format_damascus_time, DAMASCUS_TZ
 from handlers.keyboards import get_main_menu_keyboard
@@ -16,10 +14,8 @@ from database.users import is_admin_user
 from database.core import get_exchange_rate
 from database.vip import get_user_vip
 from database.points import get_points_per_order
-from database.products import get_product_options, get_product_option, calculate_option_price
+from database.products import get_product_options, get_product_option
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
-from utils import api_client
-import json
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -30,184 +26,11 @@ class OrderStates(StatesGroup):
     confirm = State()
     choosing_variant = State()
 
-
-# ============= جلب وصف الخدمة من API =============
-async def get_service_description(api_service_id: int, db_pool) -> str:
-    """جلب وصف الخدمة من API الخارجي"""
-    try:
-        if not api_service_id:
-            return None
-        
-        description = await api_client.get_product_description(int(api_service_id))
-        
-        if description:
-            logger.info(f"✅ تم جلب وصف API للخدمة {api_service_id}")
-            return description.strip()
-        return None
-    except Exception as e:
-        logger.error(f"⚠️ فشل جلب وصف API: {e}")
-        return None
-
-
-# ============= دوال مساعدة =============
+# دالة مساعدة للتخزين المؤقت
 async def get_cached_categories(db_pool):
     """جلب الأقسام مع إمكانية التخزين المؤقت"""
     async with db_pool.acquire() as conn:
         return await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
-
-
-async def send_order_to_group(bot: Bot, order_data: dict):
-    """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
-    try:
-        caption = (
-            "🆕 <b>طلب تطبيق جديد</b>\n\n"
-            f"👤 <b>المستخدم:</b> @{order_data['username']}\n"
-            f"🆔 <b>الآيدي:</b> <code>{order_data['user_id']}</code>\n"
-            f"📱 <b>التطبيق:</b> {order_data['app_name']}\n"
-        )
-        
-        if 'variant_name' in order_data:
-            caption += f"📦 <b>الفئة:</b> {order_data['variant_name']}\n"
-        else:
-            caption += f"📦 <b>الكمية:</b> {order_data['quantity']}\n"
-        
-        caption += (
-            f"💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 <b>المستهدف:</b> <code>{order_data['target_id']}</code>\n"
-            f"⏰ <b>الوقت:</b> {get_formatted_damascus_time()}\n\n"
-            "<b>🔹 الإجراءات:</b>"
-        )
-        
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(
-                text="✅ موافقة", 
-                callback_data=f"appr_order_{order_data['order_id']}"
-            ),
-            types.InlineKeyboardButton(
-                text="❌ رفض", 
-                callback_data=f"reje_order_{order_data['order_id']}"
-            ),
-            width=2
-        )
-        
-        msg = await bot.send_message(
-            chat_id=ORDERS_GROUP,
-            text=caption,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        
-        logger.info(f"✅ تم إرسال الطلب #{order_data['order_id']} للمجموعة")
-        return msg.message_id
-    except Exception as e:
-        logger.error(f"❌ خطأ في إرسال الطلب للمجموعة: {e}")
-        return None
-
-
-async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message: str = None):
-    """إرسال إشعار للمجموعة عند فشل التنفيذ التلقائي"""
-    try:
-        caption = (
-            "⚠️ <b>فشل التنفيذ التلقائي للطلب</b>\n\n"
-            f"👤 <b>المستخدم:</b> @{order_data['username']}\n"
-            f"🆔 <b>الآيدي:</b> <code>{order_data['user_id']}</code>\n"
-            f"📱 <b>التطبيق:</b> {order_data['app_name']}\n"
-        )
-        
-        if 'variant_name' in order_data:
-            caption += f"📦 <b>الفئة:</b> {order_data['variant_name']}\n"
-        else:
-            caption += f"📦 <b>الكمية:</b> {order_data['quantity']}\n"
-        
-        caption += (
-            f"💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 <b>المستهدف:</b> <code>{order_data['target_id']}</code>\n"
-            f"⏰ <b>الوقت:</b> {get_formatted_damascus_time()}\n\n"
-        )
-        
-        if error_message:
-            caption += f"❌ <b>سبب الفشل:</b> {error_message}\n\n"
-        
-        caption += (
-            "<b>🔹 الإجراءات:</b>\n"
-            "• يجب معالجة هذا الطلب يدوياً\n"
-            "• يمكن تنفيذه من خلال لوحة التحكم"
-        )
-        
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(
-                text="✅ تنفيذ يدوياً", 
-                callback_data=f"appr_order_{order_data['order_id']}"
-            ),
-            types.InlineKeyboardButton(
-                text="❌ رفض", 
-                callback_data=f"reje_order_{order_data['order_id']}"
-            ),
-            width=2
-        )
-        
-        msg = await bot.send_message(
-            chat_id=ORDERS_GROUP,
-            text=caption,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-        
-        logger.info(f"⚠️ تم إرسال إشعار فشل الطلب #{order_data['order_id']} للمجموعة")
-        return msg.message_id
-    except Exception as e:
-        logger.error(f"❌ خطأ في إرسال إشعار الفشل: {e}")
-        return None
-
-
-async def execute_order_automatically(bot: Bot, db_pool, order_data: dict, order_id: int, total_syp: float, points: int):
-    """تنفيذ الطلب تلقائياً عبر API الخارجي"""
-    try:
-        async with db_pool.acquire() as conn:
-            app = await conn.fetchrow(
-                "SELECT api_service_id, name FROM applications WHERE id = $1",
-                order_data['app_id']
-            )
-            
-            api_service_id = app['api_service_id'] if app else None
-        
-        if not api_service_id:
-            logger.error(f"❌ لا يوجد api_service_id للتطبيق {order_data['app_name']}")
-            return False, "لا يوجد API ID مرتبط بهذا التطبيق"
-        
-        logger.info(f"📤 إرسال طلب #{order_id} إلى API (service_id={api_service_id})...")
-        
-        api_result = await api_client.create_order(
-            service_id=int(api_service_id),
-            quantity=order_data.get('quantity', 1),
-            player_id=order_data['target_id']
-        )
-        
-        if api_result:
-            api_order_id = api_result.get('order_id') or api_result.get('id') or str(api_result)
-            
-            async with db_pool.acquire() as conn:
-                await conn.execute('''
-                    UPDATE orders 
-                    SET status = 'processing', 
-                        api_response = $1,
-                        api_order_id = $2,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = $3
-                ''', json.dumps(api_result), str(api_order_id), order_id)
-            
-            logger.info(f"✅ تم إرسال الطلب #{order_id} إلى API بنجاح")
-            return True, api_result
-        else:
-            logger.error(f"❌ فشل إرسال الطلب #{order_id} إلى API")
-            return False, "فشل الاتصال بـ API"
-            
-    except Exception as e:
-        logger.error(f"❌ خطأ في التنفيذ التلقائي: {e}")
-        return False, str(e)
-
 
 # ============= معالج الكولباك للقائمة الرئيسية =============
 @router.callback_query(F.data == "show_categories")
@@ -218,7 +41,9 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     categories = await get_cached_categories(db_pool)
     
     if not categories:
-        await callback.message.edit_text("⚠️ لا توجد أقسام متاحة حالياً.")
+        await callback.message.edit_text(
+            "⚠️ لا توجد أقسام متاحة حالياً."
+        )
         return
     
     builder = InlineKeyboardBuilder()
@@ -236,10 +61,10 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 الأقسام 📁:\n\n🔸اختر القسم المفضل:",
+        "🌟 الأقسام 📁:\n\n"
+        "🔸اختر القسم المفضل:",
         reply_markup=builder.as_markup()
     )
-
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_callback(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -254,8 +79,57 @@ async def back_to_main_callback(callback: types.CallbackQuery, state: FSMContext
         reply_markup=get_main_menu_keyboard(is_admin)
     )
 
+async def send_order_to_group(bot: Bot, order_data: dict):
+    """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
+    try:
+        caption = (
+            "🆕 **طلب تطبيق جديد**\n\n"
+            f"👤 **المستخدم:** @{order_data['username']}\n"
+            f"🆔 **الآيدي:** `{order_data['user_id']}`\n"
+            f"📱 **التطبيق:** {order_data['app_name']}\n"
+        )
+        
+        if 'variant_name' in order_data:
+            caption += f"📦 **الفئة:** {order_data['variant_name']}\n"
+        else:
+            caption += f"📦 **الكمية:** {order_data['quantity']}\n"
+        
+        caption += (
+            f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
+            f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
+            f"⏰ **الوقت:** {get_formatted_damascus_time()}\n\n"
+            "🔹 **الإجراءات:**"
+        )
+        
+        # أزرار للموافقة/الرفض
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(
+                text="✅ موافقة", 
+                callback_data=f"appr_order_{order_data['order_id']}"
+            ),
+            types.InlineKeyboardButton(
+                text="❌ رفض", 
+                callback_data=f"reje_order_{order_data['order_id']}"
+            ),
+            width=2
+        )
+        
+        msg = await bot.send_message(
+            chat_id=ORDERS_GROUP,
+            text=caption,
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"✅ تم إرسال الطلب #{order_data['order_id']} للمجموعة")
+        return msg.message_id
+    except Exception as e:
+        logger.error(f"❌ خطأ في إرسال الطلب للمجموعة: {e}")
+        return None
 
 # ============= معالج الرجوع الموحد =============
+
 @router.message(F.text.in_(["🔙 رجوع للقائمة", "/رجوع", "/cancel", "🏠 القائمة الرئيسية", "❌ إلغاء"]))
 async def global_back_handler(message: types.Message, state: FSMContext, db_pool):
     """معالج الرجوع من أي مكان"""
@@ -278,18 +152,24 @@ async def global_back_handler(message: types.Message, state: FSMContext, db_pool
             reply_markup=get_main_menu_keyboard(is_admin)
         )
 
-
 # ============= عرض الأقسام =============
+
+
 @router.callback_query(F.data.startswith("disabled_app_"))
 async def handle_disabled_app(callback: types.CallbackQuery):
     """معالج للتطبيقات المعطلة"""
-    await callback.answer("هذا التطبيق متوقف حالياً🔒", show_alert=True)
-
+    app_id = int(callback.data.split("_")[2])
+    
+    await callback.answer(
+        "هذا التطبيق متوقف حالياً🔒",
+        show_alert=True
+    )
 
 # ============= عرض التطبيقات داخل القسم =============
+
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
-    """عرض التطبيقات في قسم معين"""
+    """عرض التطبيقات في قسم معين - الأيقونة والاسم فقط"""
     cat_id = int(callback.data.split("_")[1])
     
     async with db_pool.acquire() as conn:
@@ -301,7 +181,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             "SELECT display_name FROM categories WHERE id = $1",
             cat_id
         )
-        purchase_rate = await get_exchange_rate(db_pool, 'purchase')
+        current_rate = await get_exchange_rate(db_pool)
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
         vip_icon = user_vip.get('icon', '⚪')
@@ -322,6 +202,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             callback_data = f"disabled_app_{app['id']}"
             button_text = f"{icon} {app['name']} (متوقف)"
         else:
+            # اختيار الأيقونة حسب نوع التطبيق
             if app['type'] == 'game':
                 icon = "🎮"
             elif app['type'] == 'subscription':
@@ -329,6 +210,7 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
             else:
                 icon = "📱"
             callback_data = f"buy_{app['id']}_{app['type']}"
+            # عرض الأيقونة والاسم فقط بناءً على طلبك
             button_text = f"{icon} {app['name']}"
         
         buttons.append(types.InlineKeyboardButton(
@@ -347,14 +229,17 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_categories"
     ))
     
+
+    
+    # إظهار مستوى المستخدم بالأيقونة والاسم الصحيحين
     await callback.message.edit_text(
         f" {category['display_name']}\n\n"
         f"👤 مستواك: {vip_icon} {vip_name} (خصم {discount}%)\n"
+    
         f"🔒 التطبيقات المقفلة متوقفة حالياً\n\n"
         "🔸 اختر التطبيق المطلوب:", 
         reply_markup=builder.as_markup()
     )
-
 
 @router.callback_query(F.data == "back_to_categories")
 async def back_to_categories(callback: types.CallbackQuery, db_pool):
@@ -374,15 +259,18 @@ async def back_to_categories(callback: types.CallbackQuery, db_pool):
     ))
     
     await callback.message.edit_text(
-        "🌟 الأقسام:\n\n🔸اختر القسم المفضل:",
+        "🌟 الأقسام:\n\n"
+        "🔸اختر القسم المفضل:",
         reply_markup=builder.as_markup()
     )
 
+# ============= بدء الطلب =============
 
 # ============= بدء الطلب =============
+
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء طلب شراء مع عرض وصف من API إن وجد"""
+    """بدء طلب شراء مع تطبيق الخصم - عرض جميع الخيارات مع تمييز المعطل"""
     parts = callback.data.split("_")
     app_id = int(parts[1])
     app_type = parts[2] if len(parts) > 2 else 'service'
@@ -394,23 +282,20 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             await callback.answer("عذراً، هذا التطبيق غير متوفر حالياً.", show_alert=True)
             return
         
+        # التحقق من حالة تفعيل التطبيق نفسه
         if not app['is_active']:
-            await callback.answer("هذا التطبيق متوقف حالياً🔒", show_alert=True)
+            await callback.answer(
+                "هذا التطبيق متوقف حالياً🔒",
+                show_alert=True
+            )
             return
 
-        purchase_rate = await get_exchange_rate(db_pool, 'purchase')
+        current_rate = await get_exchange_rate(db_pool)
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
         vip_level = user_vip.get('vip_level', 0)
-        
-        # جلب وصف الخدمة من API إذا كان هناك api_service_id
-        api_description = None
-        api_service_id = app.get('api_service_id')
-        if api_service_id:
-            api_description = await get_service_description(api_service_id, db_pool)
-            if api_description:
-                logger.info(f"✅ تم جلب وصف API للتطبيق {app['name']}")
     
+    # تحويل القيم إلى float
     app_dict = dict(app)
     app_dict['unit_price_usd'] = float(app_dict['unit_price_usd']) if app_dict['unit_price_usd'] is not None else 0.0
     app_dict['profit_percentage'] = float(app_dict.get('profit_percentage', 0) or 0)
@@ -419,25 +304,19 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     await state.update_data({
         'app': app_dict,
         'app_type': app_type,
-        'purchase_rate': purchase_rate,
+        'current_rate': current_rate,
         'discount': discount,
-        'vip_level': vip_level,
-        'api_service_id': api_service_id,
-        'api_description': api_description
+        'vip_level': vip_level
     })
     
+    # جلب جميع الخيارات (المفعلة والمعطلة) من product_options
     async with db_pool.acquire() as conn:
         options = await conn.fetch(
             "SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd",
             app_id
         )
     
-    description_text = ""
-    if api_description:
-        description_text = f"\n📝 **وصف الخدمة من الموقع:**\n{api_description}\n\n"
-    elif app_dict.get('description'):
-        description_text = f"\n📝 **الوصف:**\n{app_dict['description']}\n\n"
-    
+    # إذا كان هناك خيارات، اعرضها كلها مع تمييز المعطل
     if options and len(options) > 0:
         builder = InlineKeyboardBuilder()
         
@@ -445,7 +324,9 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             is_active = opt['is_active']
             opt_price = float(opt['price_usd']) if opt['price_usd'] is not None else 0.0
             
+            # تحديد الأيقونة حسب الحالة
             if is_active:
+                # أيقونة مناسبة حسب نوع التطبيق للمفعلة
                 if app_type == 'game':
                     icon = "🎮"
                 elif app_type == 'subscription':
@@ -454,19 +335,21 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
                     icon = "📱"
                 callback_data = f"var_{opt['id']}"
             else:
-                icon = "🔒"
+                icon = "🔒"  # قفل للخيارات المعطلة
                 callback_data = f"disabled_option_{opt['id']}"
             
+            # حساب السعر فقط للخيارات المفعلة
             if is_active:
                 price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
                 discounted_price_usd = price_with_profit * (1 - discount/100)
-                price_syp = discounted_price_usd * purchase_rate
+                price_syp = discounted_price_usd * current_rate
                 
                 if discount > 0:
                     button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
                 else:
                     button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س"
             else:
+                # للخيارات المعطلة - عرض رسالة التوقف فقط
                 button_text = f"{icon} {opt['name']} (متوقف)"
             
             builder.row(types.InlineKeyboardButton(
@@ -474,34 +357,41 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
                 callback_data=callback_data
             ))
         
+        # ✅ زر الرجوع الصحيح - يرجع للقسم وليس إلغاء
         builder.row(types.InlineKeyboardButton(
             text="🔙 رجوع للقسم",
-            callback_data=f"cat_{app_dict['category_id']}"
+            callback_data=f"cat_{app_dict['category_id']}"  # يرجع للقسم
         ))
         
+        # رسالة مناسبة حسب نوع التطبيق
         type_name = "لعبة" if app_type == 'game' else "اشتراك" if app_type == 'subscription' else "تطبيق"
+        
+        # حساب عدد الخيارات المتاحة
         active_count = sum(1 for opt in options if opt['is_active'])
         disabled_count = len(options) - active_count
-        status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً" if disabled_count > 0 else ""
+        
+        status_message = ""
+        if disabled_count > 0:
+            status_message = f"\n🔒 هناك {disabled_count} خيارات متوقفة مؤقتاً"
         
         await callback.message.edit_text(
-            f"🔽 **اخترت: {app_dict['name']}**\n"
-            f"{description_text}"
-            f"🔶 **النوع:** {type_name}\n"
-            f"👑 **مستواك:** VIP {vip_level} (خصم {discount}%)\n"
+            f"🔽اخترت:{app_dict['name']}\n\n"
+            f"🔶 النوع: {type_name}\n"
+            f"👑 مستواك: VIP {vip_level} (خصم {discount}%)\n"
+            f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
             f"{status_message}\n\n"
-            "🔸 **اختر الخيار المناسب:**\n"
+            "🔸 اختر الخيار المناسب:\n"
             "🔒 الخيارات المقفلة متوقفة مؤقتاً",
-            reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
+            reply_markup=builder.as_markup()
         )
         await state.set_state(OrderStates.choosing_variant)
     
     else:
+        # إذا لم توجد خيارات، استخدم الطريقة القديمة (إدخال الكمية يدوياً)
         profit_percentage = app_dict['profit_percentage']
         final_unit_price_usd = app_dict['unit_price_usd'] * (1 + (profit_percentage / 100))
         discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
-        price_per_unit_syp = discounted_unit_price_usd * purchase_rate
+        price_per_unit_syp = discounted_unit_price_usd * current_rate
         
         await state.update_data({
             'final_unit_price_usd': final_unit_price_usd,
@@ -510,41 +400,42 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         })
         
         if discount > 0:
-            original_price = final_unit_price_usd * purchase_rate
-            price_text = f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س (بدلاً من {original_price:,.0f} ل.س)\n"
-            price_text += f"🎁 **خصم VIP {vip_level}:** {discount}%"
+            original_price = final_unit_price_usd * current_rate
+            price_text = f"💰 سعر الوحدة: {price_per_unit_syp:,.0f} ل.س (بدلاً من {original_price:,.0f} ل.س)\n"
+            price_text += f"🎁 خصم VIP {vip_level}: {discount}%"
         else:
-            price_text = f"💰 **سعر الوحدة:** {price_per_unit_syp:,.0f} ل.س"
+            price_text = f"💰 سعر الوحدة: {price_per_unit_syp:,.0f} ل.س"
         
         await state.set_state(OrderStates.qty)
         
+        # ✅ زر الرجوع الصحيح - يرجع للقسم
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(
             text="🔙 رجوع للقسم",
-            callback_data=f"cat_{app_dict['category_id']}"
+            callback_data=f"cat_{app_dict['category_id']}"  # يرجع للقسم
         ))
         
         await callback.message.edit_text(
-            f"🏷 **الخدمة: {app_dict['name']}**\n"
-            f"{description_text}"
-            f"📦 **أقل كمية:** {app_dict['min_units']}\n"
+            f"🏷 الخدمة: {app_dict['name']}\n"
+            f"📦 أقل كمية: {app_dict['min_units']}\n"
             f"{price_text}\n\n"
-            f"**الرجاء إدخال الكمية المطلوبة:**",
+            f"**الرجاء إدخال الكمية المطلوبة**:",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
 
-
 @router.callback_query(F.data.startswith("disabled_option_"))
 async def handle_disabled_option(callback: types.CallbackQuery):
     """معالج للخيارات المعطلة"""
+    option_id = int(callback.data.split("_")[2])
+    
     await callback.answer(
         "🔒 هذا الخيار متوقف حالياً، يرجى المحاولة لاحقاً أو اختيار خيار آخر",
         show_alert=True
     )
 
-
 # ============= استلام الكمية =============
+
 @router.message(OrderStates.qty)
 async def get_qty(message: types.Message, state: FSMContext, db_pool):
     """استقبال الكمية مع تطبيق الخصم"""
@@ -580,7 +471,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
         return
     
     app = data['app']
-    purchase_rate = data.get('purchase_rate', 118)
+    current_rate = data.get('current_rate', 118)
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
     min_units = app.get('min_units', 1) or 1
@@ -600,11 +491,11 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     final_unit_price_usd = data.get('final_unit_price_usd', 0)
     
     original_total_usd = final_unit_price_usd * qty
-    original_total_syp = original_total_usd * purchase_rate
+    original_total_syp = original_total_usd * current_rate
     
     discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
     total_usd = qty * discounted_unit_price_usd
-    total_syp = total_usd * purchase_rate
+    total_syp = total_usd * current_rate
     
     await state.update_data(
         qty=qty,
@@ -640,7 +531,7 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
                 f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
                 f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
                 f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
-                f"قم بشحن رصيدك من قسم إيداع رصيد",
+                f"قم بشحن رصيدك من قسم إيداع رصيد  ",
                 reply_markup=builder.as_markup()
             )
             return
@@ -658,15 +549,20 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     app_name = app['name'].lower()
     instructions = " **الرجاء إرسال الــ 🆔**:"
     
-    if any(x in app_name for x in ['pubg', 'free fire']):
-        instructions = "🎯 الرجاء إرسال 🆔 اللاعب:"
-    elif 'telegram' in app_name:
-        instructions = "📱 الرجاء إرسال معرف تيليجرام (@username):"
-    elif 'instagram' in app_name or 'tiktok' in app_name:
-        instructions = "📸 **يرجى إرسال اسم المستخدم:**"
-    else:
-        instructions = " **يرجى إرسال الــ 🆔:**"
+    if any(x in app_name for x in ['pubg 1', 'pubg 2']):
+        instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
+    elif 'free fire' in app_name:
+        instructions = "🔥 **الرجاء إرسال 🆔 اللاعب** (Free Fire):"
+    elif 'clash' in app_name:
+        instructions = "⚔️ **الرجاء إرسال إيميل Supercell ID:**"
+    elif 'instagram' in app_name:
+        instructions = "📸 **الرجاء إرسال اسم المستخدم على Instagram:**"
+    elif any(x in app_name for x in ['TELEGRAM', '⭐ telegram']):
+        instructions = "الرجاء إرسال معرف تيليجرام (🪪 username) :"
+    elif 'netflix' in app_name:
+        instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
     
+    # استخدام builder للرجوع
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
         text="❌ إلغاء",
@@ -684,7 +580,6 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     await state.set_state(OrderStates.target_id)
     logger.info(f"✅ تم تغيير الحالة إلى target_id للمستخدم {message.from_user.id}")
 
-
 @router.message(OrderStates.choosing_variant)
 async def handle_choosing_variant(message: types.Message, state: FSMContext):
     """معالج إذا كان المستخدم في حالة اختيار الفئة وأرسل رسالة نصية"""
@@ -698,7 +593,6 @@ async def handle_choosing_variant(message: types.Message, state: FSMContext):
         "⚠️ الرجاء اختيار الفئة من الأزرار أعلاه",
         reply_markup=builder.as_markup()
     )
-
 
 @router.message(OrderStates.confirm)
 async def handle_confirm_state(message: types.Message, state: FSMContext):
@@ -714,11 +608,13 @@ async def handle_confirm_state(message: types.Message, state: FSMContext):
         reply_markup=builder.as_markup()
     )
 
+# ============= اختيار الفئة =============
 
 # ============= اختيار الفئة =============
+
 @router.callback_query(F.data.startswith("var_"))
 async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """اختيار خيار مع عرض وصف من API إن وجد"""
+    """اختيار خيار (لجميع أنواع المنتجات) مع عرض الوصف"""
     variant_id = int(callback.data.split("_")[1])
     
     option = await get_product_option(db_pool, variant_id)
@@ -734,79 +630,73 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
         return
     
     app = data['app']
-    purchase_rate = data.get('purchase_rate', 118)
-    discount = data.get('discount', 0)
-    vip_level = data.get('vip_level', 0)
+    current_rate = data['current_rate']
+    discount = data['discount']
+    vip_level = data['vip_level']
     app_type = data.get('app_type', 'service')
-    app_id = app['id']
+    app_id = app['id']  # معرف التطبيق
     
-    api_description = data.get('api_description')
-    if not api_description and data.get('api_service_id'):
-        api_description = await get_service_description(data['api_service_id'], db_pool)
-        await state.update_data(api_description=api_description)
+    app_profit = float(app.get('profit_percentage', 0) or 0)
+    opt_price = float(option['price_usd']) if option['price_usd'] is not None else 0.0
     
-    price_data = await calculate_option_price(
-        option=option,
-        purchase_rate=purchase_rate,
-        user_discount=discount,
-        use_option_profit=True
-    )
+    price_with_profit = opt_price * (1 + (app_profit / 100))
+    discounted_price_usd = price_with_profit * (1 - discount/100)
+    total_syp = discounted_price_usd * current_rate
+    
+    original_price_usd = price_with_profit
+    original_total_syp = original_price_usd * current_rate
     
     quantity = int(option.get('quantity', 1) or 1)
     
     await state.update_data({
         'variant': dict(option),
-        'supplier_price_usd': price_data['supplier_price_usd'],
-        'price_with_profit_usd': price_data['price_with_profit_usd'],
-        'final_price_usd': price_data['final_price_usd'],
-        'total_syp': price_data['final_price_syp'],
-        'profit_percentage': price_data['profit_percentage'],
-        'qty': quantity,
-        'original_total_syp': price_data['price_with_profit_usd'] * purchase_rate
+        'final_price_usd': discounted_price_usd,
+        'total_syp': total_syp,
+        'original_total_syp': original_total_syp,
+        'qty': quantity
     })
     
-    details = f"🔽 **اخترت: {app['name']}**\n\n"
+    # تحديد نوع المنتج للعرض
+    type_icon = "🎮" if app_type == 'game' else "📅" if app_type == 'subscription' else "📱"
     
-    if api_description:
-        details += f"📝 **وصف الخدمة من الموقع:**\n{api_description}\n\n"
-    elif option.get('description'):
-        details += f"📝 **الوصف:**\n{option['description']}\n\n"
+    details = f"🔽 اخترت: {app['name']}\n\n"
+    details += f"📦 الخيار: {option['name']}\n"
+    details += f"🔢 الكمية: {quantity}\n"
     
-    details += f"📦 **الخيار:** {option['name']}\n"
-    details += f"🔢 **الكمية:** {quantity}\n"
-    
-    # ✅ تم إزالة عرض نسبة الربح نهائياً
+    # إضافة الوصف هنا
+    if option.get('description'):
+        details += f"📝 الوصف:\n{option['description']}\n\n"
     
     if discount > 0:
-        saved = price_data['price_with_profit_usd'] * purchase_rate - price_data['final_price_syp']
-        details += f"💰 **السعر:** {price_data['final_price_syp']:,.0f} ل.س (بدلاً من {price_data['price_with_profit_usd'] * purchase_rate:,.0f} ل.س)\n"
-        details += f"🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved:,.0f} ل.س)\n\n"
+        saved = original_total_syp - total_syp
+        details += f"💰 السعر: {total_syp:,.0f} ل.س (بدلاً من {original_total_syp:,.0f} ل.س)\n"
+        details += f"🎁 خصم VIP {vip_level}: {discount}% (وفرت {saved:,.0f} ل.س)\n\n"
     else:
-        details += f"💰 **السعر:** {price_data['final_price_syp']:,.0f} ل.س\n\n"
+        details += f"💰 السعر: {total_syp:,.0f} ل.س\n\n"
     
+    # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
-    if 'pubg' in app_name or 'free fire' in app_name:
-        instructions = "🎯 **الرجاء إرسال 🆔 اللاعب:**"
+    if 'pubg 1' in app_name or 'pubg 2' in app_name:
+        instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
     elif 'telegram' in app_name:
-        instructions = "📱 **الرجاء إرسال معرف تيليجرام (@username):**"
+        instructions = " الرجاء إرسال معرف تيليجرام ( 🪪 username):"
     elif 'instagram' in app_name or 'tiktok' in app_name:
-        instructions = "📸 **الرجاء إرسال اسم المستخدم:**"
+        instructions = "📸 **يرجى إرسال اسم المستخدم:**"
     else:
-        instructions = "🔹 **الرجاء إرسال الـ 🆔 المطلوب:**"
+        instructions = " **يرجى إرسال الــ 🆔:**"
     
+    # ✅ زر الرجوع للخيارات السابقة
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
         text="🔙 رجوع للخيارات",
-        callback_data=f"back_to_options_{app_id}_{app_type}"
+        callback_data=f"back_to_options_{app_id}_{app_type}"  # يرجع للخيارات
     ))
     
     await callback.message.edit_text(
         f"{details}{instructions}",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        reply_markup=builder.as_markup()
     )
     await state.set_state(OrderStates.target_id)
-
 
 @router.callback_query(F.data.startswith("back_to_options_"))
 async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_pool):
@@ -817,6 +707,7 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
     app_id = int(parts[3])
     app_type = parts[4]
     
+    # إعادة عرض خيارات التطبيق
     async with db_pool.acquire() as conn:
         app = await conn.fetchrow("SELECT * FROM applications WHERE id = $1", app_id)
         options = await conn.fetch(
@@ -824,7 +715,7 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
             app_id
         )
         
-        purchase_rate = await get_exchange_rate(db_pool, 'purchase')
+        current_rate = await get_exchange_rate(db_pool)
         user_vip = await get_user_vip(db_pool, callback.from_user.id)
         discount = user_vip.get('discount_percent', 0)
         vip_level = user_vip.get('vip_level', 0)
@@ -837,14 +728,16 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
     app_dict['unit_price_usd'] = float(app_dict['unit_price_usd']) if app_dict['unit_price_usd'] is not None else 0.0
     app_dict['profit_percentage'] = float(app_dict.get('profit_percentage', 0) or 0)
     
+    # تحديث الـ state
     await state.update_data({
         'app': app_dict,
         'app_type': app_type,
-        'purchase_rate': purchase_rate,
+        'current_rate': current_rate,
         'discount': discount,
         'vip_level': vip_level
     })
     
+    # بناء كيبورد الخيارات
     builder = InlineKeyboardBuilder()
     
     for opt in options:
@@ -866,7 +759,7 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
         if is_active:
             price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
             discounted_price_usd = price_with_profit * (1 - discount/100)
-            price_syp = discounted_price_usd * purchase_rate
+            price_syp = discounted_price_usd * current_rate
             
             if discount > 0:
                 button_text = f"{icon} {opt['name']}\n{price_syp:,.0f} ل.س (خصم {discount}%)"
@@ -894,6 +787,7 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
         f"🔽 اخترت: {app_dict['name']}\n\n"
         f"🔶 النوع: {type_name}\n"
         f"👑 مستواك: VIP {vip_level} (خصم {discount}%)\n"
+        f"💰 سعر الصرف الحالي: {current_rate:,.0f} ل.س = 1$\n"
         f"{status_message}\n\n"
         "🔸 اختر الخيار المناسب:\n"
         "🔒 الخيارات المقفلة متوقفة مؤقتاً",
@@ -901,11 +795,11 @@ async def back_to_options(callback: types.CallbackQuery, state: FSMContext, db_p
     )
     await state.set_state(OrderStates.choosing_variant)
 
-
 # ============= استلام الهدف والتأكيد =============
+
 @router.message(OrderStates.target_id)
 async def confirm_order(message: types.Message, state: FSMContext, db_pool):
-    """استقبال ID الهدف وتأكيد الطلب مع عرض الوصف"""
+    """استقبال ID الهدف وتأكيد الطلب"""
     logger.info(f"📩 استقبال target_id من {message.from_user.id}: {message.text}")
     
     if message.text in ["🔙 رجوع للقائمة", "/cancel", "/رجوع", "🏠 القائمة الرئيسية", "❌ إلغاء"]:
@@ -939,7 +833,6 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
     total_syp = data.get('total_syp', 0)
-    api_description = data.get('api_description', '')
     
     async with db_pool.acquire() as conn:
         user = await conn.fetchrow(
@@ -958,20 +851,22 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     
     await state.update_data(target_id=target_id)
     
+    # حساب السعر الأصلي قبل الخصم
     if 'variant' in data:
         app = data['app']
         variant = data['variant']
         app_profit = float(app.get('profit_percentage', 0) or 0) / 100
         opt_price = float(variant.get('price_usd', 0))
         original_price_usd = opt_price * (1 + app_profit)
-        original_total_syp = original_price_usd * data.get('purchase_rate', 118)
+        original_total_syp = original_price_usd * data.get('current_rate', 118)
     else:
         final_unit_price_usd = data.get('final_unit_price_usd', 0)
         qty = data.get('qty', 1)
-        original_total_syp = final_unit_price_usd * qty * data.get('purchase_rate', 118)
+        original_total_syp = final_unit_price_usd * qty * data.get('current_rate', 118)
     
     await state.update_data(original_total_syp=original_total_syp)
     
+    # أزرار إنلاين فقط - بدون كيبورد سفلي
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="✅ تأكيد ودفع", callback_data="execute_buy"),
@@ -1003,9 +898,6 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         f"🔹 **التطبيق:** {data['app']['name']}\n"
     )
     
-    if api_description:
-        msg += f"\n📝 **وصف الخدمة:**\n{api_description[:300]}{'...' if len(api_description) > 300 else ''}\n\n"
-    
     if 'variant' in data:
         msg += f"🔹 **الفئة:** {data['variant']['name']}\n"
     else:
@@ -1016,14 +908,10 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
         f"{price_detail}\n"
         f"{warnings}\n"
         f"💳 **سيتم خصم المبلغ من رصيدك.**\n"
+        f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
     )
     
-    api_service_id = data.get('api_service_id')
-    if api_service_id:
-        msg += f"🤖 **سيتم تنفيذ الطلب تلقائياً عبر API**\n"
-    else:
-        msg += f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**\n"
-    
+    # إرسال رسالة التأكيد بدون كيبورد سفلي
     await message.answer(
         msg,
         reply_markup=builder.as_markup(),
@@ -1032,11 +920,11 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     await state.set_state(OrderStates.confirm)
     logger.info(f"✅ تم تغيير الحالة إلى confirm للمستخدم {message.from_user.id}")
 
-
 # ============= تنفيذ الطلب =============
+
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """تنفيذ الطلب - إما تلقائياً عبر API أو يدوياً"""
+    """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
     data = await state.get_data()
     
     if not data:
@@ -1048,9 +936,6 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
     total_syp = float(data['total_syp'])
-    api_service_id = data.get('api_service_id')
-    
-    # ✅ تم إزالة العروض العامة نهائياً
     
     async with db_pool.acquire() as conn:
         async with conn.transaction():
@@ -1065,7 +950,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 return
             
             await conn.execute(
-                "UPDATE users SET balance = balance - $1, total_orders = total_orders + 1, total_spent = total_spent + $1 WHERE user_id = $2",
+                "UPDATE users SET balance = balance - $1, total_orders = total_orders + 1 WHERE user_id = $2",
                 total_syp, callback.from_user.id
             )
             
@@ -1074,8 +959,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, variant_id, variant_name, 
-                     quantity, duration_days, unit_price_usd, total_amount_syp, target_id, 
-                     status, points_earned)
+                     quantity, duration_days, unit_price_usd, total_amount_syp, target_id, status, points_earned)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
                     RETURNING id
                 ''',
@@ -1098,13 +982,13 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'user_id': callback.from_user.id,
                     'username': callback.from_user.username or 'غير معروف',
                     'app_name': data['app']['name'],
-                    'app_id': data['app']['id'],
                     'variant_name': variant['name'],
                     'quantity': int(variant.get('quantity', 1) or 1),
                     'total_syp': total_syp,
                     'target_id': data['target_id'],
                 }
             else:
+                # للتوافق مع الخدمات القديمة
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, quantity, unit_price_usd, 
@@ -1128,76 +1012,36 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                     'user_id': callback.from_user.id,
                     'username': callback.from_user.username or 'غير معروف',
                     'app_name': data['app']['name'],
-                    'app_id': data['app']['id'],
                     'quantity': data['qty'],
                     'total_syp': total_syp,
                     'target_id': data['target_id'],
                 }
-    
-    auto_executed = False
-    api_error = None
-    
-    if api_service_id:
-        success, result = await execute_order_automatically(
-            bot, db_pool, order_data, order_id, total_syp, points
-        )
-        
-        if success:
-            auto_executed = True
-            async with db_pool.acquire() as conn:
+            
+            group_msg_id = await send_order_to_group(bot, order_data)
+            
+            if group_msg_id:
                 await conn.execute(
-                    "UPDATE orders SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
-                    order_id
+                    "UPDATE orders SET group_message_id = $1 WHERE id = $2",
+                    group_msg_id, order_id
                 )
-        else:
-            api_error = result
-            await send_auto_fail_notification(bot, order_data, api_error)
     
-    discount_text = ""
     if discount > 0:
         saved_amount = data.get('original_total_syp', total_syp) - total_syp
         discount_text = f"\n🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
-    
-    if auto_executed:
-        await callback.message.edit_text(
-            f"✅ **تم تنفيذ طلبك بنجاح!**\n\n"
-            f"🤖 **تم الإرسال تلقائياً عبر النظام**\n"
-            f"⏳ **جاري التنفيذ...**\n"
-            f"⭐ **نقاط مضافة:** +{points}"
-            f"{discount_text}\n\n"
-            f"🔸 **رقم طلبك:** #{order_id}",
-            parse_mode="Markdown"
-        )
-    elif api_error:
-        await callback.message.edit_text(
-            f"⚠️ **تم إرسال طلبك، لكن حدث خطأ في التنفيذ التلقائي**\n\n"
-            f"❌ **السبب:** {api_error}\n"
-            f"🔄 **سيتم معالجة طلبك يدوياً في أقرب وقت**\n"
-            f"⭐ **نقاط مضافة:** +{points}"
-            f"{discount_text}\n\n"
-            f"🔸 **رقم طلبك:** #{order_id}",
-            parse_mode="Markdown"
-        )
     else:
-        await callback.message.edit_text(
-            f"✅ **تم إرسال طلبك بنجاح!**\n\n"
-            f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
-            f"📋 **مدة تنفيذ الطلب من 1 إلى 15 دقيقة.**\n"
-            f"⭐ **نقاط مضافة:** +{points}"
-            f"{discount_text}\n\n"
-            f"🔸 **رقم طلبك:** #{order_id}",
-            parse_mode="Markdown"
-        )
-        
-        if not auto_executed and not api_error:
-            group_msg_id = await send_order_to_group(bot, order_data)
-            if group_msg_id:
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE orders SET group_message_id = $1 WHERE id = $2",
-                        group_msg_id, order_id
-                    )
+        discount_text = ""
     
+    await callback.message.edit_text(
+        f"✅ **تم إرسال طلبك بنجاح!**\n\n"
+        f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
+        f"📋 **مدة تنفيذ الطلب من 1 إلى 15 دقيقة .**\n"
+        f"⭐ **نقاط مضافة:** +{points}"
+        f"{discount_text}\n\n"
+        f"🔸 **رقم طلبك:** #{order_id}",
+        parse_mode="Markdown"
+    )
+    
+    # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
@@ -1212,15 +1056,16 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     await state.clear()
 
-
 @router.callback_query(F.data == "cancel_order")
 async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """إلغاء الطلب"""
     await state.clear()
     
+    # إرسال رسالة إلغاء مع القائمة الرئيسية
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
     
+    # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(
         text="🏠 القائمة الرئيسية",
