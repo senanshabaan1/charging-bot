@@ -18,7 +18,7 @@ from database.vip import get_user_vip
 from database.points import get_points_per_order
 from database.products import get_product_options, get_product_option, calculate_option_price
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
-from utils.api_client import api_client
+from utils import api_client
 import json
 
 logger = logging.getLogger(__name__)
