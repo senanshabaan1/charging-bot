@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import pytz
 
 from database.users import is_admin_user
+from handlers.keyboards import get_back_inline_keyboard, get_confirmation_keyboard
+from handlers.time_utils import get_damascus_time_now, format_damascus_time
 
 from database.core import (
     get_active_global_offer,
@@ -15,11 +17,9 @@ from database.core import (
     create_global_offer,
     create_deposit_bonus,
     get_all_offers,
-    deactivate_offer,
+    deactivate_offer as deactivate_offer_db,  # ✅ إعادة تسمية الاستيراد
     get_offer_usage_stats
 )
-from handlers.keyboards import get_back_inline_keyboard
-from handlers.time_utils import get_damascus_time_now, format_damascus_time
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -35,6 +35,7 @@ class OfferStates(StatesGroup):
     waiting_bonus_percent = State()
     waiting_min_deposit = State()
     waiting_max_bonus = State()
+    waiting_confirm_delete = State()
 
 
 # ============= القائمة الرئيسية =============
@@ -46,7 +47,6 @@ async def offers_menu(callback: types.CallbackQuery, db_pool):
     
     await callback.answer()
     
-    # جلب العرض النشط الحالي
     active_offer = await get_active_global_offer(db_pool)
     active_bonus = await get_active_deposit_bonus(db_pool)
     
@@ -514,7 +514,7 @@ async def list_global_offers(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     
-    for offer in offers[:10]:
+    for offer in offers:
         status = "🟢" if offer['is_active'] else "🔴"
         end_date = offer['end_date'].strftime('%Y-%m-%d')
         builder.row(types.InlineKeyboardButton(
@@ -557,7 +557,7 @@ async def list_deposit_bonuses(callback: types.CallbackQuery, db_pool):
     
     builder = InlineKeyboardBuilder()
     
-    for bonus in bonuses[:10]:
+    for bonus in bonuses:
         status = "🟢" if bonus['is_active'] else "🔴"
         end_date = bonus['end_date'].strftime('%Y-%m-%d')
         builder.row(types.InlineKeyboardButton(
@@ -598,7 +598,6 @@ async def view_offer_details(callback: types.CallbackQuery, db_pool):
         await callback.answer("العرض غير موجود", show_alert=True)
         return
     
-    # جلب إحصائيات الاستخدام
     stats = await get_offer_usage_stats(db_pool, offer_id, offer_type)
     
     builder = InlineKeyboardBuilder()
@@ -607,6 +606,12 @@ async def view_offer_details(callback: types.CallbackQuery, db_pool):
         builder.row(types.InlineKeyboardButton(
             text="❌ إلغاء تنشيط العرض",
             callback_data=f"deactivate_offer_{offer_id}_{offer_type}"
+        ))
+    else:
+        # ✅ إضافة زر حذف للعروض غير النشطة
+        builder.row(types.InlineKeyboardButton(
+            text="🗑️ حذف العرض نهائياً",
+            callback_data=f"delete_offer_{offer_id}_{offer_type}"
         ))
     
     builder.row(types.InlineKeyboardButton(
@@ -638,9 +643,9 @@ async def view_offer_details(callback: types.CallbackQuery, db_pool):
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
-# ============= إلغاء تنشيط العرض/المكافأة =============
+# ============= إلغاء تنشيط العرض/المكافأة (للعروض النشطة) =============
 @router.callback_query(F.data.startswith("deactivate_offer_"))
-async def deactivate_offer(callback: types.CallbackQuery, db_pool):
+async def handle_deactivate_offer(callback: types.CallbackQuery, db_pool):
     """إلغاء تنشيط عرض/مكافأة"""
     if not await is_admin_user(db_pool, callback.from_user.id):
         return await callback.answer("غير مصرح", show_alert=True)
@@ -649,15 +654,94 @@ async def deactivate_offer(callback: types.CallbackQuery, db_pool):
     offer_id = int(parts[2])
     offer_type = parts[3]
     
-    success = await deactivate_offer(db_pool, offer_id, offer_type)
+    success = await deactivate_offer_db(db_pool, offer_id, offer_type)
     
     if success:
         await callback.answer("✅ تم إلغاء التنشيط", show_alert=True)
         await callback.message.edit_text(
             f"✅ **تم إلغاء تنشيط {'العرض' if offer_type == 'global' else 'المكافأة'} بنجاح**\n\n"
-            f"🔹 لن يتم تطبيقه على الطلبات الجديدة.",
+            f"🔹 لن يتم تطبيقه على الطلبات الجديدة.\n"
+            f"🔹 يمكنك حذفه نهائياً من خلال تفاصيل العرض.",
             reply_markup=get_back_inline_keyboard(f"list_{offer_type}_offers" if offer_type == 'global' else "list_deposit_bonuses"),
             parse_mode="Markdown"
         )
     else:
         await callback.answer("❌ فشل إلغاء التنشيط", show_alert=True)
+
+
+# ============= حذف العرض/المكافأة نهائياً =============
+@router.callback_query(F.data.startswith("delete_offer_"))
+async def handle_delete_offer(callback: types.CallbackQuery, db_pool):
+    """بدء عملية حذف عرض/مكافأة"""
+    if not await is_admin_user(db_pool, callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    parts = callback.data.split("_")
+    offer_id = int(parts[2])
+    offer_type = parts[3]
+    
+    async with db_pool.acquire() as conn:
+        table = 'global_offers' if offer_type == 'global' else 'deposit_bonuses'
+        offer = await conn.fetchrow(f"SELECT * FROM {table} WHERE id = $1", offer_id)
+    
+    if not offer:
+        await callback.answer("العرض غير موجود", show_alert=True)
+        return
+    
+    # جلب إحصائيات الاستخدام
+    stats = await get_offer_usage_stats(db_pool, offer_id, offer_type)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ نعم، احذف نهائياً", callback_data=f"confirm_delete_offer_{offer_id}_{offer_type}"),
+        types.InlineKeyboardButton(text="❌ لا، تراجع", callback_data=f"view_offer_{offer_id}_{offer_type}")
+    )
+    
+    text = f"⚠️ **تأكيد حذف {'العرض' if offer_type == 'global' else 'المكافأة'}**\n\n"
+    text += f"🔹 **الاسم:** {offer['name']}\n"
+    if offer_type == 'global':
+        text += f"📊 **الخصم:** {offer['discount_percent']}%\n"
+    else:
+        text += f"📊 **النسبة:** {offer['bonus_percent']}%\n"
+    text += f"📅 **الفترة:** {offer['start_date'].strftime('%Y-%m-%d')} → {offer['end_date'].strftime('%Y-%m-%d')}\n"
+    text += f"📈 **إحصائيات الاستخدام:**\n"
+    text += f"   • عدد المستخدمين: {stats.get('unique_users', 0)}\n"
+    text += f"   • إجمالي الاستخدامات: {stats.get('total_uses', 0)}\n\n"
+    text += f"⚠️ **هذا الإجراء لا يمكن التراجع عنه!**\n"
+    text += f"سيتم حذف جميع سجلات استخدام هذا {'العرض' if offer_type == 'global' else 'المكافأة'} نهائياً."
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("confirm_delete_offer_"))
+async def confirm_delete_offer(callback: types.CallbackQuery, db_pool):
+    """تأكيد حذف العرض/المكافأة نهائياً"""
+    if not await is_admin_user(db_pool, callback.from_user.id):
+        return await callback.answer("غير مصرح", show_alert=True)
+    
+    parts = callback.data.split("_")
+    offer_id = int(parts[3])
+    offer_type = parts[4]
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # حذف سجلات الاستخدام أولاً
+            await conn.execute(
+                "DELETE FROM offer_usage WHERE offer_id = $1 AND offer_type = $2",
+                offer_id, offer_type
+            )
+            
+            # حذف العرض/المكافأة
+            table = 'global_offers' if offer_type == 'global' else 'deposit_bonuses'
+            await conn.execute(f"DELETE FROM {table} WHERE id = $1", offer_id)
+        
+        await callback.answer("✅ تم الحذف بنجاح", show_alert=True)
+        await callback.message.edit_text(
+            f"✅ **تم حذف {'العرض' if offer_type == 'global' else 'المكافأة'} نهائياً!**\n\n"
+            f"🔹 تم حذف جميع سجلات الاستخدام المرتبطة به.",
+            reply_markup=get_back_inline_keyboard(f"list_{offer_type}_offers" if offer_type == 'global' else "list_deposit_bonuses"),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"❌ خطأ في حذف العرض: {e}")
+        await callback.answer(f"❌ فشل الحذف: {str(e)}", show_alert=True)
