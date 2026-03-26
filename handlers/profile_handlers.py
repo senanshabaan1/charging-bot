@@ -6,12 +6,12 @@ import logging
 from handlers.time_utils import get_damascus_time_now
 from handlers.keyboards import get_main_menu_keyboard
 from database.points import get_redemption_rate, create_redemption_request
-from database.core import get_exchange_rate  # ✅ استيراد الدالة المعدلة
+from database.core import get_exchange_rate
 from database.vip import get_next_vip_level
 from database.referrals import generate_referral_code
 from database.users import get_user_profile, get_user_points 
 from utils import format_datetime, is_admin
-from cache import cached, clear_cache
+from cache import cached, clear_cache  # ✅ استيراد الكاش
 
 logger = logging.getLogger(__name__)
 router = Router(name="profile")
@@ -100,13 +100,11 @@ async def get_cached_user_operations(db_pool, user_id):
             'orders_total': orders_total
         }
 
-
 # ========== الملف الشخصي (للرسائل العادية) ==========
 @router.message(F.text == "👤 حسابي")
 async def my_account_message(message: types.Message, db_pool):
     """عرض الملف الشخصي عند الضغط على الزر العادي"""
     await show_profile(message, message.from_user.id, db_pool)
-
 
 # ========== الملف الشخصي (للكيبورد الإنلاين) ==========
 @router.callback_query(F.data == "show_profile")
@@ -115,11 +113,11 @@ async def my_account_callback(callback: types.CallbackQuery, db_pool):
     await callback.answer()
     await show_profile(callback.message, callback.from_user.id, db_pool)
 
-
 # ========== الدالة الموحدة لعرض الملف الشخصي ==========
 async def show_profile(message: types.Message, user_id: int, db_pool):
     """عرض الملف الشخصي مع أزرار النقاط وسجل العمليات وتفاصيل VIP"""
     
+    # ✅ استخدام الكاش
     user_data = await get_cached_user_basic(db_pool, user_id)
     
     if user_data and user_data['is_banned']:
@@ -152,32 +150,36 @@ async def show_profile(message: types.Message, user_id: int, db_pool):
             WHERE user_id = $1 AND status = 'completed'
         ''', user_id) or 0
         
+        # تحديث total_spent إذا كان مختلفاً
         if total_spent != total_spent_from_orders:
             await conn.execute(
                 "UPDATE users SET total_spent = $1 WHERE user_id = $2",
                 total_spent_from_orders, user_id
             )
             total_spent = total_spent_from_orders
+            # ✅ مسح الكاش بعد التحديث
             clear_cache(f"user_basic:{user_id}")
     
+    # ✅ استخدام الكاش لإحصائيات النقاط
     points_stats = await get_cached_points_stats(db_pool, user_id)
     points_from_referrals = points_stats['from_referrals']
     points_from_orders = points_stats['from_orders']
     
+    # ✅ استخدام الكاش لإحصائيات العمليات
     operations_stats = await get_cached_user_operations(db_pool, user_id)
     deposits_count = operations_stats['deposits_count']
     orders_count = operations_stats['orders_count']
     
-    # ✅ استخدام سعر النقاط المنفصل
-    points_rate = await get_exchange_rate(db_pool, 'points')
+    # حساب قيمة النقاط بالسعر الحالي
     redemption_rate = await get_redemption_rate(db_pool)
+    exchange_rate = await get_exchange_rate(db_pool)
     
-    # قيمة النقاط (باستخدام سعر النقاط)
+    # قيمة النقاط
     points_value_usd = (points / redemption_rate) if redemption_rate > 0 else 0
-    points_value_syp = points_value_usd * points_rate
+    points_value_syp = points_value_usd * exchange_rate
     
-    # قيمة 1 دولار بالليرة (باستخدام سعر النقاط)
-    base_syp = 1 * points_rate
+    # قيمة 1 دولار بالليرة
+    base_syp = 1 * exchange_rate
     
     # تحديد أيقونة VIP
     vip_icons = ["⚪", "🔵", "🟣", "🟡"]
@@ -193,6 +195,7 @@ async def show_profile(message: types.Message, user_id: int, db_pool):
     else:
         progress_text = "✨ وصلت لأعلى مستوى! (VIP 3)"
     
+    # إنشاء أزرار إنلاين
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="🔗 رابط الإحالة", callback_data="show_referral"),
@@ -206,13 +209,13 @@ async def show_profile(message: types.Message, user_id: int, db_pool):
         types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="back_to_main")
     )
     
+    # رسالة الملف الشخصي مع تفاصيل VIP - بصيغة HTML
     profile_text = (
         f"👤 <b>الملف الشخصي</b>\n\n"
         f"🆔 <b>الآيدي:</b> <code>{user_id}</code>\n"
         f"👤 <b>الاسم:</b> {first_name or message.from_user.full_name}\n"
         f"📅 <b>اليوزر:</b> @{username or message.from_user.username or 'غير متوفر'}\n"
         f"💰 <b>الرصيد:</b> {balance:,.0f} ل.س\n"
-        f"⭐ <b>النقاط:</b> {points} (≈ {points_value_syp:,.0f} ل.س)\n"
         f"👑 <b>نظام VIP:</b>\n"
         f"• مستواك: {vip_icon} VIP {vip_level}\n"
         f"• خصمك الحالي: {vip_discount}%\n"
@@ -221,6 +224,7 @@ async def show_profile(message: types.Message, user_id: int, db_pool):
         f"🔹 <b>اختر من الأزرار أدناه:</b>"
     )
     
+    # محاولة تعديل الرسالة إذا كانت موجودة، أو إرسال رسالة جديدة
     try:
         await message.edit_text(
             profile_text,
@@ -234,15 +238,14 @@ async def show_profile(message: types.Message, user_id: int, db_pool):
             parse_mode="HTML"
         )
 
-
 # ========== رابط الإحالة ==========
 @router.callback_query(F.data == "show_referral")
 async def show_referral_button(callback: types.CallbackQuery, db_pool):
-    """عرض رابط الإحالة مع سعر النقاط الحالي"""
+    """عرض رابط الإحالة مع سعر الصرف الحالي"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
-    # ✅ استخدام سعر النقاط
-    points_rate = await get_exchange_rate(db_pool, 'points')
+    exchange_rate = await get_exchange_rate(db_pool)
     
     async with db_pool.acquire() as conn:
         try:
@@ -255,11 +258,13 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
     
     if not code:
         code = await generate_referral_code(db_pool, callback.from_user.id)
+        # ✅ مسح الكاش بعد تحديث الكود
         clear_cache(f"user_basic:{callback.from_user.id}")
     
     bot_username = (await callback.bot.me()).username
     link = f"https://t.me/{bot_username}?start={code}"
     
+    # ✅ استخدام الكاش لإحصائيات الإحالة
     async with db_pool.acquire() as conn:
         referrals_count = await conn.fetchval(
             "SELECT COUNT(*) FROM users WHERE referred_by = $1",
@@ -274,7 +279,7 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         except:
             points_from_referrals = 0
     
-    base_syp = 1 * points_rate
+    base_syp = 1 * exchange_rate
     
     text = (
         f"🔗 رابط الإحالة الخاص بك\n\n"
@@ -284,38 +289,40 @@ async def show_referral_button(callback: types.CallbackQuery, db_pool):
         f"• النقاط المكتسبة: {points_from_referrals}\n\n"
         f"🎁 مميزات الإحالة:\n"
         f"• 1 نقطة لكل مشترك جديد\n"
-        f"• {base_syp:,.0f} ل.س = 1$ (سعر النقاط الحالي)\n"
         f"شارك الرابط مع أصدقائك!"
     )
     
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     
+    # ✅ تعديل النص والكيبورد بطلب واحد
     await callback.message.edit_text(
         text,
         reply_markup=builder.as_markup()
     )
 
-
 # ========== قائمة استرداد النقاط ==========
 @router.callback_query(F.data == "redeem_points_menu")
 async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
-    """قائمة استرداد النقاط - استخدام سعر النقاط"""
+    """قائمة استرداد النقاط"""
     
+    # 1. جلب البيانات أولاً قبل الرد على الـ callback
     points = await get_cached_user_points(db_pool, callback.from_user.id)
     redemption_rate = await get_redemption_rate(db_pool)
     
+    # 2. التحقق من النقاط
     if points < redemption_rate:
+        # هنا نرسل التنبيه وننهي الدالة
         return await callback.answer(
             f"❌ عذراً! تحتاج {redemption_rate} نقطة على الأقل للاسترداد.\nلديك {points} نقطة فقط.", 
             show_alert=True
         )
     
+    # 3. إذا كانت نقاطه كافية، "نطفي" الزر ونكمل العمل
     await callback.answer()
     
-    # ✅ استخدام سعر النقاط المنفصل
-    points_rate = await get_exchange_rate(db_pool, 'points')
-    base_syp = 1 * points_rate
+    exchange_rate = await get_exchange_rate(db_pool)
+    base_syp = 1 * exchange_rate
     max_redemptions = min(points // redemption_rate, 20)
     
     builder = InlineKeyboardBuilder()
@@ -325,7 +332,7 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
         
         builder.row(types.InlineKeyboardButton(
             text=f"{i}$ ({syp_amount:.0f} ل.س) - {points_needed} نقطة",
-            callback_data=f"redeem_{points_needed}_{syp_amount:.0f}_{points_rate}"
+            callback_data=f"redeem_{points_needed}_{syp_amount:.0f}_{exchange_rate}"
         ))
     
     builder.row(types.InlineKeyboardButton(
@@ -343,23 +350,24 @@ async def redeem_points_menu(callback: types.CallbackQuery, db_pool):
     await callback.message.edit_text(
         text,
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
-    )
-
+        parse_mode="Markdown" # لضمان ظهور النص الغامق بشكل صحيح
+        )
+    
 
 # ========== معالجة طلب الاسترداد ==========
 @router.callback_query(F.data.startswith("redeem_"))
 async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
     """معالجة طلب الاسترداد"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     try:
         parts = callback.data.split("_")
         points = int(parts[1])
         amount_syp = float(parts[2])
-        points_rate = float(parts[3]) if len(parts) > 3 else None
+        exchange_rate = float(parts[3]) if len(parts) > 3 else None
         
-        amount_usd = amount_syp / points_rate if points_rate else points / 100
+        amount_usd = amount_syp / exchange_rate if exchange_rate else points / 100
         
         request_id, error = await create_redemption_request(
             db_pool, 
@@ -373,6 +381,7 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
         if error:
             await callback.answer(f"❌ {error}", show_alert=True)
         else:
+            # ✅ مسح الكاش بعد إنشاء طلب استرداد
             clear_cache(f"user_points:{callback.from_user.id}")
             clear_cache(f"user_basic:{callback.from_user.id}")
             
@@ -382,7 +391,7 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 f"✅ **تم إرسال طلب الاسترداد بنجاح!**\n\n"
                 f"⭐ النقاط: {points}\n"
                 f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
-                f"💵 سعر النقاط: {points_rate:.0f} ل.س = 1$\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س = 1$\n"
                 f"🕐 وقت الطلب: {current_time} (دمشق)\n\n"
                 f"⏳ في انتظار موافقة الإدارة.\n"
                 f"📋 رقم الطلب: #{request_id}"
@@ -396,7 +405,7 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
                 f"🆔 الآيدي: `{callback.from_user.id}`\n"
                 f"⭐ النقاط: {points}\n"
                 f"💰 المبلغ: {amount_syp:.0f} ل.س\n"
-                f"💵 سعر النقاط: {points_rate:.0f} ل.س\n"
+                f"💵 سعر الصرف: {exchange_rate:.0f} ل.س\n"
                 f"🕐 وقت الطلب: {current_time} (دمشق)\n"
                 f"📋 رقم الطلب: #{request_id}"
             )
@@ -411,7 +420,6 @@ async def process_redeem_from_menu(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         await callback.answer(f"❌ خطأ: {str(e)}", show_alert=True)
 
-
 # ========== العودة للملف الشخصي ==========
 @router.callback_query(F.data == "back_to_account")
 async def back_to_account(callback: types.CallbackQuery, db_pool):
@@ -419,13 +427,14 @@ async def back_to_account(callback: types.CallbackQuery, db_pool):
     await callback.answer()
     await show_profile(callback.message, callback.from_user.id, db_pool)
 
-
 # ========== رصيد النقاط ==========
 @router.callback_query(F.data == "show_points_balance")
 async def show_points_balance(callback: types.CallbackQuery, db_pool):
-    """عرض رصيد النقاط وتفاصيله - استخدام سعر النقاط"""
+    """عرض رصيد النقاط وتفاصيله"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
+    # ✅ استخدام الكاش
     current_points = await get_cached_user_points(db_pool, callback.from_user.id)
     points_stats = await get_cached_points_stats(db_pool, callback.from_user.id)
     
@@ -433,19 +442,17 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
     points_from_orders = points_stats['from_orders']
     points_redeemed = points_stats['redeemed']
     
-    # ✅ استخدام سعر النقاط المنفصل
-    points_rate = await get_exchange_rate(db_pool, 'points')
+    exchange_rate = await get_exchange_rate(db_pool)
     redemption_rate = await get_redemption_rate(db_pool)
     
     points_value_usd = (current_points / redemption_rate) if redemption_rate > 0 else 0
-    points_value_syp = points_value_usd * points_rate
-    base_syp = 1 * points_rate
+    points_value_syp = points_value_usd * exchange_rate
+    base_syp = 1 * exchange_rate
     
     text = (
         f"⭐ **رصيد النقاط**\n\n"
         f"**نقاطك الحالية:** {current_points}\n"
-        f"💰 **القيمة:** {points_value_syp:.0f} ل.س (${points_value_usd:.2f})\n"
-        f"📊 **سعر الصرف:** {points_rate:,.0f} ل.س = 1$\n\n"
+        f"💰 **القيمة:** {points_value_syp:.0f} ل.س (${points_value_usd:.2f})\n\n"
         f"📊 **تفاصيل النقاط:**\n"
         f"• من الإحالات: {points_from_referrals} نقطة\n"
         f"• من المشتريات: {points_from_orders} نقطة\n"
@@ -456,17 +463,18 @@ async def show_points_balance(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     
+    # ✅ تعديل النص والكيبورد بطلب واحد
     await callback.message.edit_text(
         text,
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
 
-
 # ========== سجل العمليات ==========
 @router.callback_query(F.data == "transactions_history")
 async def transactions_history(callback: types.CallbackQuery, db_pool):
     """عرض سجل العمليات (آخر 3 شحن + آخر 3 شراء)"""
+    # ✅ إطفاء الزر فوراً
     await callback.answer()
     
     user_id = callback.from_user.id
@@ -489,12 +497,14 @@ async def transactions_history(callback: types.CallbackQuery, db_pool):
             LIMIT 3
         ''', user_id)
         
+        # ✅ استخدام الكاش للإحصائيات
         operations_stats = await get_cached_user_operations(db_pool, user_id)
         deposits_count = operations_stats['deposits_count']
         orders_count = operations_stats['orders_count']
         deposits_total = operations_stats['deposits_total']
         orders_total = operations_stats['orders_total']
     
+    # ✅ استخدام HTML بدلاً من Markdown
     text = (
         f"📊 <b>سجل العمليات</b>\n\n"
         f"<b>إحصائيات سريعة:</b>\n"
@@ -525,6 +535,7 @@ async def transactions_history(callback: types.CallbackQuery, db_pool):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع للحساب", callback_data="back_to_account"))
     
+    # ✅ تعديل النص والكيبورد بطلب واحد
     await callback.message.edit_text(
         text,
         reply_markup=builder.as_markup(),
