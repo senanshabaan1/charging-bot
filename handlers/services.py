@@ -56,26 +56,29 @@ async def get_cached_categories(db_pool):
         return await conn.fetch("SELECT * FROM categories ORDER BY sort_order")
 
 
+  # handlers/services.py - استبدل دالة send_order_to_group بهذه النسخة
+
 async def send_order_to_group(bot: Bot, order_data: dict):
-    """إرسال طلب التطبيق للمجموعة مع أزرار - للطلبات التي تحتاج موافقة"""
+    """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
     try:
+        # ✅ استخدام HTML بدلاً من Markdown لتجنب مشاكل التنسيق
         caption = (
-            "🆕 **طلب تطبيق جديد**\n\n"
-            f"👤 **المستخدم:** @{order_data['username']}\n"
-            f"🆔 **الآيدي:** `{order_data['user_id']}`\n"
-            f"📱 **التطبيق:** {order_data['app_name']}\n"
+            "🆕 <b>طلب تطبيق جديد</b>\n\n"
+            f"👤 <b>المستخدم:</b> @{order_data['username']}\n"
+            f"🆔 <b>الآيدي:</b> <code>{order_data['user_id']}</code>\n"
+            f"📱 <b>التطبيق:</b> {order_data['app_name']}\n"
         )
         
         if 'variant_name' in order_data:
-            caption += f"📦 **الفئة:** {order_data['variant_name']}\n"
+            caption += f"📦 <b>الفئة:</b> {order_data['variant_name']}\n"
         else:
-            caption += f"📦 **الكمية:** {order_data['quantity']}\n"
+            caption += f"📦 <b>الكمية:</b> {order_data['quantity']}\n"
         
         caption += (
-            f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **الوقت:** {get_formatted_damascus_time()}\n\n"
-            "🔹 **الإجراءات:**"
+            f"💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n"
+            f"🎯 <b>المستهدف:</b> <code>{order_data['target_id']}</code>\n"
+            f"⏰ <b>الوقت:</b> {get_formatted_damascus_time()}\n\n"
+            "<b>🔹 الإجراءات:</b>"
         )
         
         builder = InlineKeyboardBuilder()
@@ -95,7 +98,7 @@ async def send_order_to_group(bot: Bot, order_data: dict):
             chat_id=ORDERS_GROUP,
             text=caption,
             reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
+            parse_mode="HTML"  # ✅ تغيير إلى HTML
         )
         
         logger.info(f"✅ تم إرسال الطلب #{order_data['order_id']} للمجموعة")
@@ -103,34 +106,34 @@ async def send_order_to_group(bot: Bot, order_data: dict):
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال الطلب للمجموعة: {e}")
         return None
-
+# handlers/services.py - استبدل دالة send_auto_fail_notification بهذه النسخة
 
 async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message: str = None):
     """إرسال إشعار للمجموعة عند فشل التنفيذ التلقائي"""
     try:
         caption = (
-            "⚠️ **فشل التنفيذ التلقائي للطلب**\n\n"
-            f"👤 **المستخدم:** @{order_data['username']}\n"
-            f"🆔 **الآيدي:** `{order_data['user_id']}`\n"
-            f"📱 **التطبيق:** {order_data['app_name']}\n"
+            "⚠️ <b>فشل التنفيذ التلقائي للطلب</b>\n\n"
+            f"👤 <b>المستخدم:</b> @{order_data['username']}\n"
+            f"🆔 <b>الآيدي:</b> <code>{order_data['user_id']}</code>\n"
+            f"📱 <b>التطبيق:</b> {order_data['app_name']}\n"
         )
         
         if 'variant_name' in order_data:
-            caption += f"📦 **الفئة:** {order_data['variant_name']}\n"
+            caption += f"📦 <b>الفئة:</b> {order_data['variant_name']}\n"
         else:
-            caption += f"📦 **الكمية:** {order_data['quantity']}\n"
+            caption += f"📦 <b>الكمية:</b> {order_data['quantity']}\n"
         
         caption += (
-            f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **الوقت:** {get_formatted_damascus_time()}\n\n"
+            f"💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n"
+            f"🎯 <b>المستهدف:</b> <code>{order_data['target_id']}</code>\n"
+            f"⏰ <b>الوقت:</b> {get_formatted_damascus_time()}\n\n"
         )
         
         if error_message:
-            caption += f"❌ **سبب الفشل:** {error_message}\n\n"
+            caption += f"❌ <b>سبب الفشل:</b> {error_message}\n\n"
         
         caption += (
-            "🔹 **الإجراءات:**\n"
+            "<b>🔹 الإجراءات:</b>\n"
             "• يجب معالجة هذا الطلب يدوياً\n"
             "• يمكن تنفيذه من خلال لوحة التحكم"
         )
@@ -152,7 +155,7 @@ async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message:
             chat_id=ORDERS_GROUP,
             text=caption,
             reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
+            parse_mode="HTML"  # ✅ تغيير إلى HTML
         )
         
         logger.info(f"⚠️ تم إرسال إشعار فشل الطلب #{order_data['order_id']} للمجموعة")
@@ -160,7 +163,6 @@ async def send_auto_fail_notification(bot: Bot, order_data: dict, error_message:
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال إشعار الفشل: {e}")
         return None
-
 
 async def execute_order_automatically(bot: Bot, db_pool, order_data: dict, order_id: int, total_syp: float, points: int):
     """تنفيذ الطلب تلقائياً عبر API الخارجي"""
