@@ -383,3 +383,12 @@ async def get_deposit_bonus_percent(pool, amount: float = None) -> int:
     """جلب نسبة مكافأة الإيداع (للتوافق)"""
     bonus = await get_active_deposit_bonus(pool, amount)
     return bonus['bonus_percent'] if bonus else 0
+
+# database/core.py - أضف هذه الدوال
+
+async def get_all_offers(pool, offer_type: str = 'global') -> list:
+    """جلب جميع العروض/المكافآت (للتوافق مع admin/offers.py)"""
+    if offer_type == 'global':
+        return await get_all_global_offers(pool)
+    else:
+        return await get_all_deposit_bonuses(pool)
