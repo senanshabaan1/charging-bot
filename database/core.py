@@ -11,21 +11,22 @@ logger = logging.getLogger(__name__)
 DAMASCUS_TZ = pytz.timezone('Asia/Damascus')
 
 
-# ============= دوال مساعدة للتواريخ =============
-def make_aware(dt):
-    """تحويل التاريخ إلى offset-aware باستخدام توقيت دمشق"""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return DAMASCUS_TZ.localize(dt)
-    return dt
+# ============= دوال مساعدة للتواريخ (حل جذري) =============
+def get_current_time_naive():
+    """الحصول على الوقت الحالي بدون منطقة زمنية (offset-naive)"""
+    return datetime.now(DAMASCUS_TZ).replace(tzinfo=None)
 
 
 def make_naive(dt):
-    """تحويل التاريخ إلى offset-naive (إزالة معلومات المنطقة الزمنية)"""
+    """تحويل أي تاريخ إلى offset-naive (بدون منطقة زمنية)"""
     if dt is None:
         return None
-    if dt.tzinfo is not None:
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+        except:
+            return dt
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
         return dt.astimezone(DAMASCUS_TZ).replace(tzinfo=None)
     return dt
 
@@ -170,32 +171,30 @@ async def set_syriatel_numbers(pool, numbers):
         return False
 
 
-# ============= دوال العروض العامة (مع إصلاح التواريخ) =============
+# ============= دوال العروض العامة (بعد الإصلاح الجذري) =============
 
-async def get_db_now(pool):
-    """جلب الوقت الحالي من قاعدة البيانات (offset-aware)"""
+async def get_db_now_naive(pool):
+    """جلب الوقت الحالي من قاعدة البيانات بدون منطقة زمنية"""
     try:
         async with pool.acquire() as conn:
             now = await conn.fetchval("SELECT NOW()")
-            return now
+            return make_naive(now)
     except Exception as e:
         logging.error(f"❌ خطأ في جلب الوقت: {e}")
-        return datetime.now(DAMASCUS_TZ)
+        return get_current_time_naive()
 
 
 async def get_active_global_offer(pool) -> Optional[Dict]:
     """جلب العرض العام النشط حالياً"""
     try:
-        now = await get_db_now(pool)
-        # ✅ تأكد من أن now هو offset-aware
-        now = make_aware(now)
+        now = await get_db_now_naive(pool)
         
         async with pool.acquire() as conn:
             offer = await conn.fetchrow('''
                 SELECT * FROM global_offers 
                 WHERE is_active = TRUE 
-                AND start_date <= $1 
-                AND end_date >= $1
+                AND start_date <= $1::timestamp 
+                AND end_date >= $1::timestamp
                 ORDER BY discount_percent DESC
                 LIMIT 1
             ''', now)
@@ -227,15 +226,14 @@ async def create_global_offer(
 ) -> Optional[int]:
     """إنشاء عرض عام جديد"""
     try:
-        # ✅ تأكد من أن التواريخ offset-aware
-        start_date = make_aware(start_date)
-        end_date = make_aware(end_date)
+        start_date = make_naive(start_date)
+        end_date = make_naive(end_date)
         
         async with pool.acquire() as conn:
             offer_id = await conn.fetchval('''
                 INSERT INTO global_offers 
                 (name, discount_percent, start_date, end_date, description, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                VALUES ($1, $2, $3::timestamp, $4::timestamp, $5, $6)
                 RETURNING id
             ''', name, discount_percent, start_date, end_date, description, created_by)
             logging.info(f"✅ تم إنشاء عرض عام #{offer_id}: {discount_percent}%")
@@ -260,21 +258,19 @@ async def deactivate_global_offer(pool, offer_id: int) -> bool:
         return False
 
 
-# ============= دوال مكافآت الإيداع (مع إصلاح التواريخ) =============
+# ============= دوال مكافآت الإيداع (بعد الإصلاح الجذري) =============
 
 async def get_active_deposit_bonus(pool, deposit_amount: float = None) -> Optional[Dict]:
     """جلب مكافأة الإيداع النشطة حالياً"""
     try:
-        now = await get_db_now(pool)
-        # ✅ تأكد من أن now هو offset-aware
-        now = make_aware(now)
+        now = await get_db_now_naive(pool)
         
         async with pool.acquire() as conn:
             query = '''
                 SELECT * FROM deposit_bonuses 
                 WHERE is_active = TRUE 
-                AND start_date <= $1 
-                AND end_date >= $1
+                AND start_date <= $1::timestamp 
+                AND end_date >= $1::timestamp
             '''
             params = [now]
             
@@ -315,15 +311,14 @@ async def create_deposit_bonus(
 ) -> Optional[int]:
     """إنشاء مكافأة إيداع جديدة"""
     try:
-        # ✅ تأكد من أن التواريخ offset-aware
-        start_date = make_aware(start_date)
-        end_date = make_aware(end_date)
+        start_date = make_naive(start_date)
+        end_date = make_naive(end_date)
         
         async with pool.acquire() as conn:
             bonus_id = await conn.fetchval('''
                 INSERT INTO deposit_bonuses 
                 (name, bonus_percent, start_date, end_date, min_deposit_amount, max_bonus_amount, description, created_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3::timestamp, $4::timestamp, $5, $6, $7, $8)
                 RETURNING id
             ''', name, bonus_percent, start_date, end_date, min_deposit_amount, max_bonus_amount, description, created_by)
             logging.info(f"✅ تم إنشاء مكافأة إيداع #{bonus_id}: {bonus_percent}%")
