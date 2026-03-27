@@ -177,10 +177,7 @@ async def start_dep(callback: types.CallbackQuery, state: FSMContext, db_pool):
     else:
         msg += "أدخل المبلغ بالدولار (مثال: 5):"
     
-    await callback.message.answer(
-        msg,
-        
-    )
+    await callback.message.answer(msg)
 
 # ============= استلام المبلغ =============
 
@@ -216,23 +213,20 @@ async def get_amount(message: types.Message, state: FSMContext):
         if amt <= 0:
             return await message.answer(
                 "⚠️ المبلغ يجب أن يكون أكبر من 0.\n"
-                "الرجاء إدخال مبلغ صحيح:",
-                
+                "الرجاء إدخال مبلغ صحيح:"
             )
         
         # التحقق من الحد الأدنى للمبلغ
         if amt < 1:
             return await message.answer(
                 "⚠️ الحد الأدنى للمبلغ هو 1.\n"
-                "الرجاء إدخال مبلغ أكبر:",
-                
+                "الرجاء إدخال مبلغ أكبر:"
             )
         
     except ValueError:
         return await message.answer(
             "⚠️ خطأ في الصيغة!\n"
-            "الرجاء إدخال رقم صحيح (مثال: 500 أو 50.5):",
-            
+            "الرجاء إدخال رقم صحيح (مثال: 500 أو 50.5):"
         )
     
     data = await state.get_data()
@@ -252,7 +246,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         display_amount=display_amount
     )
     
-    # عرض تعليمات التحويل حسب الطريقة
+    # عرض تعليمات التحويل حسب الطريقة (HTML)
     if data['method'] == "m_syr":
         # ✅ جلب الأرقام المحدثة من config مباشرة
         syriatel_nums = get_current_syriatel_numbers()
@@ -277,7 +271,7 @@ async def get_amount(message: types.Message, state: FSMContext):
         
         await message.answer(
             f"📤 <b>تحويل {display_amount}</b>\n\n"
-            f"💳 <u><b>يرحى الإرسال إلى العنوان التالي ({currency}):</b></u>\n\n"
+            f"💳 <u><b>يرجى الإرسال إلى العنوان التالي ({currency}):</b></u>\n\n"
             f"<code>{data['wallet']}</code>\n\n"
             f"✅ <b>بعد التحويل، أرسل رقم العملية:</b>\n\n"
             f"💡 <i>ملاحظة: اضغط على الرقم لنسخه</i>",
@@ -299,29 +293,29 @@ async def get_amount(message: types.Message, state: FSMContext):
 # ============= إرسال الطلب للمجموعة =============
 
 async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id: str = None):
-    """إرسال طلب الشحن للمجموعة مع أزرار - بتوقيت دمشق"""
+    """إرسال طلب الشحن للمجموعة مع أزرار - بتوقيت دمشق (HTML)"""
     try:
-        user_info = f"👤 المستخدم: @{data.get('username', 'غير معروف')}\n"
-        user_info += f"🆔 الآيدي: `{data['user_id']}`\n"
+        user_info = f"👤 <b>المستخدم:</b> @{data.get('username', 'غير معروف')}\n"
+        user_info += f"🆔 <b>الآيدي:</b> <code>{data['user_id']}</code>\n"
         
-        amount_info = f"💰 المبلغ: {data['display_amount']}\n"
-        amount_info += f"💸 المبلغ بالليرة: {data['amount_syp']:,.0f} ل.س\n"
+        amount_info = f"💰 <b>المبلغ:</b> {data['display_amount']}\n"
+        amount_info += f"💸 <b>المبلغ بالليرة:</b> {data['amount_syp']:,.0f} ل.س\n"
         
-        method_info = f"💳 الطريقة: {data['method_name']}\n"
+        method_info = f"💳 <b>الطريقة:</b> {data['method_name']}\n"
         
-        tx_info_text = f"🔢 رقم العملية: `{tx_info}`\n" if tx_info else ""
+        tx_info_text = f"🔢 <b>رقم العملية:</b> <code>{tx_info}</code>\n" if tx_info else ""
         
         # استخدام توقيت دمشق
         current_time = get_formatted_damascus_time()
         
         caption = (
-            "🆕 **طلب شحن جديد**\n\n"
+            "🆕 <b>طلب شحن جديد</b>\n\n"
             f"{user_info}"
             f"{amount_info}"
             f"{method_info}"
             f"{tx_info_text}"
-            f"⏰ الوقت: {current_time}\n\n"
-            "🔹 **الإجراءات:**"
+            f"⏰ <b>الوقت:</b> {current_time}\n\n"
+            "🔹 <b>الإجراءات:</b>"
         )
         
         # أزرار الموافقة والرفض
@@ -338,20 +332,21 @@ async def send_to_group(bot: Bot, data: dict, tx_info: str = None, photo_file_id
             width=2
         )
         
+        # ✅ استخدام HTML بدلاً من Markdown
         if photo_file_id:
             msg = await bot.send_photo(
                 chat_id=config.DEPOSIT_GROUP,
                 photo=photo_file_id,
                 caption=caption,
                 reply_markup=builder.as_markup(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         else:
             msg = await bot.send_message(
                 chat_id=config.DEPOSIT_GROUP,
                 text=caption,
                 reply_markup=builder.as_markup(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         
         logger.info(f"✅ تم إرسال طلب الشحن للمجموعة، message_id: {msg.message_id}")
@@ -383,22 +378,22 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
         clean_tx = tx.replace(' ', '').replace('-', '')
         if not clean_tx.isdigit() or len(clean_tx) < 12:
             return await message.answer(
-                "❌ **خطأ:** رقم عملية سيرياتل كاش يجب أن يكون 12 رقم على الأقل.\n"
+                "❌ <b>خطأ:</b> رقم عملية سيرياتل كاش يجب أن يكون 12 رقم على الأقل.\n"
                 "📝 يرجى إدخال رقم صحيح:",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
     
     # حفظ رقم العملية في الـ state
     await state.update_data(tx_info=tx)
     
-    # تجهيز رسالة التأكيد
+    # تجهيز رسالة التأكيد (HTML)
     data = await state.get_data()
     
     text = (
-        f"📋 **تأكيد طلب الشحن**\n\n"
-        f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"💳 **طريقة الدفع:** {data['method_name']}\n"
-        f"🔢 **رقم العملية:** `{tx}`\n\n"
+        f"📋 <b>تأكيد طلب الشحن</b>\n\n"
+        f"💰 <b>المبلغ:</b> {data['display_amount']}\n"
+        f"💳 <b>طريقة الدفع:</b> {data['method_name']}\n"
+        f"🔢 <b>رقم العملية:</b> <code>{tx}</code>\n\n"
         f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
     )
     
@@ -412,7 +407,7 @@ async def process_tx(message: types.Message, state: FSMContext, bot: Bot, db_poo
     await message.answer(
         text,
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await state.set_state(DepStates.confirm)
 
@@ -477,14 +472,14 @@ async def confirm_deposit(callback: types.CallbackQuery, state: FSMContext, bot:
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    # ✅ تعديل رسالة التأكيد
+    # ✅ تعديل رسالة التأكيد (HTML)
     await callback.message.edit_text(
-        f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
-        f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"🔢 **رقم الطلب:** #{deposit_id}\n"
-        f"⏳ **بانتظار موافقة الإدارة.**\n"
-        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
-        parse_mode="Markdown"
+        f"✅ <b>تم إرسال طلب الشحن بنجاح!</b>\n\n"
+        f"💰 <b>المبلغ:</b> {data['display_amount']}\n"
+        f"🔢 <b>رقم الطلب:</b> #{deposit_id}\n"
+        f"⏳ <b>بانتظار موافقة الإدارة.</b>\n"
+        f"📋 <b>الوقت المتوقع: 5-10 دقائق.</b>",
+        parse_mode="HTML"
     )
     
     # إرسال رسالة منفصلة مع القائمة الرئيسية
@@ -505,8 +500,8 @@ async def cancel_deposit(callback: types.CallbackQuery, state: FSMContext, db_po
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
     await callback.message.edit_text(
-        "❌ **تم إلغاء طلب الشحن.**",
-        parse_mode="Markdown"
+        "❌ <b>تم إلغاء طلب الشحن.</b>",
+        parse_mode="HTML"
     )
     
     await callback.message.answer(
@@ -535,14 +530,14 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
     # حفظ معلومات الصورة في الـ state
     await state.update_data(photo_file_id=photo_file_id)
     
-    # تجهيز رسالة التأكيد
+    # تجهيز رسالة التأكيد (HTML)
     data = await state.get_data()
     
     text = (
-        f"📋 **تأكيد طلب الشحن**\n\n"
-        f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"💳 **طريقة الدفع:** {data['method_name']}\n"
-        f"🖼️ **تم استلام لقطة الشاشة**\n\n"
+        f"📋 <b>تأكيد طلب الشحن</b>\n\n"
+        f"💰 <b>المبلغ:</b> {data['display_amount']}\n"
+        f"💳 <b>طريقة الدفع:</b> {data['method_name']}\n"
+        f"🖼️ <b>تم استلام لقطة الشاشة</b>\n\n"
         f"✅ هل أنت متأكد من إرسال طلب الشحن؟"
     )
     
@@ -556,7 +551,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot, db_
     await message.answer(
         text,
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await state.set_state(DepStates.confirm)
 
@@ -622,14 +617,14 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
     
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     
-    # ✅ تعديل رسالة التأكيد
+    # ✅ تعديل رسالة التأكيد (HTML)
     await callback.message.edit_text(
-        f"✅ **تم إرسال طلب الشحن بنجاح!**\n\n"
-        f"💰 **المبلغ:** {data['display_amount']}\n"
-        f"🔢 **رقم الطلب:** #{deposit_id}\n"
-        f"⏳ **بانتظار موافقة الإدارة.**\n"
-        f"📋 **الوقت المتوقع: 5-10 دقائق.**",
-        parse_mode="Markdown"
+        f"✅ <b>تم إرسال طلب الشحن بنجاح!</b>\n\n"
+        f"💰 <b>المبلغ:</b> {data['display_amount']}\n"
+        f"🔢 <b>رقم الطلب:</b> #{deposit_id}\n"
+        f"⏳ <b>بانتظار موافقة الإدارة.</b>\n"
+        f"📋 <b>الوقت المتوقع: 5-10 دقائق.</b>",
+        parse_mode="HTML"
     )
     
     # إرسال رسالة منفصلة مع القائمة الرئيسية
@@ -646,7 +641,6 @@ async def confirm_deposit_photo(callback: types.CallbackQuery, state: FSMContext
 async def invalid_photo(message: types.Message):
     """معالج إذا أرسل المستخدم نص بدل صورة"""
     await message.answer(
-        "❌ **خطأ:** يرجى إرسال صورة للتحويل (لقطة شاشة).\n",
-        
-        parse_mode="Markdown"
+        "❌ <b>خطأ:</b> يرجى إرسال صورة للتحويل (لقطة شاشة).",
+        parse_mode="HTML"
     )
