@@ -1,4 +1,4 @@
-# handlers/services.py - التعديلات النهائية
+# handlers/services.py - التعديلات النهائية (باستخدام HTML)
 
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
@@ -80,25 +80,25 @@ async def back_to_main_callback(callback: types.CallbackQuery, state: FSMContext
     )
 
 async def send_order_to_group(bot: Bot, order_data: dict):
-    """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق"""
+    """إرسال طلب التطبيق للمجموعة مع أزرار - بتوقيت دمشق (HTML)"""
     try:
         caption = (
-            "🆕 **طلب تطبيق جديد**\n\n"
-            f"👤 **المستخدم:** @{order_data['username']}\n"
-            f"🆔 **الآيدي:** `{order_data['user_id']}`\n"
-            f"📱 **التطبيق:** {order_data['app_name']}\n"
+            "🆕 <b>طلب تطبيق جديد</b>\n\n"
+            f"👤 <b>المستخدم:</b> @{order_data['username']}\n"
+            f"🆔 <b>الآيدي:</b> <code>{order_data['user_id']}</code>\n"
+            f"📱 <b>التطبيق:</b> {order_data['app_name']}\n"
         )
         
         if 'variant_name' in order_data:
-            caption += f"📦 **الفئة:** {order_data['variant_name']}\n"
+            caption += f"📦 <b>الفئة:</b> {order_data['variant_name']}\n"
         else:
-            caption += f"📦 **الكمية:** {order_data['quantity']}\n"
+            caption += f"📦 <b>الكمية:</b> {order_data['quantity']}\n"
         
         caption += (
-            f"💰 **المبلغ:** {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 **المستهدف:** `{order_data['target_id']}`\n"
-            f"⏰ **الوقت:** {get_formatted_damascus_time()}\n\n"
-            "🔹 **الإجراءات:**"
+            f"💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n"
+            f"🎯 <b>المستهدف:</b> <code>{order_data['target_id']}</code>\n"
+            f"⏰ <b>الوقت:</b> {get_formatted_damascus_time()}\n\n"
+            "🔹 <b>الإجراءات:</b>"
         )
         
         # أزرار للموافقة/الرفض
@@ -115,11 +115,12 @@ async def send_order_to_group(bot: Bot, order_data: dict):
             width=2
         )
         
+        # ✅ استخدام HTML بدلاً من Markdown
         msg = await bot.send_message(
             chat_id=ORDERS_GROUP,
             text=caption,
             reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
         logger.info(f"✅ تم إرسال الطلب #{order_data['order_id']} للمجموعة")
@@ -419,9 +420,9 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             f"🏷 الخدمة: {app_dict['name']}\n"
             f"📦 أقل كمية: {app_dict['min_units']}\n"
             f"{price_text}\n\n"
-            f"**الرجاء إدخال الكمية المطلوبة**:",
+            f"<b>الرجاء إدخال الكمية المطلوبة</b>:",
             reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
 @router.callback_query(F.data.startswith("disabled_option_"))
@@ -547,20 +548,20 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
         price_message = f"💰 المبلغ الإجمالي: {total_syp:,.0f} ل.س"
     
     app_name = app['name'].lower()
-    instructions = " **الرجاء إرسال الــ 🆔**:"
+    instructions = " <b>الرجاء إرسال الــ 🆔</b>:"
     
     if any(x in app_name for x in ['pubg 1', 'pubg 2']):
-        instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
+        instructions = "🎯 <b>الرجاء إرسال 🆔 اللاعب (PUBG)</b>:"
     elif 'free fire' in app_name:
-        instructions = "🔥 **الرجاء إرسال 🆔 اللاعب** (Free Fire):"
+        instructions = "🔥 <b>الرجاء إرسال 🆔 اللاعب</b> (Free Fire):"
     elif 'clash' in app_name:
-        instructions = "⚔️ **الرجاء إرسال إيميل Supercell ID:**"
+        instructions = "⚔️ <b>الرجاء إرسال إيميل Supercell ID</b>:"
     elif 'instagram' in app_name:
-        instructions = "📸 **الرجاء إرسال اسم المستخدم على Instagram:**"
+        instructions = "📸 <b>الرجاء إرسال اسم المستخدم على Instagram</b>:"
     elif any(x in app_name for x in ['TELEGRAM', '⭐ telegram']):
-        instructions = "الرجاء إرسال معرف تيليجرام (🪪 username) :"
+        instructions = "<b>الرجاء إرسال معرف تيليجرام (🪪 username)</b> :"
     elif 'netflix' in app_name:
-        instructions = "🎬 **الرجاء إرسال البريد الإلكتروني للحساب:**"
+        instructions = "🎬 <b>الرجاء إرسال البريد الإلكتروني للحساب</b>:"
     
     # استخدام builder للرجوع
     builder = InlineKeyboardBuilder()
@@ -570,11 +571,11 @@ async def get_qty(message: types.Message, state: FSMContext, db_pool):
     ))
     
     await message.answer(
-        f"✅ **تم قبول الكمية**\n\n"
+        f"✅ <b>تم قبول الكمية</b>\n\n"
         f"{price_message}\n\n"
         f"{instructions}",
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     
     await state.set_state(OrderStates.target_id)
@@ -677,13 +678,13 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     # تعليمات مناسبة حسب نوع التطبيق
     app_name = app['name'].lower()
     if 'pubg 1' in app_name or 'pubg 2' in app_name:
-        instructions = "🎯 الرجاء إرسال 🆔 اللاعب (PUBG):"
+        instructions = "🎯 <b>الرجاء إرسال 🆔 اللاعب (PUBG)</b>:"
     elif 'telegram' in app_name:
-        instructions = " الرجاء إرسال معرف تيليجرام ( 🪪 username):"
+        instructions = "<b>الرجاء إرسال معرف تيليجرام (🪪 username)</b>:"
     elif 'instagram' in app_name or 'tiktok' in app_name:
-        instructions = "📸 **يرجى إرسال اسم المستخدم:**"
+        instructions = "📸 <b>يرجى إرسال اسم المستخدم</b>:"
     else:
-        instructions = " **يرجى إرسال الــ 🆔:**"
+        instructions = "<b>يرجى إرسال الــ 🆔</b>:"
     
     # ✅ زر الرجوع للخيارات السابقة
     builder = InlineKeyboardBuilder()
@@ -694,7 +695,8 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     
     await callback.message.edit_text(
         f"{details}{instructions}",
-        reply_markup=builder.as_markup()
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
     await state.set_state(OrderStates.target_id)
 
@@ -889,33 +891,33 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     app_name = data['app']['name'].lower()
     warnings = ""
     if 'pubg' in app_name or 'free fire' in app_name:
-        warnings = "\n⚠️ **تنبيه:** غير مسؤولين عن أي 🆔 خاطئ. تأكد من صحة الـ 🆔 قبل الإرسال.\n"
+        warnings = "\n⚠️ <b>تنبيه:</b> غير مسؤولين عن أي 🆔 خاطئ. تأكد من صحة الـ 🆔 قبل الإرسال.\n"
     elif 'clash' in app_name:
-        warnings = "\n⚠️ **تنبيه:** تأكد من صحة إيميل Supercell ID الخاص بك.\n"
+        warnings = "\n⚠️ <b>تنبيه:</b> تأكد من صحة إيميل Supercell ID الخاص بك.\n"
     
     msg = (
-        f"📋 **تفاصيل الطلب:**\n\n"
-        f"🔹 **التطبيق:** {data['app']['name']}\n"
+        f"📋 <b>تفاصيل الطلب:</b>\n\n"
+        f"🔹 <b>التطبيق:</b> {data['app']['name']}\n"
     )
     
     if 'variant' in data:
-        msg += f"🔹 **الفئة:** {data['variant']['name']}\n"
+        msg += f"🔹 <b>الفئة:</b> {data['variant']['name']}\n"
     else:
-        msg += f"🔹 **الكمية:** {data['qty']}\n"
+        msg += f"🔹 <b>الكمية:</b> {data['qty']}\n"
     
     msg += (
-        f"🔹 **الـ 🆔:** `{target_id}`\n"
+        f"🔹 <b>الـ 🆔:</b> <code>{target_id}</code>\n"
         f"{price_detail}\n"
         f"{warnings}\n"
-        f"💳 **سيتم خصم المبلغ من رصيدك.**\n"
-        f"⏳ **بعد التأكيد، انتظر موافقة الإدارة.**"
+        f"💳 <b>سيتم خصم المبلغ من رصيدك.</b>\n"
+        f"⏳ <b>بعد التأكيد، انتظر موافقة الإدارة.</b>"
     )
     
     # إرسال رسالة التأكيد بدون كيبورد سفلي
     await message.answer(
         msg,
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await state.set_state(OrderStates.confirm)
     logger.info(f"✅ تم تغيير الحالة إلى confirm للمستخدم {message.from_user.id}")
@@ -1027,18 +1029,18 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     
     if discount > 0:
         saved_amount = data.get('original_total_syp', total_syp) - total_syp
-        discount_text = f"\n🎁 **خصم VIP {vip_level}:** {discount}% (وفرت {saved_amount:,.0f} ل.س)"
+        discount_text = f"\n🎁 <b>خصم VIP {vip_level}:</b> {discount}% (وفرت {saved_amount:,.0f} ل.س)"
     else:
         discount_text = ""
     
     await callback.message.edit_text(
-        f"✅ **تم إرسال طلبك بنجاح!**\n\n"
-        f"⏳ **جاري مراجعة طلبك من قبل الإدارة...**\n"
-        f"📋 **مدة تنفيذ الطلب من 1 إلى 15 دقيقة .**\n"
-        f"⭐ **نقاط مضافة:** +{points}"
+        f"✅ <b>تم إرسال طلبك بنجاح!</b>\n\n"
+        f"⏳ <b>جاري مراجعة طلبك من قبل الإدارة...</b>\n"
+        f"📋 <b>مدة تنفيذ الطلب من 1 إلى 15 دقيقة .</b>\n"
+        f"⭐ <b>نقاط مضافة:</b> +{points}"
         f"{discount_text}\n\n"
-        f"🔸 **رقم طلبك:** #{order_id}",
-        parse_mode="Markdown"
+        f"🔸 <b>رقم طلبك:</b> #{order_id}",
+        parse_mode="HTML"
     )
     
     # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
@@ -1062,8 +1064,7 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool
     await state.clear()
     
     # إرسال رسالة إلغاء مع القائمة الرئيسية
-    is_admin = await is_admin_user(db_pool, callback.from_user.id)
-    await callback.message.edit_text("❌ **تم إلغاء الطلب.**")
+    await callback.message.edit_text("❌ <b>تم إلغاء الطلب.</b>", parse_mode="HTML")
     
     # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
     builder = InlineKeyboardBuilder()
