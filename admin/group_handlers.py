@@ -57,8 +57,8 @@ async def approve_deposit_from_group(callback: types.CallbackQuery, db_pool, bot
                 await callback.message.edit_caption(caption=new_text, reply_markup=None, parse_mode="HTML")
             else:
                 await callback.message.edit_text(text=new_text, reply_markup=None, parse_mode="HTML")
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"⚠️ فشل تحديث الرسالة فوراً: {e}")
         
         # ✅ تنفيذ العملية في الخلفية
         asyncio.create_task(process_deposit_approval(
@@ -114,10 +114,12 @@ async def process_deposit_approval(user_id: int, amount: float, callback: types.
             bot, user_id, amount, new_balance, damascus_time
         ))
         
-        # تحديث رسالة المجموعة (HTML)
+        # تحديث رسالة المجموعة (HTML) - تأكد من عدم وجود علامات HTML غير مغلقة
         try:
             current_text = callback.message.text or callback.message.caption or ""
-            new_text = current_text.replace("⏳ <b>جاري المعالجة...</b>", "") + f"\n\n✅ <b>تمت الموافقة على الطلب</b>\n📅 <b>بتاريخ:</b> {damascus_time}"
+            # إزالة علامة جاري المعالجة إذا وجدت
+            clean_text = current_text.replace("⏳ <b>جاري المعالجة...</b>", "")
+            new_text = f"{clean_text}\n\n✅ <b>تمت الموافقة على الطلب</b>\n📅 <b>بتاريخ:</b> {damascus_time}"
             
             if callback.message.photo:
                 await callback.message.edit_caption(caption=new_text, reply_markup=None, parse_mode="HTML")
@@ -167,8 +169,8 @@ async def reject_deposit_from_group(callback: types.CallbackQuery, bot: Bot, db_
                 await callback.message.edit_caption(caption=new_text, reply_markup=None, parse_mode="HTML")
             else:
                 await callback.message.edit_text(text=new_text, reply_markup=None, parse_mode="HTML")
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"⚠️ فشل تحديث الرسالة: {e}")
         
         # تنفيذ في الخلفية
         asyncio.create_task(process_deposit_rejection(user_id, callback, db_pool, bot))
@@ -198,10 +200,11 @@ async def process_deposit_rejection(user_id: int, callback: types.CallbackQuery,
         # إرسال إشعار للمستخدم
         asyncio.create_task(notify_user_deposit_rejected(bot, user_id, damascus_time))
         
-        # تحديث رسالة المجموعة (HTML)
+        # تحديث رسالة المجموعة (HTML) - تأكد من صحة التنسيق
         try:
             current_text = callback.message.text or callback.message.caption or ""
-            new_text = current_text.replace("⏳ <b>جاري الرفض...</b>", "") + f"\n\n❌ <b>تم رفض الطلب</b>\n📅 <b>بتاريخ:</b> {damascus_time}"
+            clean_text = current_text.replace("⏳ <b>جاري الرفض...</b>", "")
+            new_text = f"{clean_text}\n\n❌ <b>تم رفض الطلب</b>\n📅 <b>بتاريخ:</b> {damascus_time}"
             
             if callback.message.photo:
                 await callback.message.edit_caption(caption=new_text, reply_markup=None, parse_mode="HTML")
@@ -253,10 +256,10 @@ async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: 
         
         # ✅ تحديث الزر فوراً (HTML)
         try:
-            new_text = callback.message.text + "\n\n⏳ <b>جاري المعالجة...</b>"
+            new_text = f"{callback.message.text}\n\n⏳ <b>جاري المعالجة...</b>"
             await callback.message.edit_text(new_text, reply_markup=None, parse_mode="HTML")
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"⚠️ فشل تحديث الرسالة: {e}")
         
         # ✅ تنفيذ العملية في الخلفية
         asyncio.create_task(process_order_approval(order_id, callback, db_pool, bot))
@@ -303,9 +306,12 @@ async def process_order_approval(order_id: int, callback: types.CallbackQuery, d
             width=2
         )
         
-        # تحديث رسالة المجموعة (HTML)
+        # تحديث رسالة المجموعة (HTML) - تأكد من صحة التنسيق
+        clean_text = callback.message.text.replace("⏳ <b>جاري المعالجة...</b>", "")
+        new_text = f"{clean_text}\n\n🔄 <b>جاري التنفيذ...</b>"
+        
         await callback.message.edit_text(
-            callback.message.text.replace("⏳ <b>جاري المعالجة...</b>", "") + "\n\n🔄 <b>جاري التنفيذ...</b>",
+            new_text,
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
@@ -345,13 +351,14 @@ async def reject_order_from_group(callback: types.CallbackQuery, db_pool, bot: B
         
         # تحديث الرسالة فوراً (HTML)
         try:
+            new_text = f"{callback.message.text}\n\n⏳ <b>جاري الرفض...</b>"
             await callback.message.edit_text(
-                callback.message.text + "\n\n⏳ <b>جاري الرفض...</b>",
+                new_text,
                 reply_markup=None,
                 parse_mode="HTML"
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"⚠️ فشل تحديث الرسالة: {e}")
         
         # تنفيذ في الخلفية
         asyncio.create_task(process_order_rejection(order_id, callback, db_pool, bot))
@@ -388,9 +395,12 @@ async def process_order_rejection(order_id: int, callback: types.CallbackQuery, 
                 # ✅ استخدم await بدلاً من create_task (للتجربة)
                 await notify_user_order_rejected(bot, order)
         
-        # تحديث رسالة المجموعة (HTML)
+        # تحديث رسالة المجموعة (HTML) - تأكد من صحة التنسيق
+        clean_text = callback.message.text.replace("⏳ <b>جاري الرفض...</b>", "")
+        new_text = f"{clean_text}\n\n❌ <b>تم رفض الطلب وإعادة الرصيد</b>"
+        
         await callback.message.edit_text(
-            callback.message.text.replace("⏳ <b>جاري الرفض...</b>", "") + "\n\n❌ <b>تم رفض الطلب وإعادة الرصيد</b>",
+            new_text,
             reply_markup=None,
             parse_mode="HTML"
         )
@@ -514,9 +524,12 @@ async def process_order_completion(order_id: int, callback: types.CallbackQuery,
             bot, order, points, user_points, vip_icon, vip_level, vip_discount
         ))
         
-        # تحديث رسالة المجموعة (HTML)
+        # تحديث رسالة المجموعة (HTML) - تأكد من صحة التنسيق
+        clean_text = callback.message.text.replace("🔄 <b>جاري التنفيذ...</b>", "")
+        new_text = f"{clean_text}\n\n✅ <b>تم التنفيذ بنجاح</b>"
+        
         await callback.message.edit_text(
-            callback.message.text.replace("🔄 <b>جاري التنفيذ...</b>", "") + "\n\n✅ <b>تم التنفيذ بنجاح</b>",
+            new_text,
             reply_markup=None,
             parse_mode="HTML"
         )
@@ -556,13 +569,15 @@ async def fail_order_from_group(callback: types.CallbackQuery, db_pool, bot: Bot
         
         # تحديث الرسالة فوراً (HTML)
         try:
+            clean_text = callback.message.text.replace("🔄 <b>جاري التنفيذ...</b>", "")
+            new_text = f"{clean_text}\n\n⏳ <b>جاري معالجة الفشل...</b>"
             await callback.message.edit_text(
-                callback.message.text.replace("🔄 <b>جاري التنفيذ...</b>", "") + "\n\n⏳ <b>جاري معالجة الفشل...</b>",
+                new_text,
                 reply_markup=None,
                 parse_mode="HTML"
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"⚠️ فشل تحديث الرسالة: {e}")
         
         # تنفيذ في الخلفية
         asyncio.create_task(process_order_failure(order_id, callback, db_pool, bot))
@@ -601,9 +616,12 @@ async def process_order_failure(order_id: int, callback: types.CallbackQuery, db
                 # ✅ إرسال إشعار (await مباشر)
                 await notify_user_order_failed(bot, order)
         
-        # تحديث رسالة المجموعة (HTML)
+        # تحديث رسالة المجموعة (HTML) - تأكد من صحة التنسيق
+        clean_text = callback.message.text.replace("⏳ <b>جاري معالجة الفشل...</b>", "")
+        new_text = f"{clean_text}\n\n❌ <b>تعذر التنفيذ وتم إعادة الرصيد</b>"
+        
         await callback.message.edit_text(
-            callback.message.text.replace("🔄 <b>جاري التنفيذ...</b>", "") + "\n\n❌ <b>تعذر التنفيذ وتم إعادة الرصيد</b>",
+            new_text,
             reply_markup=None,
             parse_mode="HTML"
         )
