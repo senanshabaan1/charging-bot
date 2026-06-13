@@ -27,16 +27,10 @@ class MousaCardAPI:
             headers = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
+                'Authorization': f'Bearer {self.api_token}',  # محاولة بهذه الطريقة
             }
             self.session = aiohttp.ClientSession(headers=headers)
         return self.session
-    
-    def _build_url_with_token(self, path: str, include_params: bool = False) -> str:
-        """
-        بناء الرابط مع إضافة التوكن كـ query parameter
-        """
-        separator = '&' if include_params else '?'
-        return f"{self.base_url}{path}{separator}api-token={self.api_token}"
     
     async def close(self):
         """إغلاق الجلسة"""
@@ -51,8 +45,7 @@ class MousaCardAPI:
         """
         try:
             session = await self._get_session()
-            url = self._build_url_with_token("/client/api/profile/")
-            async with session.get(url, timeout=30) as resp:
+            async with session.get(f"{self.base_url}/client/api/profile/", timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return {
@@ -61,7 +54,8 @@ class MousaCardAPI:
                         'raw': data
                     }
                 else:
-                    logger.error(f"فشل جلب الملف الشخصي: {resp.status}")
+                    error_text = await resp.text()
+                    logger.error(f"فشل جلب الملف الشخصي: {resp.status} - {error_text[:200]}")
                     return None
         except Exception as e:
             logger.error(f"خطأ في جلب الملف الشخصي: {e}")
@@ -85,28 +79,23 @@ class MousaCardAPI:
         """
         try:
             session = await self._get_session()
+            url = f"{self.base_url}/client/api/products/"
             
-            # بناء المعاملات
             params = {}
             if products_id:
                 params['products_id'] = products_id
             if base_only:
                 params['base'] = '1'
             
-            # إضافة التوكن للمعاملات
-            params['api-token'] = self.api_token
-            
-            url = f"{self.base_url}/client/api/products/"
-            
             async with session.get(url, params=params, timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # البيانات تأتي كمصفوفة من المنتجات
                     if isinstance(data, list):
                         return self._normalize_products(data)
                     return []
                 else:
-                    logger.error(f"فشل جلب المنتجات: {resp.status}")
+                    error_text = await resp.text()
+                    logger.error(f"فشل جلب المنتجات: {resp.status} - {error_text[:200]}")
                     return []
         except Exception as e:
             logger.error(f"خطأ في جلب المنتجات: {e}")
@@ -131,8 +120,7 @@ class MousaCardAPI:
         """
         try:
             session = await self._get_session()
-            url = self._build_url_with_token(f"/client/api/content/{category_id}/")
-            async with session.get(url, timeout=30) as resp:
+            async with session.get(f"{self.base_url}/client/api/content/{category_id}/", timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return self._normalize_categories_data(data)
@@ -153,36 +141,16 @@ class MousaCardAPI:
         """
         إنشاء طلب جديد في موقع Mousa Card
         POST /client/api/newOrder/{product_id}/params/
-        
-        Args:
-            product_id: معرف المنتج
-            quantity: الكمية (qt)
-            player_id: معرف اللاعب (للألعاب)
-            order_uuid: UUID للطلب (سيتم إنشاؤه تلقائياً إذا لم يُقدم)
-            extra_params: معاملات إضافية
-        
-        Returns:
-            {
-                'success': bool,
-                'order_id': str,
-                'status': str,  # accept, reject, wait
-                'price': float,
-                'data': dict,
-                'error': str (optional)
-            }
         """
         try:
             session = await self._get_session()
             
-            # إنشاء UUID للطلب إذا لم يُقدم
             if not order_uuid:
                 order_uuid = str(uuid.uuid4())
             
-            # بناء المعاملات
             params = {
                 'qt': quantity,
-                'order_uuid': order_uuid,
-                'api-token': self.api_token  # إضافة التوكن هنا
+                'order_uuid': order_uuid
             }
             
             if player_id:
@@ -193,14 +161,13 @@ class MousaCardAPI:
             
             url = f"{self.base_url}/client/api/newOrder/{product_id}/params/"
             
-            logger.info(f"📤 إنشاء طلب في Mousa Card: product_id={product_id}, quantity={quantity}, order_uuid={order_uuid}")
+            logger.info(f"📤 إنشاء طلب في Mousa Card: product_id={product_id}, quantity={quantity}")
             
             async with session.post(url, params=params, timeout=60) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     logger.info(f"📥 رد Mousa Card: {data}")
                     
-                    # تحليل الاستجابة
                     if data.get('status') == 'OK':
                         response_data = data.get('data', {})
                         return {
@@ -234,17 +201,11 @@ class MousaCardAPI:
     
     # ============= الاستعلام عن الطلبات =============
     async def check_orders(self, order_ids: List[str]) -> List[Dict]:
-        """
-        التحقق من حالة مجموعة طلبات
-        GET /client/api/check?orders=[ID1,ID2]/
-        
-        Args:
-            order_ids: قائمة بمعرفات الطلبات
-        """
+        """التحقق من حالة مجموعة طلبات"""
         try:
             session = await self._get_session()
             orders_param = ','.join(order_ids)
-            url = f"{self.base_url}/client/api/check?orders=[{orders_param}]/&api-token={self.api_token}"
+            url = f"{self.base_url}/client/api/check?orders=[{orders_param}]/"
             
             async with session.get(url, timeout=30) as resp:
                 if resp.status == 200:
@@ -283,7 +244,6 @@ class MousaCardAPI:
         """توحيد تنسيق المنتجات"""
         normalized = []
         for item in products:
-            # استخراج min/max من qty_values
             qty_values = item.get('qty_values', {})
             if isinstance(qty_values, dict):
                 min_qty = int(qty_values.get('min', 1))
@@ -311,7 +271,6 @@ class MousaCardAPI:
             'products': []
         }
         
-        # معالجة التصنيفات
         categories = data.get('categories', [])
         if isinstance(categories, list):
             for cat in categories:
@@ -323,7 +282,6 @@ class MousaCardAPI:
                     'sort_order': cat.get('sort_order', 0)
                 })
         
-        # معالجة المنتجات (قد تكون في keys مختلفة)
         for key, value in data.items():
             if key not in ['categories', 'image_url', 'parent_id', 'sort_order']:
                 if isinstance(value, dict) and 'id' in value:
@@ -340,9 +298,7 @@ class MousaCardAPI:
     
     # ============= مزامنة البيانات مع قاعدة البيانات =============
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """
-        مزامنة الخدمات من Mousa Card مع قاعدة البيانات المحلية
-        """
+        """مزامنة الخدمات من Mousa Card مع قاعدة البيانات المحلية"""
         products = await self.get_products()
         
         if not products:
@@ -357,17 +313,14 @@ class MousaCardAPI:
                 if not product['available']:
                     continue
                 
-                # حساب سعر البيع بعد إضافة نسبة الربح
                 selling_price = product['price'] * (1 + default_profit / 100)
                 
-                # التحقق إذا كان المنتج موجوداً
                 existing = await conn.fetchval(
                     "SELECT id FROM applications WHERE api_service_id = $1",
                     str(product['id'])
                 )
                 
                 if existing:
-                    # تحديث المنتج الموجود
                     await conn.execute('''
                         UPDATE applications 
                         SET unit_price_usd = $1,
@@ -378,7 +331,6 @@ class MousaCardAPI:
                     ''', selling_price, product['min_quantity'], default_profit, str(product['id']))
                     updated_count += 1
                 else:
-                    # إضافة منتج جديد
                     await conn.execute('''
                         INSERT INTO applications 
                         (name, unit_price_usd, min_units, profit_percentage, 
@@ -410,6 +362,10 @@ def set_api_token(token: str):
     _api_token = token
     if _api_client:
         _api_client.api_token = token
+        # تحديث الجلسة لإعادة إنشائها بالتوكن الجديد
+        if _api_client.session and not _api_client.session.closed:
+            asyncio.create_task(_api_client.session.close())
+        _api_client.session = None
 
 
 def get_api_client() -> MousaCardAPI:
