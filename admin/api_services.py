@@ -694,10 +694,17 @@ async def change_default_profit_start(callback: types.CallbackQuery, state: FSMC
     )
 
 
-@router.message(lambda m: m.text and m.text.isdigit() and 0 <= int(m.text) <= 100, state="waiting_default_profit")
+@router.message(lambda m: m.text and m.text.isdigit() and 0 <= int(m.text) <= 100)
 async def change_default_profit_save(message: types.Message, state: FSMContext, db_pool):
     """حفظ نسبة الربح الافتراضية الجديدة"""
+    from database.users import is_admin_user
+    
     if not await is_admin_user(db_pool, message.from_user.id):
+        return
+    
+    # التحقق من أن المستخدم في الحالة الصحيحة
+    current_state = await state.get_state()
+    if current_state != "waiting_default_profit":
         return
     
     profit = int(message.text)
