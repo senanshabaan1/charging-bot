@@ -27,10 +27,16 @@ class MousaCardAPI:
             headers = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'api-token': self.api_token or ''
             }
             self.session = aiohttp.ClientSession(headers=headers)
         return self.session
+    
+    def _build_url_with_token(self, path: str, include_params: bool = False) -> str:
+        """
+        بناء الرابط مع إضافة التوكن كـ query parameter
+        """
+        separator = '&' if include_params else '?'
+        return f"{self.base_url}{path}{separator}api-token={self.api_token}"
     
     async def close(self):
         """إغلاق الجلسة"""
@@ -45,7 +51,8 @@ class MousaCardAPI:
         """
         try:
             session = await self._get_session()
-            async with session.get(f"{self.base_url}/client/api/profile/", timeout=30) as resp:
+            url = self._build_url_with_token("/client/api/profile/")
+            async with session.get(url, timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return {
@@ -78,13 +85,18 @@ class MousaCardAPI:
         """
         try:
             session = await self._get_session()
-            url = f"{self.base_url}/client/api/products/"
             
+            # بناء المعاملات
             params = {}
             if products_id:
                 params['products_id'] = products_id
             if base_only:
                 params['base'] = '1'
+            
+            # إضافة التوكن للمعاملات
+            params['api-token'] = self.api_token
+            
+            url = f"{self.base_url}/client/api/products/"
             
             async with session.get(url, params=params, timeout=30) as resp:
                 if resp.status == 200:
@@ -119,7 +131,8 @@ class MousaCardAPI:
         """
         try:
             session = await self._get_session()
-            async with session.get(f"{self.base_url}/client/api/content/{category_id}/", timeout=30) as resp:
+            url = self._build_url_with_token(f"/client/api/content/{category_id}/")
+            async with session.get(url, timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return self._normalize_categories_data(data)
@@ -168,7 +181,8 @@ class MousaCardAPI:
             # بناء المعاملات
             params = {
                 'qt': quantity,
-                'order_uuid': order_uuid
+                'order_uuid': order_uuid,
+                'api-token': self.api_token  # إضافة التوكن هنا
             }
             
             if player_id:
@@ -230,7 +244,7 @@ class MousaCardAPI:
         try:
             session = await self._get_session()
             orders_param = ','.join(order_ids)
-            url = f"{self.base_url}/client/api/check?orders=[{orders_param}]/"
+            url = f"{self.base_url}/client/api/check?orders=[{orders_param}]/&api-token={self.api_token}"
             
             async with session.get(url, timeout=30) as resp:
                 if resp.status == 200:
