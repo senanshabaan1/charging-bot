@@ -16,7 +16,8 @@ from database.vip import get_user_vip
 from database.points import get_points_per_order
 from database.products import get_product_options, get_product_option
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
-
+from api.client import get_api_client
+import uuid
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -1077,3 +1078,100 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool
         "👋 تم العودة للقائمة الرئيسية",
         reply_markup=builder.as_markup()
     )
+async def send_order_to_mousa_api(order_id: int, db_pool, bot: Bot) -> bool:
+    """
+    إرسال طلب إلى Mousa Card API بعد موافقة المشرف
+    """
+    from api.client import get_api_client
+    
+    async with db_pool.acquire() as conn:
+        # جلب معلومات الطلب والتطبيق المرتبط
+        order = await conn.fetchrow('''
+            SELECT o.*, a.api_service_id, a.profit_percentage
+            FROM orders o
+            JOIN applications a ON o.app_id = a.id
+            WHERE o.id = $1 AND o.status = 'processing'
+        ''', order_id)
+        
+        if not order:
+            logger.warning(f"⚠️ الطلب {order_id} غير موجود أو ليس في حالة processing")
+            return False
+        
+        if not order['api_service_id']:
+            logger.warning(f"⚠️ التطبيق {order['app_name']} ليس مرتبطاً بخدمة API")
+            return False
+        
+        # تحضير المعاملات الإضافية حسب نوع التطبيق
+        extra_params = {}
+        app_name = order['app_name'].lower()
+        
+        if 'pubg' in app_name:
+            extra_params['playerId'] = order['target_id']
+        elif 'free fire' in app_name:
+            extra_params['playerId'] = order['target_id']
+        elif 'clash' in app_name:
+            extra_params['playerId'] = order['target_id']
+        else:
+            extra_params['playerId'] = order['target_id']
+        
+        # إرسال الطلب إلى Mousa Card API
+        api = get_api_client()
+        result = await api.create_order(
+            product_id=int(order['api_service_id']),
+            quantity=order['quantity'],
+            player_id=order['target_id'] if 'player' in str(extra_params) else None,
+            extra_params=extra_params if extra_params else None
+        )
+        
+        if result['success']:
+            # تحديث حالة الطلب
+            await conn.execute('''
+                UPDATE orders 
+                SET status = 'completed',
+                    api_response = $1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2
+            ''', json.dumps(result.get('raw', {})), order_id)
+            
+            # إشعار المستخدم
+            await bot.send_message(
+                order['user_id'],
+                f"✅ **تم تنفيذ طلبك #{order_id} بنجاح!**\n\n"
+                f"📱 **التطبيق:** {order['app_name']}\n"
+                f"🎯 **المستهدف:** {order['target_id']}\n"
+                f"💰 **المبلغ:** {order['total_amount_syp']:,.0f} ل.س\n"
+                f"📋 **رقم الطلب في الموقع:** {result.get('order_id')}\n\n"
+                f"شكراً لاستخدامك خدماتنا",
+                parse_mode="Markdown"
+            )
+            
+            logger.info(f"✅ تم إرسال الطلب {order_id} إلى Mousa Card API بنجاح")
+            return True
+        else:
+            # فشل الإرسال
+            await conn.execute('''
+                UPDATE orders 
+                SET status = 'failed',
+                    admin_notes = $1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2
+            ''', f"فشل الإرسال إلى Mousa Card API: {result.get('error')}", order_id)
+            
+            # إشعار المستخدم
+            await bot.send_message(
+                order['user_id'],
+                f"❌ **عذراً، تعذر تنفيذ طلبك #{order_id}**\n\n"
+                f"🔸 **السبب:** {result.get('error', 'خطأ في الاتصال بالموقع')}\n\n"
+                f"💰 **تم إعادة المبلغ إلى رصيدك.**\n"
+                f"📞 للاستفسار، تواصل مع الدعم.",
+                parse_mode="Markdown"
+            )
+            
+            # إعادة الرصيد
+            await conn.execute(
+                "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
+                order['total_amount_syp'], order['user_id']
+            )
+            
+            logger.error(f"❌ فشل إرسال الطلب {order_id} إلى Mousa Card API: {result.get('error')}")
+            return False

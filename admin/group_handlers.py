@@ -8,7 +8,7 @@ from utils import get_formatted_damascus_time, format_amount
 from database.cache_utils import invalidate_user_cache
 from database.points import get_points_per_order
 from database.vip import update_user_vip
-
+from api.client import get_api_client
 logger = logging.getLogger(__name__)
 router = Router(name="admin_group")
 
@@ -270,14 +270,14 @@ async def approve_order_from_group(callback: types.CallbackQuery, db_pool, bot: 
 
 
 async def process_order_approval(order_id: int, callback: types.CallbackQuery, db_pool, bot: Bot):
-    """معالجة الموافقة في الخلفية"""
+    """معالجة الموافقة على الطلب وإرساله إلى API إذا كان مرتبطاً"""
     try:
         async with db_pool.acquire() as conn:
-            # جلب معلومات الطلب
             order = await conn.fetchrow('''
-                SELECT o.*, u.user_id, u.username
+                SELECT o.*, u.user_id, u.username, a.api_service_id
                 FROM orders o
                 JOIN users u ON o.user_id = u.user_id
+                JOIN applications a ON o.app_id = a.id
                 WHERE o.id = $1
             ''', order_id)
             
@@ -292,13 +292,28 @@ async def process_order_approval(order_id: int, callback: types.CallbackQuery, d
                 order_id
             )
             
-            # ✅ مسح كاش المستخدم
+            # مسح كاش المستخدم
             await invalidate_user_cache(order['user_id'])
         
-        # إرسال إشعار للمستخدم (في الخلفية)
-        asyncio.create_task(notify_user_order_approved(bot, order))
+        # ✅ إذا كان التطبيق مرتبطاً بخدمة API، أرسل مباشرة
+        if order['api_service_id']:
+            # إرسال إلى Mousa Card API
+            from handlers.services import send_order_to_mousa_api
+            success = await send_order_to_mousa_api(order_id, db_pool, bot)
+            
+            if success:
+                # تحديث رسالة المجموعة
+                await callback.message.edit_text(
+                    f"{callback.message.text}\n\n✅ **تم إرسال الطلب إلى Mousa Card API وتنفيذه بنجاح**",
+                    reply_markup=None
+                )
+                return
         
-        # إنشاء أزرار جديدة
+        # إذا لم يكن مرتبطاً بـ API أو فشل الإرسال، استمر بالطريقة العادية
+        # إشعار للمستخدم
+        await notify_user_order_approved(bot, order)
+        
+        # إنشاء أزرار جديدة للتنفيذ اليدوي
         builder = InlineKeyboardBuilder()
         builder.row(
             types.InlineKeyboardButton(text="✅ تم التنفيذ", callback_data=f"compl_order_{order_id}"),
@@ -306,12 +321,8 @@ async def process_order_approval(order_id: int, callback: types.CallbackQuery, d
             width=2
         )
         
-        # تحديث رسالة المجموعة (HTML) - تأكد من صحة التنسيق
-        clean_text = callback.message.text.replace("⏳ <b>جاري المعالجة...</b>", "")
-        new_text = f"{clean_text}\n\n🔄 <b>جاري التنفيذ...</b>"
-        
         await callback.message.edit_text(
-            new_text,
+            f"{callback.message.text}\n\n🔄 <b>الطلب قيد التنفيذ...</b>",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )

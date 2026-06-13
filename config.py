@@ -175,6 +175,21 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 LOG_FILE = os.getenv("LOG_FILE", "")
 
+# ============= إعدادات API Mousa Card =============
+
+# رابط API الأساسي
+API_BASE_URL = os.getenv("API_BASE_URL", "https://mousa-card.com")
+
+# توكن API (من موقع Mousa Card)
+API_TOKEN = os.getenv("API_TOKEN", "4lqzCLWniWuQwkYjO6YIVPtpnbMguw8JXyVvfvO6OoS1aUNI9IYQNDUJFN-Ittev")
+
+# إعدادات المزامنة التلقائية
+AUTO_SYNC_SERVICES = get_env_bool("AUTO_SYNC_SERVICES", True)
+SYNC_INTERVAL_HOURS = get_env_int("SYNC_INTERVAL_HOURS", 6)
+
+# نسبة الربح الافتراضية للمنتجات المستوردة من API
+DEFAULT_API_PROFIT = get_env_int("DEFAULT_API_PROFIT", 10)
+
 # ============= دوال تحميل الإعدادات الديناميكية =============
 
 async def load_exchange_rate(pool) -> bool:
@@ -201,6 +216,48 @@ async def load_bot_settings(pool) -> bool:
         return True
     except Exception as e:
         print(f"❌ خطأ في تحميل حالة البوت: {e}")
+        return False
+
+async def load_api_settings(pool) -> bool:
+    """تحميل إعدادات API من قاعدة البيانات"""
+    global API_TOKEN, API_BASE_URL, DEFAULT_API_PROFIT, AUTO_SYNC_SERVICES
+    try:
+        async with pool.acquire() as conn:
+            # تحميل التوكن من قاعدة البيانات إذا كان موجوداً
+            db_token = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'api_token'"
+            )
+            if db_token:
+                API_TOKEN = db_token
+                print(f"🔑 تم تحميل توكن API من قاعدة البيانات")
+            
+            # تحميل رابط API
+            db_url = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'api_base_url'"
+            )
+            if db_url:
+                API_BASE_URL = db_url
+                print(f"🌐 تم تحميل رابط API: {API_BASE_URL}")
+            
+            # تحميل نسبة الربح الافتراضية
+            db_profit = await conn.fetchval(
+                "SELECT value::int FROM bot_settings WHERE key = 'api_default_profit'"
+            )
+            if db_profit:
+                DEFAULT_API_PROFIT = db_profit
+                print(f"📊 نسبة الربح الافتراضية: {DEFAULT_API_PROFIT}%")
+            
+            # تحميل إعداد المزامنة التلقائية
+            auto_sync = await conn.fetchval(
+                "SELECT value FROM bot_settings WHERE key = 'auto_sync_services'"
+            )
+            if auto_sync:
+                AUTO_SYNC_SERVICES = (auto_sync == 'enabled')
+                print(f"🔄 المزامنة التلقائية: {'مفعلة' if AUTO_SYNC_SERVICES else 'معطلة'}")
+        
+        return True
+    except Exception as e:
+        print(f"⚠️ خطأ في تحميل إعدادات API: {e}")
         return False
 
 # ============= التحقق من صحة الإعدادات =============
@@ -242,6 +299,10 @@ def validate_config() -> List[str]:
         if not DB_CONFIG.get('password'):
             warnings.append("⚠️ DB_PASSWORD غير محددة (قد تحتاجها للاتصال المحلي)")
     
+    # تحقق من إعدادات API (تحذير فقط، ليست إلزامية)
+    if not API_TOKEN:
+        warnings.append("⚠️ API_TOKEN غير محدد (اختياري، لربط Mousa Card)")
+    
     return errors, warnings
 
 # ============= طباعة ملخص الإعدادات =============
@@ -270,6 +331,12 @@ def print_config_summary():
     print(f"\n👥 مجموعات الإدارة:")
     print(f"   💰 DEPOSIT_GROUP: {DEPOSIT_GROUP if DEPOSIT_GROUP else '⚠️'}")
     print(f"   📦 ORDERS_GROUP: {ORDERS_GROUP if ORDERS_GROUP else '⚠️'}")
+    
+    print(f"\n🌐 إعدادات API (Mousa Card):")
+    print(f"   🔌 API_BASE_URL: {API_BASE_URL}")
+    print(f"   🔑 API_TOKEN: {'✅ موجود' if API_TOKEN else '❌ مفقود'}")
+    print(f"   📊 DEFAULT_API_PROFIT: {DEFAULT_API_PROFIT}%")
+    print(f"   🔄 AUTO_SYNC_SERVICES: {'✅ مفعل' if AUTO_SYNC_SERVICES else '❌ معطل'}")
     
     print(f"\n⚙️ إعدادات إضافية:")
     print(f"   🔧 DEBUG: {DEBUG}")
@@ -324,6 +391,12 @@ __all__ = [
     'LOG_LEVEL',
     'LOG_FORMAT',
     'LOG_FILE',
+    'API_BASE_URL',
+    'API_TOKEN',
+    'AUTO_SYNC_SERVICES',
+    'SYNC_INTERVAL_HOURS',
+    'DEFAULT_API_PROFIT',
     'load_exchange_rate',
-    'load_bot_settings'
+    'load_bot_settings',
+    'load_api_settings'
 ]

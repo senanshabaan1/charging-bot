@@ -14,7 +14,7 @@ from .vip import router as vip_router
 from .broadcast import router as broadcast_router
 from .group_handlers import router as group_router
 from .reset import router as reset_router
-
+from .api_services import router as api_router
 router = Router(name="admin")
 
 # ✅ Make sure each router is included only once
@@ -31,7 +31,8 @@ router.include_routers(
     vip_router,
     broadcast_router,
     group_router,
-    reset_router
+    reset_router,
+    api_router
 )
 
 __all__ = ['router']
