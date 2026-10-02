@@ -35,6 +35,13 @@ class MousaCardClient:
                 logger.error(f"❌ خطأ في الاتصال مع Mousa Card ({url}): {e}")
                 return None
 
+    async def get_balance(self) -> float:
+        """جلب رصيد الحساب من الـ API (دالة توافقية لوحة الويب)"""
+        result = await self._make_request("GET", "/client/api/balance")
+        if isinstance(result, dict):
+            return float(result.get("balance", result.get("data", 0.0)))
+        return 0.0
+
     async def get_products(self) -> List[Dict]:
         """جلب جميع المنتجات المتاحة مباشرة من مسار /client/api/products"""
         data = await self._make_request("GET", "/client/api/products")
@@ -237,11 +244,10 @@ def get_api_client() -> MousaCardClient:
     api_url = os.getenv("MOUSA_API_URL", "https://mousacard.com")
     api_token = "eVbvddm6ATc7pVsSMtakM5hTpZzd9RtvP6GRYPMByDQb5fWtfZKQPCsqEzYPBM1q"
     return MousaCardClient(api_url, api_token)
-    # ============= دوال توافقية إضافية =============
+
+# دوال توافقية إضافية لمنع أخطاء الاستيراد
 def set_api_token(token: str):
-    """دالة توافقية لتحديث الرمز"""
     pass
 
 def close_api_client():
-    """دالة توافقية لإغلاق الاتصال"""
     pass
