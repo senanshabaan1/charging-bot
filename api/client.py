@@ -333,22 +333,13 @@ class MousaCardAPI:
                     continue
                 
                 # ==========================================
-                # 🛠️ حل مشكلة السعر السوري من الـ API
+                # 🛠️ الاعتماد على سعر الصرف المحدد في البوت فقط
                 # ==========================================
-                api_raw_price = product['price']
+                # السعر القادم من الموقع (بالدولار)
+                api_price_usd = product['price']
                 
-                # 1. هل أسعار الموقع تظهر بـ (الآلاف)؟ (22.3 تعني 22300 ليرة)
-                # إذا كانت كذلك، نضربها بـ 1000
-                IS_PRICE_IN_THOUSANDS = True 
-                
-                # 2. هل أسعار حسابك في الموقع بالليرة السورية؟
-                # البوت يتعامل بالدولار بالخلفية، لذا نقسم على سعر الصرف للتحويل
-                IS_ACCOUNT_IN_SYP = True
-                
-                api_actual_price = api_raw_price * 1000 if IS_PRICE_IN_THOUSANDS else api_raw_price
-                api_price_usd = api_actual_price / current_rate if IS_ACCOUNT_IN_SYP else api_actual_price
-                
-                # السعر النهائي بالدولار مضافاً إليه ربحك
+                # السعر النهائي بالدولار مضافاً إليه نسبة ربحك
+                # (البوت سيقوم بضربه بسعر الصرف 139 تلقائياً عند عرضه للزبون)
                 selling_price = api_price_usd * (1 + default_profit / 100)
                 # ==========================================
                 
