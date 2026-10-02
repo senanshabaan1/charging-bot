@@ -36,10 +36,12 @@ class MousaCardClient:
                 return None
 
     async def get_balance(self) -> float:
-        """جلب رصيد الحساب من الـ API (دالة توافقية لوحة الويب)"""
-        result = await self._make_request("GET", "/client/api/balance")
+        """جلب رصيد الحساب من الـ API (المسار الصحيح)"""
+        # محاولة فحص المسار المعتاد للرصيد
+        result = await self._make_request("GET", "/client/api/user")
         if isinstance(result, dict):
-            return float(result.get("balance", result.get("data", 0.0)))
+            data = result.get("data", result)
+            return float(data.get("balance", data.get("wallet", 0.0)))
         return 0.0
 
     async def get_products(self) -> List[Dict]:
@@ -241,9 +243,9 @@ class MousaCardClient:
 
 def get_api_client() -> MousaCardClient:
     import os
-    # تأكد أن الرابط هنا يطابق النطاق الصحيح للموقع تماماً
     api_url = os.getenv("MOUSA_API_URL", "https://mousa-card.com")
-    api_token = "eVbvddm6ATc7pVsSMtakM5hTpZzd9RtvP6GRYPMByDQb5fWtfZKQPCsqEzYPBM1q"
+    # ⚠️ استبدل هذا الرمز بالرمز الصحيح والجديد من موقع Mousa Card إن لزم الأمر
+    api_token = os.getenv("MOUSA_API_TOKEN", "Zut5m0AkmCBEnbyLQxW0vMumniXz8jqf-T_GfgUVHf9Fir83Akbz__ACiDMLS8qt")
     return MousaCardClient(api_url, api_token)
 
 # دوال توافقية إضافية لمنع أخطاء الاستيراد
