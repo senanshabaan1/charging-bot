@@ -316,11 +316,15 @@ class MousaCardAPI:
             logger.error("❌ لا توجد منتجات للمزامنة من Mousa Card")
             return 0
         
+        # ✅ جلب سعر الصرف لتحويل العملة
+        from database.core import get_exchange_rate
+        current_rate = await get_exchange_rate(db_pool)
+        if current_rate <= 0: current_rate = 139
+        
         synced_count = 0
         updated_count = 0
         
         async with db_pool.acquire() as conn:
-            # جلب الأقسام الحالية لعدم التكرار
             existing_cats = await conn.fetch("SELECT id, display_name FROM categories")
             cat_map = {c['display_name']: c['id'] for c in existing_cats if c['display_name']}
             
@@ -328,7 +332,26 @@ class MousaCardAPI:
                 if not product['available']:
                     continue
                 
-                # 1. إنشاء القسم تلقائياً إذا لم يكن موجوداً
+                # ==========================================
+                # 🛠️ حل مشكلة السعر السوري من الـ API
+                # ==========================================
+                api_raw_price = product['price']
+                
+                # 1. هل أسعار الموقع تظهر بـ (الآلاف)؟ (22.3 تعني 22300 ليرة)
+                # إذا كانت كذلك، نضربها بـ 1000
+                IS_PRICE_IN_THOUSANDS = True 
+                
+                # 2. هل أسعار حسابك في الموقع بالليرة السورية؟
+                # البوت يتعامل بالدولار بالخلفية، لذا نقسم على سعر الصرف للتحويل
+                IS_ACCOUNT_IN_SYP = True
+                
+                api_actual_price = api_raw_price * 1000 if IS_PRICE_IN_THOUSANDS else api_raw_price
+                api_price_usd = api_actual_price / current_rate if IS_ACCOUNT_IN_SYP else api_actual_price
+                
+                # السعر النهائي بالدولار مضافاً إليه ربحك
+                selling_price = api_price_usd * (1 + default_profit / 100)
+                # ==========================================
+                
                 cat_name = product.get('category_name')
                 if not cat_name:
                     cat_name = "خدمات عامة"
@@ -344,10 +367,6 @@ class MousaCardAPI:
                 
                 category_id = cat_map[cat_name]
                 
-                # 2. حساب السعر مع الربح
-                selling_price = product['price'] * (1 + default_profit / 100)
-                
-                # 3. تحديث أو إضافة المنتج وربطه بالقسم الجديد
                 existing = await conn.fetchval(
                     "SELECT id FROM applications WHERE api_service_id = $1 OR name = $2",
                     str(product['id']), product['name']
@@ -386,7 +405,6 @@ class MousaCardAPI:
                     except Exception as e:
                         logger.error(f"⚠️ تخطي المنتج {product['name']} بسبب خطأ: {e}")
         
-        # مسح الكاش لظهور التعديلات فوراً
         from cache import clear_cache
         clear_cache("categories")
         clear_cache("apps_by_category")
