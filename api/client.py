@@ -309,17 +309,12 @@ class MousaCardAPI:
     
     # ============= مزامنة البيانات مع قاعدة البيانات =============
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """مزامنة الخدمات والأقسام من Mousa Card مع قاعدة البيانات المحلية تلقائياً"""
+        """مزامنة الخدمات والأقسام من Mousa Card واعتماد السعر بالسوري مباشرة"""
         products = await self.get_products()
         
         if not products:
             logger.error("❌ لا توجد منتجات للمزامنة من Mousa Card")
             return 0
-        
-        # ✅ جلب سعر الصرف لتحويل العملة
-        from database.core import get_exchange_rate
-        current_rate = await get_exchange_rate(db_pool)
-        if current_rate <= 0: current_rate = 139
         
         synced_count = 0
         updated_count = 0
@@ -333,14 +328,12 @@ class MousaCardAPI:
                     continue
                 
                 # ==========================================
-                # 🛠️ حفظ السعر بالليرة السورية مباشرة بدون تحويل لدولار
+                # 🛠️ اعتماد السعر القادم من الموقع كـ (ليرة سورية) مباشرة
                 # ==========================================
-                # السعر القادم من الموقع هو بالليرة السورية أصلاً (مثلاً 144.23)
-                api_price_syp = float(product['price'])
+                raw_price = float(product['price']) # السعر كما هو من الموقع (مثلاً 144.23 أو 164.5)
                 
-                # السعر النهائي بالليرة السورية مضافاً إليه نسبة ربحك
-                selling_price = api_price_syp * (1 + default_profit / 100)
-                # ==========================================
+                # السعر النهائي بالسوري مضافاً إليه نسبة ربحك فقط (بدون أي ضرب بسعر صرف أو دولار)
+                selling_price_syp = raw_price * (1 + default_profit / 100)
                 # ==========================================
                 
                 cat_name = product.get('category_name')
@@ -366,14 +359,14 @@ class MousaCardAPI:
                 if existing:
                     await conn.execute('''
                         UPDATE applications 
-                        SET unit_price_usd = $1,
+                        SET unit_price_usd = $1,  -- (سنستمر بتخزينه في هذا العمود لتجنب تعديل الجداول، لكن قيمته أصبحت بالليرة مباشرة)
                             min_units = $2,
                             profit_percentage = $3,
                             api_service_id = $4,
                             category_id = $5,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = $6
-                    ''', selling_price, product['min_quantity'], default_profit, str(product['id']), category_id, existing)
+                    ''', selling_price_syp, product['min_quantity'], default_profit, str(product['id']), category_id, existing)
                     updated_count += 1
                 else:
                     try:
@@ -384,7 +377,7 @@ class MousaCardAPI:
                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         ''',
                         product['name'],
-                        selling_price,
+                        selling_price_syp,
                         product['min_quantity'],
                         default_profit,
                         'service',
@@ -401,7 +394,7 @@ class MousaCardAPI:
         clear_cache("apps_by_category")
         clear_cache("products_list")
         
-        logger.info(f"✅ مزامنة Mousa Card: {synced_count} خدمات جديدة, {updated_count} تحديث")
+        logger.info(f"✅ تمت مزامنة الأسعار بالسوري: {synced_count} جديدة, {updated_count} تحديث")
         return synced_count + updated_count
 # ============= Singleton Pattern =============
 _api_client: Optional[MousaCardAPI] = None
