@@ -1,6 +1,7 @@
 import aiohttp
 import logging
 import uuid
+import json
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -186,12 +187,9 @@ class MousaCardClient:
 
     async def create_order(self, product_id: int, quantity: int, player_id: str, extra_params: dict = None) -> dict:
         """إنشاء طلب جديد عبر مسار /client/api/newOrder/{product_id}/params"""
-        # توليد معرف فريد لمنع تكرار الطلب (UUIDv4)
         unique_order_uuid = str(uuid.uuid4())
-        
         endpoint = f"/client/api/newOrder/{product_id}/params"
         
-        # تجهيز بارامترات الطلب حسب متطلبات الـ API
         params = {
             "qty": quantity,
             "playerId": player_id,
@@ -200,12 +198,10 @@ class MousaCardClient:
         if extra_params:
             params.update(extra_params)
             
-        # إرسال الطلب بطريقة GET (أو POST حسب المتاح، الـ API يدعم الإثنين)
         result = await self._make_request("GET", endpoint, params=params)
         
         if isinstance(result, dict):
             status = result.get("status", "").lower()
-            # فحص الاستجابة (accept أو OK)
             if status in ["ok", "accept", "success"] or result.get("success") == True:
                 data_dict = result.get("data", result)
                 order_id = data_dict.get("order_id", data_dict.get("id", unique_order_uuid))
@@ -215,11 +211,25 @@ class MousaCardClient:
                     "raw": result
                 }
             else:
-                # إذا كان الحالة reject أو فشل
                 error_msg = result.get("message", result.get("error", "تم رفض الطلب من المصدر (Reject)"))
                 return {"success": False, "error": error_msg}
                 
         return {"success": False, "error": "استجابة غير صالحة من خادم الموقع عند إنشاء الطلب"}
+
+    async def check_orders_status(self, order_ids: list) -> dict:
+        """التحقق من حالة مجموعة طلبات عبر مسار /client/api/check"""
+        orders_json = json.dumps(order_ids)
+        endpoint = "/client/api/check"
+        params = {"orders": orders_json}
+        
+        result = await self._make_request("GET", endpoint, params=params)
+        
+        if isinstance(result, dict) and (result.get("status") == "OK" or result.get("success") == True or "data" in result):
+            return {
+                "success": True,
+                "data": result.get("data", [])
+            }
+        return {"success": False, "data": [], "error": "تعذر جلب حالة الطلبات من المصدر"}
 
 
 def get_api_client() -> MousaCardClient:
