@@ -326,9 +326,10 @@ class MousaCardAPI:
                 
                 selling_price = product['price'] * (1 + default_profit / 100)
                 
+                # ✅ التعديل هنا: البحث عن المنتج بالـ ID أو بالاسم لتجنب تعارض الأسماء (Duplicate Key)
                 existing = await conn.fetchval(
-                    "SELECT id FROM applications WHERE api_service_id = $1",
-                    str(product['id'])
+                    "SELECT id FROM applications WHERE api_service_id = $1 OR name = $2",
+                    str(product['id']), product['name']
                 )
                 
                 if existing:
@@ -337,30 +338,33 @@ class MousaCardAPI:
                         SET unit_price_usd = $1,
                             min_units = $2,
                             profit_percentage = $3,
+                            api_service_id = $4,
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE api_service_id = $4
-                    ''', selling_price, product['min_quantity'], default_profit, str(product['id']))
+                        WHERE id = $5
+                    ''', selling_price, product['min_quantity'], default_profit, str(product['id']), existing)
                     updated_count += 1
                 else:
-                    await conn.execute('''
-                        INSERT INTO applications 
-                        (name, unit_price_usd, min_units, profit_percentage, 
-                         type, api_service_id, is_active, created_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
-                    ''',
-                    product['name'],
-                    selling_price,
-                    product['min_quantity'],
-                    default_profit,
-                    'service',
-                    str(product['id']),
-                    True
-                    )
-                    synced_count += 1
+                    try:
+                        await conn.execute('''
+                            INSERT INTO applications 
+                            (name, unit_price_usd, min_units, profit_percentage, 
+                             type, api_service_id, is_active)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ''',
+                        product['name'],
+                        selling_price,
+                        product['min_quantity'],
+                        default_profit,
+                        'service',
+                        str(product['id']),
+                        True
+                        )
+                        synced_count += 1
+                    except Exception as e:
+                        logger.error(f"⚠️ تخطي المنتج {product['name']} بسبب خطأ: {e}")
         
         logger.info(f"✅ مزامنة Mousa Card: {synced_count} خدمات جديدة, {updated_count} تحديث")
         return synced_count + updated_count
-
 
 # ============= Singleton Pattern =============
 _api_client: Optional[MousaCardAPI] = None
