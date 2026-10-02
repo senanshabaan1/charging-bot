@@ -34,12 +34,16 @@ class MousaCardClient:
                 return None
 
     async def get_products(self) -> List[Dict]:
-        """جلب المنتجات (للتوافق القديم)"""
-        content = await self.get_content_by_category(0)
-        return content.get('products', [])
+        """جلب جميع المنتجات المتاحة مباشرة من مسار /client/api/products"""
+        data = await self._make_request("GET", "/client/api/products")
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict) and "products" in data:
+            return data["products"]
+        return []
 
     async def get_content_by_category(self, category_id: int = 0) -> dict:
-        """جلب الأقسام والمنتجات لتصنيف معين حسب الـ API الجديد"""
+        """جلب الأقسام والتصنيفات من مسار /client/api/content/{id}"""
         try:
             endpoint = f"/client/api/content/{category_id}"
             data = await self._make_request("GET", endpoint)
@@ -51,31 +55,28 @@ class MousaCardClient:
             return {"categories": [], "products": []}
 
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """مزامنة الأقسام والتصنيفات والمنتجات تماماً كما تأتي من API الموقع"""
+        """مزامنة الأقسام والمنتجات بالاعتماد على مسار المنتجات والأقسام معاً"""
+        # 1. جلب الأقسام الرئيسية والفرعية
         main_content = await self.get_content_by_category(0)
-        
         root_categories = main_content.get('categories', [])
-        all_products = main_content.get('products', [])
+        
+        # 2. جلب جميع المنتجات مباشرة من المسار الاحترافي /client/api/products
+        all_products = await self.get_products()
+        if not all_products:
+            # خطة بديلة لو فشل المسار المباشر
+            all_products = main_content.get('products', [])
 
         synced_cats_count = 0
         synced_prod_count = 0
         
         async with db_pool.acquire() as conn:
-            cat_mapping = {} # لتخزين معرف القسم في الموقع مقابل معرفه في قاعدة البيانات
+            cat_mapping = {}
             categories_to_process = list(root_categories)
             
-            # جلب محتوى الأقسام الفرعية والتصنيفات تلو الأخرى
+            # جلب الأقسام الفرعية أيضاً لتكتمل الشجرة
             for cat in root_categories:
                 cat_id_in_api = cat['id']
                 sub_content = await self.get_content_by_category(cat_id_in_api)
-                
-                # إضافة منتجات هذا القسم إلى القائمة الشاملة
-                if 'products' in sub_content and isinstance(sub_content['products'], list):
-                    for p in sub_content['products']:
-                        p['parent_id'] = cat_id_in_api
-                        all_products.append(p)
-                
-                # إضافة الأقسام الفرعية إن وجدت
                 sub_cats = sub_content.get('categories', [])
                 if isinstance(sub_cats, list):
                     categories_to_process.extend(sub_cats)
@@ -87,7 +88,6 @@ class MousaCardClient:
                 sort_order = cat.get('sort_order', 1)
                 icon = "📁"
                 
-                # إعطاء أيقونات حسب اسم القسم تلقائياً
                 name_lower = cat_name.lower()
                 if any(x in name_lower for x in ['pubg', 'ببجي', 'free fire', 'game', 'لعبة', 'شدات']):
                     icon = "🎮"
@@ -110,12 +110,11 @@ class MousaCardClient:
                     ''', str(api_cat_id), cat_name, icon, sort_order)
                     synced_cats_count += 1
                 else:
-                    # تحديث اسم القسم إن طرأ عليه تغيير
                     await conn.execute("UPDATE categories SET display_name = $1 WHERE id = $2", cat_name, db_cat_id)
                 
                 cat_mapping[api_cat_id] = db_cat_id
 
-            # قسم افتراضي احتياطي في حال وجد منتج بدون قسم
+            # قسم افتراضي احتياطي
             default_cat_id = await conn.fetchval("SELECT id FROM categories LIMIT 1")
             if not default_cat_id:
                 default_cat_id = await conn.fetchval('''
@@ -123,8 +122,11 @@ class MousaCardClient:
                     VALUES ($1, $2, $3, $4) RETURNING id
                 ''', 'default', 'خدمات عامة', '📁', 99)
 
-            # حفظ المنتجات وربطها بأقسامها الصحيحة
+            # حفظ المنتجات وتوزيعها حسب الـ parent_id أو القيمة القادمة من الـ API
             for product in all_products:
+                if not product.get('available', True):
+                    continue
+                    
                 prod_id = product.get('id')
                 if not prod_id:
                     continue
@@ -132,6 +134,15 @@ class MousaCardClient:
                 prod_name = product.get('name', 'خدمة بدون اسم')
                 base_price_syp = float(product.get('price', 0))
                 
+                # استخراج الحدود للكمية لو وجدت (qty_values)
+                qty_values = product.get('qty_values')
+                min_units = 1
+                if isinstance(qty_values, dict):
+                    try:
+                        min_units = int(float(qty_values.get('min', 1)))
+                    except:
+                        min_units = 1
+
                 parent_api_cat_id = product.get('parent_id', product.get('category_id', 0))
                 target_db_cat_id = cat_mapping.get(parent_api_cat_id, default_cat_id)
                 
@@ -145,10 +156,11 @@ class MousaCardClient:
                         UPDATE applications 
                         SET name = $1,
                             unit_price_usd = $2,
-                            category_id = $3,
+                            min_units = $3,
+                            category_id = $4,
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $4
-                    ''', prod_name, base_price_syp, target_db_cat_id, existing)
+                        WHERE id = $5
+                    ''', prod_name, base_price_syp, min_units, target_db_cat_id, existing)
                     synced_prod_count += 1
                 else:
                     try:
@@ -160,7 +172,7 @@ class MousaCardClient:
                         ''',
                         prod_name,
                         base_price_syp,
-                        1, 
+                        min_units,
                         default_profit,
                         'service',
                         str(prod_id),
@@ -176,7 +188,7 @@ class MousaCardClient:
         clear_cache("apps_by_category")
         clear_cache("products_list")
         
-        logger.info(f"✅ تمت المزامنة حسب أقسام الموقع: {synced_cats_count} قسم, {synced_prod_count} منتج")
+        logger.info(f"✅ تمت مزامنة المنتجات والأقسام بنجاح: {synced_cats_count} قسم, {synced_prod_count} منتج")
         return synced_cats_count + synced_prod_count
 
     async def create_order(self, product_id: int, quantity: int, player_id: str, extra_params: dict = None) -> dict:
@@ -205,9 +217,7 @@ class MousaCardClient:
 
 
 def get_api_client() -> MousaCardClient:
-    """إنشاء وتجهيز نسخة من عميل الـ API بالاعتماد على إعدادات القاعدة أو الكونفج"""
     import os
     api_url = os.getenv("MOUSA_API_URL", "https://mousacard.com")
-    # الـ Token الخاص بك
     api_token = "eVbvddm6ATc7pVsSMtakM5hTpZzd9RtvP6GRYPMByDQb5fWtfZKQPCsqEzYPBM1q"
     return MousaCardClient(api_url, api_token)
