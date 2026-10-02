@@ -182,7 +182,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             if opt['is_active']:
                 price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
                 discounted_usd = price_with_profit * (1 - discount/100)
-                price_syp = discounted_usd * current_rate
+                price_syp = discounted_usd
                 
                 btn_text = f"💎 {opt['name']} | {price_syp:,.0f} ل.س"
                 if discount > 0:
@@ -264,7 +264,7 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     price_with_profit = opt_price * (1 + app_profit)
     discounted_usd = price_with_profit * (1 - discount/100)
     total_syp = discounted_usd * current_rate
-    original_syp = price_with_profit * current_rate
+    original_syp = price_with_profit
     
     await state.update_data({
         'variant': dict(option),
