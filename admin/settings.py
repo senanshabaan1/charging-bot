@@ -30,6 +30,7 @@ class SettingsStates(StatesGroup):
     waiting_new_rate = State()
     waiting_maintenance_msg = State()
     waiting_new_syriatel_numbers = State()
+    waiting_wallet_value = State()
 
 # ✅ دوال مساعدة بدون كاش - تجلب من قاعدة البيانات مباشرة
 async def get_db_exchange_rate(db_pool) -> float:
@@ -150,71 +151,104 @@ async def save_maintenance_message(message: types.Message, state: FSMContext, db
     await state.clear()
 
 # أرقام سيرياتل
-@router.callback_query(F.data == "edit_syriatel")
-async def edit_syriatel_start(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """بدء تعديل أرقام سيرياتل كاش"""
-    if not is_admin(callback.from_user.id):
-        return await callback.answer("غير مصرح", show_alert=True)
-    
+# ============= إدارة محافظ وبنوك الدفع =============
+@router.callback_query(F.data == "edit_wallets_menu")
+async def edit_wallets_menu(callback: types.CallbackQuery, db_pool):
+    """لوحة التحكم بالمحافظ"""
+    if not is_admin(callback.from_user.id): return
     await callback.answer()
     
-    # ✅ استخدام قاعدة البيانات مباشرة
-    current_nums = await get_db_syriatel_numbers(db_pool)
-    
-    nums_text = "\n".join([f"{i+1}. `{num}`" for i, num in enumerate(current_nums)])
+    # جلب العناوين الحالية (أو استخدام القيم الموجودة بالكونفج كاحتياط)
+    import config
+    async with db_pool.acquire() as conn:
+        syr = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'syriatel_nums'")
+        sham = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'sham_cash_num'")
+        sham_usd = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'sham_cash_usd'")
+        usdt = await conn.fetchval("SELECT value FROM bot_settings WHERE key = 'usdt_wallet'")
+        
+    syr_display = syr if syr else ", ".join(config.SYRIATEL_NUMS) if config.SYRIATEL_NUMS else "غير محدد"
     
     text = (
-        f"📞 **أرقام سيرياتل كاش الحالية:**\n\n"
-        f"{nums_text}\n\n"
-        f"**أدخل الأرقام الجديدة** (كل رقم في سطر منفصل):\n"
-        f"مثال:\n74091109\n63826779\n\n"
-        f" أرسل /cancel للإلغاء"
+        "💳 <b>إدارة محافظ الدفع وأرقام التحويل</b>\n\n"
+        f"📞 <b>سيرياتل كاش:</b>\n<code>{syr_display}</code>\n\n"
+        f"🇸🇾 <b>شام كاش (ليرة):</b>\n<code>{sham or config.SHAM_CASH_NUM or 'غير محدد'}</code>\n\n"
+        f"💵 <b>شام كاش (دولار):</b>\n<code>{sham_usd or config.SHAM_CASH_NUM_USD or 'غير محدد'}</code>\n\n"
+        f"💎 <b>محفظة USDT:</b>\n<code>{usdt or config.USDT_BEP20_WALLET or 'غير محدد'}</code>\n\n"
+        "🔸 <b>اختر المحفظة التي تريد تعديلها:</b>"
     )
     
-    await callback.message.answer(text, parse_mode="Markdown")
-    await state.set_state(SettingsStates.waiting_new_syriatel_numbers)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📞 سيرياتل كاش", callback_data="edit_wallet_syriatel_nums"))
+    builder.row(types.InlineKeyboardButton(text="🇸🇾 شام كاش (ل.س)", callback_data="edit_wallet_sham_cash_num"))
+    builder.row(types.InlineKeyboardButton(text="💵 شام كاش ($)", callback_data="edit_wallet_sham_cash_usd"))
+    builder.row(types.InlineKeyboardButton(text="💎 محفظة USDT", callback_data="edit_wallet_usdt_wallet"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_settings_menu"))
+    
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-@router.message(SettingsStates.waiting_new_syriatel_numbers)
-async def save_syriatel_numbers(message: types.Message, state: FSMContext, db_pool):
-    """حفظ أرقام سيرياتل الجديدة"""
-    if not is_admin(message.from_user.id):
-        return
+@router.callback_query(F.data.startswith("edit_wallet_"))
+async def edit_wallet_start(callback: types.CallbackQuery, state: FSMContext):
+    wallet_key = callback.data.replace("edit_wallet_", "")
     
-    numbers = [line.strip() for line in message.text.split('\n') if line.strip()]
+    names = {
+        "syriatel_nums": "أرقام سيرياتل كاش (ضع فاصلة إذا كان أكثر من رقم)",
+        "sham_cash_num": "رقم شام كاش (ليرة سورية)",
+        "sham_cash_usd": "رقم شام كاش (دولار)",
+        "usdt_wallet": "عنوان محفظة USDT (BEP20)"
+    }
     
-    # ✅ التحقق من صحة الأرقام
-    valid_numbers = []
-    invalid_numbers = []
+    await state.update_data(wallet_key=wallet_key)
+    await state.set_state(SettingsStates.waiting_wallet_value)
     
-    for num in numbers:
-        # إزالة أي مسافات أو شرطات
-        clean_num = num.replace(' ', '').replace('-', '').replace('+', '')
-        if clean_num.isdigit() and len(clean_num) >= 8:
-            valid_numbers.append(clean_num)
-        else:
-            invalid_numbers.append(num)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="edit_wallets_menu"))
     
-    if invalid_numbers:
-        return await message.answer(
-            f"❌ الأرقام التالية غير صحيحة:\n{', '.join(invalid_numbers)}\n\n"
-            f"يرجى إدخال أرقام صحيحة (8 أرقام على الأقل).",
-            
-        )
-    
-    success = await set_syriatel_numbers(db_pool, valid_numbers)
-    
-    if success:
-        import config
-        config.SYRIATEL_NUMS = valid_numbers
+    await callback.message.edit_text(
+        f"✏️ <b>تعديل {names.get(wallet_key)}</b>\n\n"
+        f"أرسل الرقم أو العنوان الجديد الآن في رسالة:\n",
+        reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+
+@router.message(SettingsStates.waiting_wallet_value)
+async def save_wallet_value(message: types.Message, state: FSMContext, db_pool):
+    if message.text in ["/cancel", "❌ إلغاء", "🔙 رجوع للقائمة"]:
+        await state.clear()
+        return await message.answer("✅ تم الإلغاء.")
         
-        text = "✅ **تم تحديث أرقام سيرياتل كاش بنجاح!**\n\nالأرقام الجديدة:\n"
-        for i, num in enumerate(valid_numbers, 1):
-            text += f"{i}. `{num}`\n"
-    else:
-        text = "❌ **فشل تحديث الأرقام**"
+    data = await state.get_data()
+    wallet_key = data.get('wallet_key')
+    new_value = message.text.strip()
     
-    await message.answer(text, parse_mode="Markdown")
+    # تحديث في قاعدة البيانات
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO bot_settings (key, value) 
+            VALUES ($1, $2)
+            ON CONFLICT (key) DO UPDATE SET value = $2
+        ''', wallet_key, new_value)
+        
+    # تحديث الكونفج الحية لكي تظهر للزبائن في قائمة الإيداع فوراً بدون إعادة تشغيل
+    import config
+    if wallet_key == "syriatel_nums":
+        config.SYRIATEL_NUMS = [x.strip() for x in new_value.split(',')]
+    elif wallet_key == "sham_cash_num":
+        config.SHAM_CASH_NUM = new_value
+    elif wallet_key == "sham_cash_usd":
+        config.SHAM_CASH_NUM_USD = new_value
+    elif wallet_key == "usdt_wallet":
+        config.USDT_BEP20_WALLET = new_value
+        
     await state.clear()
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔙 العودة للمحافظ", callback_data="edit_wallets_menu"))
+    
+    await message.answer(
+        f"✅ <b>تم تحديث المحفظة بنجاح!</b>\n\n"
+        f"القيمة الجديدة: <code>{new_value}</code>\n"
+        f"ستظهر هذه القيمة للزبائن فوراً في قسم الإيداع.",
+        reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
 
 # سعر الصرف
 @router.callback_query(F.data == "edit_rate")
