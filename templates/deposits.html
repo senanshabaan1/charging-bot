@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة طلبات الشحن | لوحة التحكم</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Tajawal', sans-serif;
+        }
+        
+        body {
+            background: #f8f9fc;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1a1f2b 0%, #2c3e50 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+        }
+        
+        .sidebar .logo {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar .logo i {
+            font-size: 40px;
+            color: #3498db;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        .sidebar .nav-link.active {
+            background: #3498db;
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            margin-left: 10px;
+            width: 20px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .page-header h2 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .filters-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .deposits-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: #fafbfc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .card-header h5 i {
+            margin-left: 10px;
+            color: #27ae60;
+        }
+        
+        .card-body {
+            padding: 25px;
+        }
+        
+        .table {
+            margin: 0;
+        }
+        
+        .table thead th {
+            border-top: none;
+            font-weight: 600;
+            color: #7f8c8d;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-approved {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-rejected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .method-badge {
+            padding: 3px 8px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .method-syriatel {
+            background: #cfe2ff;
+            color: #084298;
+        }
+        
+        .method-bank {
+            background: #d1e7dd;
+            color: #0a3622;
+        }
+        
+        .method-usdt {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .btn-group-sm .btn {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .modal-content {
+            border-radius: 15px;
+        }
+        
+        .modal-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            border-radius: 15px 15px 0 0;
+        }
+        
+        .photo-preview {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+        
+        .search-box {
+            width: 250px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+                position: static;
+            }
+            
+            .card-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .search-box {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي -->
+            <div class="col-md-2 sidebar">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h4>إدارة البوت</h4>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a href="/" class="nav-link">
+                            <i class="fas fa-home"></i> الرئيسية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link">
+                            <i class="fas fa-users"></i> إدارة المستخدمين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/applications" class="nav-link">
+                            <i class="fas fa-mobile-alt"></i> إدارة التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/categories" class="nav-link">
+                            <i class="fas fa-folder"></i> إدارة الأقسام
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/points" class="nav-link">
+                            <i class="fas fa-star"></i> إدارة النقاط
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/vip" class="nav-link">
+                            <i class="fas fa-crown"></i> نظام VIP
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/deposits" class="nav-link active">
+                            <i class="fas fa-coins"></i> طلبات الشحن
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/orders" class="nav-link">
+                            <i class="fas fa-shopping-cart"></i> طلبات التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/statistics" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/broadcast" class="nav-link">
+                            <i class="fas fa-bullhorn"></i> رسالة جماعية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admins" class="nav-link">
+                            <i class="fas fa-shield-alt"></i> إدارة المشرفين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <a href="/logout" class="btn btn-danger w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                </a>
+            </div>
+            
+            <!-- المحتوى الرئيسي -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'danger' else 'check-circle' }} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <div class="page-header">
+                    <h2>
+                        <i class="fas fa-coins me-2"></i>
+                        إدارة طلبات الشحن
+                    </h2>
+                </div>
+                
+                <!-- فلتر البحث -->
+                <div class="filters-card">
+                    <form method="GET" class="row g-3">
+                        <div class="col-md-4">
+                            <input type="text" name="search" class="form-control" placeholder="بحث بآيدي المستخدم أو رقم المعاملة" value="{{ request.args.get('search', '') }}">
+                        </div>
+                        <div class="col-md-3">
+                            <select name="status" class="form-control">
+                                <option value="">جميع الحالات</option>
+                                <option value="pending" {% if request.args.get('status') == 'pending' %}selected{% endif %}>معلق</option>
+                                <option value="approved" {% if request.args.get('status') == 'approved' %}selected{% endif %}>مقبول</option>
+                                <option value="rejected" {% if request.args.get('status') == 'rejected' %}selected{% endif %}>مرفوض</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select name="method" class="form-control">
+                                <option value="">جميع الطرق</option>
+                                <option value="syriatel" {% if request.args.get('method') == 'syriatel' %}selected{% endif %}>سيرياتل</option>
+                                <option value="bank" {% if request.args.get('method') == 'bank' %}selected{% endif %}>تحويل بنكي</option>
+                                <option value="usdt" {% if request.args.get('method') == 'usdt' %}selected{% endif %}>USDT</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-search me-2"></i>بحث
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- قائمة طلبات الشحن -->
+                <div class="deposits-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-list"></i>
+                            طلبات الشحن ({{ deposits|length }})
+                        </h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>المستخدم</th>
+                                        <th>الطريقة</th>
+                                        <th>المبلغ ($)</th>
+                                        <th>المبلغ (ل.س)</th>
+                                        <th>رقم المعاملة</th>
+                                        <th>صورة</th>
+                                        <th>الحالة</th>
+                                        <th>التاريخ</th>
+                                        <th>الإجراءات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for deposit in deposits %}
+                                    <tr class="{% if deposit.status == 'pending' %}table-warning{% endif %}">
+                                        <td>{{ deposit.id }}</td>
+                                        <td>
+                                            <strong>{{ deposit.username or 'غير معروف' }}</strong>
+                                            <br>
+                                            <small class="text-muted">ID: {{ deposit.user_id }}</small>
+                                        </td>
+                                        <td>
+                                            {% if deposit.method == 'syriatel' %}
+                                            <span class="method-badge method-syriatel">📱 سيرياتل</span>
+                                            {% elif deposit.method == 'bank' %}
+                                            <span class="method-badge method-bank">🏦 بنكي</span>
+                                            {% elif deposit.method == 'usdt' %}
+                                            <span class="method-badge method-usdt">₿ USDT</span>
+                                            {% else %}
+                                            <span class="method-badge">{{ deposit.method }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>${{ "%.2f"|format(deposit.amount) }}</td>
+                                        <td class="fw-bold">{{ deposit.amount_syp|int }} ل.س</td>
+                                        <td>
+                                            {% if deposit.tx_info %}
+                                            <code>{{ deposit.tx_info }}</code>
+                                            {% else %}
+                                            -
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if deposit.has_photo %}
+                                            <button class="btn btn-sm btn-info" onclick="showPhoto({{ deposit.id }})">
+                                                <i class="fas fa-image"></i>
+                                            </button>
+                                            {% else %}
+                                            -
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if deposit.status == 'pending' %}
+                                            <span class="status-badge status-pending">
+                                                <i class="fas fa-clock me-1"></i>معلق
+                                            </span>
+                                            {% elif deposit.status == 'approved' %}
+                                            <span class="status-badge status-approved">
+                                                <i class="fas fa-check-circle me-1"></i>مقبول
+                                            </span>
+                                            {% elif deposit.status == 'rejected' %}
+                                            <span class="status-badge status-rejected">
+                                                <i class="fas fa-times-circle me-1"></i>مرفوض
+                                            </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ deposit.created_at.strftime('%Y-%m-%d %H:%M') if deposit.created_at else '-' }}</td>
+                                        <td>
+                                            {% if deposit.status == 'pending' %}
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-success" onclick="approveDeposit({{ deposit.id }})">
+                                                    <i class="fas fa-check"></i> قبول
+                                                </button>
+                                                <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal{{ deposit.id }}">
+                                                    <i class="fas fa-times"></i> رفض
+                                                </button>
+                                            </div>
+                                            {% else %}
+                                            <button class="btn btn-sm btn-info" onclick="viewDetails({{ deposit.id }})">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    
+                                    <!-- Modal رفض -->
+                                    <div class="modal fade" id="rejectModal{{ deposit.id }}" tabindex="-1">
+                                        <div class="modal-dialog">
+                                            <div class="modal-content">
+                                                <form action="/deposit_action/{{ deposit.id }}" method="POST">
+                                                    <input type="hidden" name="action" value="reject">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title text-danger">
+                                                            <i class="fas fa-times-circle me-2"></i>
+                                                            رفض طلب الشحن #{{ deposit.id }}
+                                                        </h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                    </div>
+                                                    <div class="modal-body">
+                                                        <p class="mb-3">
+                                                            <strong>المستخدم:</strong> {{ deposit.username or deposit.user_id }}<br>
+                                                            <strong>المبلغ:</strong> {{ deposit.amount_syp|int }} ل.س
+                                                        </p>
+                                                        
+                                                        <div class="mb-3">
+                                                            <label class="form-label fw-bold">سبب الرفض</label>
+                                                            <textarea name="notes" class="form-control" rows="3" placeholder="اختياري"></textarea>
+                                                        </div>
+                                                    </div>
+                                                    <div class="modal-footer">
+                                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                                                        <button type="submit" class="btn btn-danger">تأكيد الرفض</button>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal عرض الصورة -->
+    <div class="modal fade" id="photoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-image me-2"></i>
+                        صورة التحويل
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center" id="photoContent">
+                    <img src="" class="photo-preview" id="photoImage">
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal التفاصيل -->
+    <div class="modal fade" id="detailsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-info-circle me-2"></i>
+                        تفاصيل الطلب
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="detailsContent">
+                    جاري التحميل...
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // الموافقة على الطلب
+        function approveDeposit(depositId) {
+            if (confirm('هل أنت متأكد من الموافقة على هذا الطلب؟')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = `/deposit_action/${depositId}`;
+                
+                const actionInput = document.createElement('input');
+                actionInput.type = 'hidden';
+                actionInput.name = 'action';
+                actionInput.value = 'approve';
+                form.appendChild(actionInput);
+                
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+        
+        // عرض الصورة
+        function showPhoto(depositId) {
+            // هنا يمكن جلب الصورة من API
+            const modal = new bootstrap.Modal(document.getElementById('photoModal'));
+            document.getElementById('photoImage').src = `/deposit_photo/${depositId}`;
+            modal.show();
+        }
+        
+        // عرض التفاصيل
+        function viewDetails(depositId) {
+            const modal = new bootstrap.Modal(document.getElementById('detailsModal'));
+            document.getElementById('detailsContent').innerHTML = 'جاري التحميل...';
+            modal.show();
+            
+            // جلب التفاصيل عبر AJAX
+            fetch(`/api/deposit/${depositId}`)
+                .then(response => response.json())
+                .then(data => {
+                    let html = `
+                        <table class="table">
+                            <tr>
+                                <th>رقم الطلب:</th>
+                                <td>${data.id}</td>
+                            </tr>
+                            <tr>
+                                <th>المستخدم:</th>
+                                <td>${data.username || data.user_id}</td>
+                            </tr>
+                            <tr>
+                                <th>الطريقة:</th>
+                                <td>${data.method}</td>
+                            </tr>
+                            <tr>
+                                <th>المبلغ:</th>
+                                <td>${data.amount_syp} ل.س</td>
+                            </tr>
+                            <tr>
+                                <th>الحالة:</th>
+                                <td>${data.status}</td>
+                            </tr>
+                            <tr>
+                                <th>تاريخ الإنشاء:</th>
+                                <td>${data.created_at}</td>
+                            </tr>
+                            <tr>
+                                <th>تاريخ المعالجة:</th>
+                                <td>${data.processed_at || '-'}</td>
+                            </tr>
+                            <tr>
+                                <th>ملاحظات:</th>
+                                <td>${data.admin_notes || '-'}</td>
+                            </tr>
+                        </table>
+                    `;
+                    document.getElementById('detailsContent').innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('detailsContent').innerHTML = '<div class="alert alert-danger">خطأ في تحميل البيانات</div>';
+                });
+        }
+        
+        // تحديث تلقائي كل 30 ثانية
+        setTimeout(() => location.reload(), 30000);
+    </script>
+</body>
+</html>

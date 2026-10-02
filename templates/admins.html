@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة المشرفين | لوحة التحكم</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Tajawal', sans-serif;
+        }
+        
+        body {
+            background: #f8f9fc;
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1a1f2b 0%, #2c3e50 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+        }
+        
+        .sidebar .logo {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar .logo i {
+            font-size: 40px;
+            color: #3498db;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 12px 15px;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+        
+        .sidebar .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        
+        .sidebar .nav-link.active {
+            background: #3498db;
+            color: white;
+        }
+        
+        .sidebar .nav-link i {
+            margin-left: 10px;
+            width: 20px;
+        }
+        
+        .main-content {
+            padding: 30px;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .page-header h2 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .admins-card, .logs-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: #fafbfc;
+            padding: 20px 25px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .card-header h5 i {
+            margin-left: 10px;
+            color: #e74c3c;
+        }
+        
+        .card-body {
+            padding: 25px;
+        }
+        
+        .table {
+            margin: 0;
+        }
+        
+        .table thead th {
+            border-top: none;
+            font-weight: 600;
+            color: #7f8c8d;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        
+        .role-badge {
+            padding: 5px 10px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .role-owner {
+            background: #cfe2ff;
+            color: #084298;
+        }
+        
+        .role-admin {
+            background: #d1e7dd;
+            color: #0a3622;
+        }
+        
+        .role-moderator {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .btn-group-sm .btn {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .modal-content {
+            border-radius: 15px;
+        }
+        
+        .modal-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            border-radius: 15px 15px 0 0;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border-right: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+                position: static;
+            }
+            
+            .card-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي -->
+            <div class="col-md-2 sidebar">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <h4>إدارة البوت</h4>
+                </div>
+                
+                <ul class="nav flex-column">
+                    <li class="nav-item">
+                        <a href="/" class="nav-link">
+                            <i class="fas fa-home"></i> الرئيسية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/users" class="nav-link">
+                            <i class="fas fa-users"></i> إدارة المستخدمين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/applications" class="nav-link">
+                            <i class="fas fa-mobile-alt"></i> إدارة التطبيقات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/categories" class="nav-link">
+                            <i class="fas fa-folder"></i> إدارة الأقسام
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/points" class="nav-link">
+                            <i class="fas fa-star"></i> إدارة النقاط
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/vip" class="nav-link">
+                            <i class="fas fa-crown"></i> نظام VIP
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/statistics" class="nav-link">
+                            <i class="fas fa-chart-bar"></i> الإحصائيات
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/broadcast" class="nav-link">
+                            <i class="fas fa-bullhorn"></i> رسالة جماعية
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admins" class="nav-link active">
+                            <i class="fas fa-shield-alt"></i> إدارة المشرفين
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/settings" class="nav-link">
+                            <i class="fas fa-cog"></i> الإعدادات
+                        </a>
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <a href="/logout" class="btn btn-danger w-100">
+                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                </a>
+            </div>
+            
+            <!-- المحتوى الرئيسي -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                <i class="fas fa-{{ 'exclamation-circle' if category == 'danger' else 'check-circle' }} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <div class="page-header">
+                    <h2>
+                        <i class="fas fa-shield-alt me-2"></i>
+                        إدارة المشرفين
+                    </h2>
+                    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addAdminModal">
+                        <i class="fas fa-plus me-2"></i>إضافة مشرف جديد
+                    </button>
+                </div>
+                
+                <!-- قائمة المشرفين -->
+                <div class="admins-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-users-cog"></i>
+                            قائمة المشرفين
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% if admins %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>المستخدم</th>
+                                        <th>الدور</th>
+                                        <th>تاريخ الإضافة</th>
+                                        <th>آخر نشاط</th>
+                                        <th>الإجراءات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for admin in admins %}
+                                    <tr>
+                                        <td>{{ admin.user_id }}</td>
+                                        <td>
+                                            <strong>{{ admin.username or admin.first_name or 'غير معروف' }}</strong>
+                                            <br>
+                                            <small class="text-muted">ID: {{ admin.user_id }}</small>
+                                        </td>
+                                        <td>
+                                            {% if admin.role == 'owner' %}
+                                            <span class="role-badge role-owner">
+                                                <i class="fas fa-crown me-1"></i>مالك
+                                            </span>
+                                            {% elif admin.role == 'admin' %}
+                                            <span class="role-badge role-admin">
+                                                <i class="fas fa-shield-alt me-1"></i>مدير
+                                            </span>
+                                            {% else %}
+                                            <span class="role-badge role-moderator">
+                                                <i class="fas fa-user-shield me-1"></i>مشرف
+                                            </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ admin.created_at.strftime('%Y-%m-%d') if admin.created_at else '-' }}</td>
+                                        <td>{{ admin.last_login.strftime('%Y-%m-%d %H:%M') if admin.last_login else '-' }}</td>
+                                        <td>
+                                            {% if admin.role != 'owner' %}
+                                            <form action="/remove_admin/{{ admin.user_id }}" method="POST" class="d-inline" onsubmit="return confirm('هل أنت متأكد من إزالة هذا المشرف؟');">
+                                                <button type="submit" class="btn btn-sm btn-danger">
+                                                    <i class="fas fa-user-minus"></i> إزالة
+                                                </button>
+                                            </form>
+                                            {% else %}
+                                            <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-users-slash text-muted" style="font-size: 48px;"></i>
+                            <p class="mt-3 text-muted">لا يوجد مشرفين</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- سجل النشاطات -->
+                <div class="logs-card">
+                    <div class="card-header">
+                        <h5>
+                            <i class="fas fa-history"></i>
+                            آخر النشاطات
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% if logs %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>المشرف</th>
+                                        <th>الإجراء</th>
+                                        <th>التفاصيل</th>
+                                        <th>التاريخ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for log in logs %}
+                                    <tr>
+                                        <td>{{ log.user_id }}</td>
+                                        <td>
+                                            <span class="badge bg-info">{{ log.action }}</span>
+                                        </td>
+                                        <td>{{ log.details }}</td>
+                                        <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted text-center py-3">لا يوجد سجل نشاطات</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal إضافة مشرف جديد -->
+    <div class="modal fade" id="addAdminModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="/add_admin" method="POST">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-user-plus text-success me-2"></i>
+                            إضافة مشرف جديد
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="warning-box">
+                            <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                            يجب على المستخدم استخدام البوت مرة واحدة على الأقل قبل إضافته كمشرف.
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">آيدي المستخدم <span class="text-danger">*</span></label>
+                            <input type="number" name="user_id" class="form-control" placeholder="مثال: 123456789" required>
+                            <small class="text-muted">يمكن للمستخدم الحصول على آيديه عبر إرسال /id للبوت</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">الدور</label>
+                            <select name="role" class="form-control">
+                                <option value="moderator">🛡️ مشرف - صلاحيات محدودة</option>
+                                <option value="admin">👑 مدير - جميع الصلاحيات ما عدا إدارة المشرفين</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                        <button type="submit" class="btn btn-success">إضافة المشرف</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // تحديث تلقائي كل 30 ثانية
+        setTimeout(() => location.reload(), 30000);
+    </script>
+</body>
+</html>
