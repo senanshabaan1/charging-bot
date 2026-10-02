@@ -306,7 +306,7 @@ async def process_quantity(message_obj: types.Message, state: FSMContext, qty: i
     final_unit_usd = data['final_unit_price_usd']
     original_syp = final_unit_usd * qty * current_rate
     discounted_usd = final_unit_usd * (1 - discount/100)
-    total_syp = qty * discounted_usd * current_rate
+    total_syp = qty * discounted_unit_price_usd
     
     await state.update_data(qty=qty, total_usd=qty*discounted_usd, total_syp=total_syp, original_total_syp=original_syp)
     
