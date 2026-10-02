@@ -309,7 +309,7 @@ class MousaCardAPI:
     
     # ============= مزامنة البيانات مع قاعدة البيانات =============
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """مزامنة الخدمات وحفظ السعر الأساسي الصافي مع تثبيت نسبة الربح بشكل منفصل"""
+        """مزامنة الخدمات وفرزها في أقسام مخصصة تلقائياً حسب نوع الخدمة"""
         products = await self.get_products()
         
         if not products:
@@ -320,33 +320,52 @@ class MousaCardAPI:
         updated_count = 0
         
         async with db_pool.acquire() as conn:
-            existing_cats = await conn.fetch("SELECT id, display_name FROM categories")
-            cat_map = {c['display_name']: c['id'] for c in existing_cats if c['display_name']}
+            # خريطة الأقسام الافتراضية الذكية
+            categories_map = {
+                "units": {"name": "syriatel_mtn", "display": "📞 وحدات سيرياتل و MTN", "icon": "📞", "sort": 1},
+                "games": {"name": "games", "display": "🎮 الألعاب وشحنها", "icon": "🎮", "sort": 2},
+                "chat": {"name": "chat_apps", "display": "💬 تطبيقات الدردشة", "icon": "💬", "sort": 3},
+                "subs": {"name": "subscriptions", "display": "📅 الاشتراكات الرقمية", "icon": "📅", "sort": 4},
+                "other": {"name": "general_services", "display": "📁 خدمات عامة", "icon": "📁", "sort": 5}
+            }
+            
+            # التأكد من وجود هذه الأقسام مسبقاً في قاعدة البيانات أو إنشاءها
+            cat_db_ids = {}
+            for key, cat_info in categories_map.items():
+                cat_id = await conn.fetchval("SELECT id FROM categories WHERE name = $1", cat_info["name"])
+                if not cat_id:
+                    cat_id = await conn.fetchval('''
+                        INSERT INTO categories (name, display_name, icon, sort_order)
+                        VALUES ($1, $2, $3, $4) RETURNING id
+                    ''', cat_info["name"], cat_info["display"], cat_info["icon"], cat_info["sort"])
+                cat_db_ids[key] = cat_id
             
             for product in products:
                 if not product['available']:
                     continue
                 
-                # ==========================================
-                # 🛠️ القاعدة الصحيحة: حفظ السعر الأساسي الصافي فقط
-                # ==========================================
-                base_price_syp = float(product['price']) # السعر الأساسي من الموقع بدون أي إضافات
-                # ==========================================
+                # السعر الأساسي الصافي بالسوري
+                base_price_syp = float(product['price'])
                 
-                cat_name = product.get('category_name')
-                if not cat_name:
-                    cat_name = "خدمات عامة"
-                    
-                if cat_name not in cat_map:
-                    import time
-                    internal_name = f"api_cat_{int(time.time() * 1000)}_{product['id']}"
-                    new_cat_id = await conn.fetchval('''
-                        INSERT INTO categories (name, display_name, icon, sort_order)
-                        VALUES ($1, $2, $3, $4) RETURNING id
-                    ''', internal_name, cat_name, "📁", 10)
-                    cat_map[cat_name] = new_cat_id
+                # ==========================================
+                # 🧠 الفرز الذكي للأقسام حسب اسم المنتج أو فئته من الموقع
+                # ==========================================
+                prod_name = str(product['name']).lower()
+                raw_cat_name = str(product.get('category_name', '')).lower()
                 
-                category_id = cat_map[cat_name]
+                target_cat_key = "other"
+                
+                if any(x in prod_name or x in raw_cat_name for x in ['سيرياتل', 'syriatel', 'mtn', 'ام تي ان', 'رصيد', 'وحدات', 'صاعق']):
+                    target_cat_key = "units"
+                elif any(x in prod_name or x in raw_cat_name for x in ['pubg', 'ببجي', 'free fire', 'فري فاير', 'clash', 'لعبة', 'ألعاب', 'game', 'شدات', 'ماساه', 'جواهر']):
+                    target_cat_key = "games"
+                elif any(x in prod_name or x in raw_cat_name for x in ['telegram', 'تيليجرام', 'رصيد تليجرام', 'نجوم', 'stars', 'whatsapp', 'viber', 'دردشة', 'chat']):
+                    target_cat_key = "chat"
+                elif any(x in prod_name or x in raw_cat_name for x in ['netflix', 'نتفلكس', 'spotify', 'يوتيوب', 'اشتراك', 'vip', 'انترنت', 'قنوات']):
+                    target_cat_key = "subs"
+                
+                category_id = cat_db_ids[target_cat_key]
+                # ==========================================
                 
                 existing = await conn.fetchval(
                     "SELECT id FROM applications WHERE api_service_id = $1 OR name = $2",
@@ -391,7 +410,7 @@ class MousaCardAPI:
         clear_cache("apps_by_category")
         clear_cache("products_list")
         
-        logger.info(f"✅ تمت المزامنة بأسعار صافية: {synced_count} جديدة, {updated_count} تحديث")
+        logger.info(f"✅ تمت المزامنة والفرز الذكي: {synced_count} جديدة, {updated_count} تحديث")
         return synced_count + updated_count
 # ============= Singleton Pattern =============
 _api_client: Optional[MousaCardAPI] = None
