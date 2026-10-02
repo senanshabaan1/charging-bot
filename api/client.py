@@ -237,3 +237,11 @@ def get_api_client() -> MousaCardClient:
     api_url = os.getenv("MOUSA_API_URL", "https://mousacard.com")
     api_token = "eVbvddm6ATc7pVsSMtakM5hTpZzd9RtvP6GRYPMByDQb5fWtfZKQPCsqEzYPBM1q"
     return MousaCardClient(api_url, api_token)
+    # ============= دوال توافقية إضافية =============
+def set_api_token(token: str):
+    """دالة توافقية لتحديث الرمز"""
+    pass
+
+def close_api_client():
+    """دالة توافقية لإغلاق الاتصال"""
+    pass
