@@ -1,5 +1,6 @@
 import aiohttp
 import logging
+import uuid
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -14,12 +15,12 @@ class MousaCardClient:
             "Content-Type": "application/json"
         }
 
-    async def _make_request(self, method: str, endpoint: str, data: dict = None) -> Any:
+    async def _make_request(self, method: str, endpoint: str, data: dict = None, params: dict = None) -> Any:
         """تنفيذ طلبات HTTP مع التعامل مع الأخطاء"""
         url = f"{self.api_url}{endpoint}"
         async with aiohttp.ClientSession(headers=self.headers) as session:
             try:
-                async with session.request(method, url, json=data, timeout=30) as response:
+                async with session.request(method, url, json=data, params=params, timeout=30) as response:
                     if response.status == 200:
                         try:
                             return await response.json()
@@ -56,14 +57,11 @@ class MousaCardClient:
 
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
         """مزامنة الأقسام والمنتجات بالاعتماد على مسار المنتجات والأقسام معاً"""
-        # 1. جلب الأقسام الرئيسية والفرعية
         main_content = await self.get_content_by_category(0)
         root_categories = main_content.get('categories', [])
         
-        # 2. جلب جميع المنتجات مباشرة من المسار الاحترافي /client/api/products
         all_products = await self.get_products()
         if not all_products:
-            # خطة بديلة لو فشل المسار المباشر
             all_products = main_content.get('products', [])
 
         synced_cats_count = 0
@@ -73,7 +71,6 @@ class MousaCardClient:
             cat_mapping = {}
             categories_to_process = list(root_categories)
             
-            # جلب الأقسام الفرعية أيضاً لتكتمل الشجرة
             for cat in root_categories:
                 cat_id_in_api = cat['id']
                 sub_content = await self.get_content_by_category(cat_id_in_api)
@@ -81,7 +78,6 @@ class MousaCardClient:
                 if isinstance(sub_cats, list):
                     categories_to_process.extend(sub_cats)
 
-            # حفظ الأقسام في قاعدة البيانات
             for cat in categories_to_process:
                 api_cat_id = cat['id']
                 cat_name = cat.get('name', 'تصنيف غير معروف')
@@ -114,7 +110,6 @@ class MousaCardClient:
                 
                 cat_mapping[api_cat_id] = db_cat_id
 
-            # قسم افتراضي احتياطي
             default_cat_id = await conn.fetchval("SELECT id FROM categories LIMIT 1")
             if not default_cat_id:
                 default_cat_id = await conn.fetchval('''
@@ -122,7 +117,6 @@ class MousaCardClient:
                     VALUES ($1, $2, $3, $4) RETURNING id
                 ''', 'default', 'خدمات عامة', '📁', 99)
 
-            # حفظ المنتجات وتوزيعها حسب الـ parent_id أو القيمة القادمة من الـ API
             for product in all_products:
                 if not product.get('available', True):
                     continue
@@ -134,7 +128,6 @@ class MousaCardClient:
                 prod_name = product.get('name', 'خدمة بدون اسم')
                 base_price_syp = float(product.get('price', 0))
                 
-                # استخراج الحدود للكمية لو وجدت (qty_values)
                 qty_values = product.get('qty_values')
                 min_units = 1
                 if isinstance(qty_values, dict):
@@ -192,28 +185,41 @@ class MousaCardClient:
         return synced_cats_count + synced_prod_count
 
     async def create_order(self, product_id: int, quantity: int, player_id: str, extra_params: dict = None) -> dict:
-        """إرسال طلب شراء إلى Mousa Card API"""
-        payload = {
-            "product_id": product_id,
-            "quantity": quantity,
-            "player_id": player_id
+        """إنشاء طلب جديد عبر مسار /client/api/newOrder/{product_id}/params"""
+        # توليد معرف فريد لمنع تكرار الطلب (UUIDv4)
+        unique_order_uuid = str(uuid.uuid4())
+        
+        endpoint = f"/client/api/newOrder/{product_id}/params"
+        
+        # تجهيز بارامترات الطلب حسب متطلبات الـ API
+        params = {
+            "qty": quantity,
+            "playerId": player_id,
+            "order_uuid": unique_order_uuid
         }
         if extra_params:
-            payload.update(extra_params)
+            params.update(extra_params)
             
-        result = await self._make_request("POST", "/client/api/order/create", payload)
+        # إرسال الطلب بطريقة GET (أو POST حسب المتاح، الـ API يدعم الإثنين)
+        result = await self._make_request("GET", endpoint, params=params)
         
         if isinstance(result, dict):
-            if result.get("status") == "success" or result.get("success") == True or "order_id" in result:
+            status = result.get("status", "").lower()
+            # فحص الاستجابة (accept أو OK)
+            if status in ["ok", "accept", "success"] or result.get("success") == True:
+                data_dict = result.get("data", result)
+                order_id = data_dict.get("order_id", data_dict.get("id", unique_order_uuid))
                 return {
                     "success": True,
-                    "order_id": result.get("order_id", result.get("id", "N/A")),
+                    "order_id": order_id,
                     "raw": result
                 }
             else:
-                error_msg = result.get("message", result.get("error", "خطأ غير معروف من المصدر"))
+                # إذا كان الحالة reject أو فشل
+                error_msg = result.get("message", result.get("error", "تم رفض الطلب من المصدر (Reject)"))
                 return {"success": False, "error": error_msg}
-        return {"success": False, "error": "استجابة غير صالحة من خادم الموقع"}
+                
+        return {"success": False, "error": "استجابة غير صالحة من خادم الموقع عند إنشاء الطلب"}
 
 
 def get_api_client() -> MousaCardClient:
