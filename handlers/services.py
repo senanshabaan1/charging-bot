@@ -294,7 +294,7 @@ async def manual_qty(message: types.Message, state: FSMContext, db_pool):
 async def process_quantity(message_obj: types.Message, state: FSMContext, qty: int, db_pool, is_edit=False):
     data = await state.get_data()
     app = data['app']
-    current_rate, discount = data['current_rate'], data['discount']
+    discount = data['discount']
     min_units = app.get('min_units', 1) or 1
     
     if qty < min_units:
@@ -304,9 +304,9 @@ async def process_quantity(message_obj: types.Message, state: FSMContext, qty: i
         return
         
     final_unit_usd = data['final_unit_price_usd']
-    original_syp = final_unit_usd * qty * current_rate
+    original_syp = final_unit_usd * qty  # السعر المباشر بالسوري
     discounted_usd = final_unit_usd * (1 - discount/100)
-    total_syp = qty * discounted_unit_price_usd
+    total_syp = qty * discounted_usd     # السعر الإجمالي المباشر بالسوري
     
     await state.update_data(qty=qty, total_usd=qty*discounted_usd, total_syp=total_syp, original_total_syp=original_syp)
     
