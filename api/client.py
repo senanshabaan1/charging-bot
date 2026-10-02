@@ -309,7 +309,7 @@ class MousaCardAPI:
     
     # ============= مزامنة البيانات مع قاعدة البيانات =============
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """مزامنة الخدمات من Mousa Card مع قاعدة البيانات المحلية"""
+        """مزامنة الخدمات والأقسام من Mousa Card مع قاعدة البيانات المحلية تلقائياً"""
         products = await self.get_products()
         
         if not products:
@@ -320,13 +320,34 @@ class MousaCardAPI:
         updated_count = 0
         
         async with db_pool.acquire() as conn:
+            # جلب الأقسام الحالية لعدم التكرار
+            existing_cats = await conn.fetch("SELECT id, display_name FROM categories")
+            cat_map = {c['display_name']: c['id'] for c in existing_cats if c['display_name']}
+            
             for product in products:
                 if not product['available']:
                     continue
                 
+                # 1. إنشاء القسم تلقائياً إذا لم يكن موجوداً
+                cat_name = product.get('category_name')
+                if not cat_name:
+                    cat_name = "خدمات عامة"
+                    
+                if cat_name not in cat_map:
+                    import time
+                    internal_name = f"api_cat_{int(time.time() * 1000)}_{product['id']}"
+                    new_cat_id = await conn.fetchval('''
+                        INSERT INTO categories (name, display_name, icon, sort_order)
+                        VALUES ($1, $2, $3, $4) RETURNING id
+                    ''', internal_name, cat_name, "📁", 10)
+                    cat_map[cat_name] = new_cat_id
+                
+                category_id = cat_map[cat_name]
+                
+                # 2. حساب السعر مع الربح
                 selling_price = product['price'] * (1 + default_profit / 100)
                 
-                # ✅ التعديل هنا: البحث عن المنتج بالـ ID أو بالاسم لتجنب تعارض الأسماء (Duplicate Key)
+                # 3. تحديث أو إضافة المنتج وربطه بالقسم الجديد
                 existing = await conn.fetchval(
                     "SELECT id FROM applications WHERE api_service_id = $1 OR name = $2",
                     str(product['id']), product['name']
@@ -339,17 +360,18 @@ class MousaCardAPI:
                             min_units = $2,
                             profit_percentage = $3,
                             api_service_id = $4,
+                            category_id = $5,
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $5
-                    ''', selling_price, product['min_quantity'], default_profit, str(product['id']), existing)
+                        WHERE id = $6
+                    ''', selling_price, product['min_quantity'], default_profit, str(product['id']), category_id, existing)
                     updated_count += 1
                 else:
                     try:
                         await conn.execute('''
                             INSERT INTO applications 
                             (name, unit_price_usd, min_units, profit_percentage, 
-                             type, api_service_id, is_active)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                             type, api_service_id, category_id, is_active)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         ''',
                         product['name'],
                         selling_price,
@@ -357,15 +379,21 @@ class MousaCardAPI:
                         default_profit,
                         'service',
                         str(product['id']),
+                        category_id,
                         True
                         )
                         synced_count += 1
                     except Exception as e:
                         logger.error(f"⚠️ تخطي المنتج {product['name']} بسبب خطأ: {e}")
         
+        # مسح الكاش لظهور التعديلات فوراً
+        from cache import clear_cache
+        clear_cache("categories")
+        clear_cache("apps_by_category")
+        clear_cache("products_list")
+        
         logger.info(f"✅ مزامنة Mousa Card: {synced_count} خدمات جديدة, {updated_count} تحديث")
         return synced_count + updated_count
-
 # ============= Singleton Pattern =============
 _api_client: Optional[MousaCardAPI] = None
 _api_token: str = None
