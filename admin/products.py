@@ -321,35 +321,38 @@ async def edit_product_list(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("edit_prod_"))
 async def edit_product_form(callback: types.CallbackQuery, state: FSMContext, db_pool):
     """عرض نموذج تعديل المنتج"""
-    # ✅ إطفاء الزر فوراً
     await callback.answer()
-    
     prod_id = int(callback.data.split("_")[2])
     
-    # ✅ استخدام الكاش
     product = await get_cached_product_details(db_pool, prod_id)
-    
     if not product:
         return await callback.answer("❌ المنتج غير موجود", show_alert=True)
     
     await state.update_data(product_id=prod_id)
     
+    # جلب اسم القسم إذا وجد
+    async with db_pool.acquire() as conn:
+        cat_name = await conn.fetchval("SELECT display_name FROM categories WHERE id = $1", product.get('category_id'))
+        cat_display = cat_name if cat_name else "⚠️ بدون قسم (مخفي عن المستخدمين)"
+
     text = (
         f"✏️ **تعديل المنتج:** {product['name']}\n\n"
         f"**البيانات الحالية:**\n"
-        f"• القسم: {product.get('category_id', 'غير محدد')}\n"
+        f"• القسم: {cat_display}\n"
         f"• السعر: ${product['unit_price_usd']}\n"
-        f"• الحد الأدنى: {product['min_units']}\n"
+        f"• الحد الأدنى للطلب: {product['min_units']}\n"
         f"• الربح: {product['profit_percentage']}%\n"
-        f"• النوع: {product['type']}\n"
         f"• الحالة: {'✅ نشط' if product['is_active'] else '❌ غير نشط'}\n\n"
-        f"📝 أرسل البيانات الجديدة بالصيغة:\n"
-        f"`الاسم|السعر|الحد_الأدنى|الربح`\n\n"
-        f"مثال:` اسم جديد|0.01|200|10 `\n\n"
+        f"📝 لتعديل البيانات أرسل بالصيغة:\n"
+        f"`الاسم|السعر|الحد_الأدنى|الربح`\n"
         f" أرسل /cancel للإلغاء"
     )
     
-    await safe_edit_message(callback.message, text)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📁 إظهار المنتج للزبائن (تعيين قسم)", callback_data=f"change_cat_{prod_id}"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="edit_product"))
+    
+    await safe_edit_message(callback.message, text, reply_markup=builder.as_markup())
     await state.set_state(ProductStates.waiting_product_id)
 
 @router.message(ProductStates.waiting_product_id)
@@ -694,3 +697,43 @@ async def export_products(callback: types.CallbackQuery, db_pool):
     except Exception as e:
         logger.error(f"❌ خطأ في تصدير المنتجات: {e}")
         await callback.answer("❌ فشل إنشاء التقرير", show_alert=True)
+        # ============= تعيين قسم لمنتج (مهم للمنتجات المتزامنة) =============
+@router.callback_query(F.data.startswith("change_cat_"))
+async def change_category_start(callback: types.CallbackQuery, db_pool):
+    prod_id = int(callback.data.split("_")[2])
+    categories = await get_cached_categories(db_pool)
+    
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        builder.row(types.InlineKeyboardButton(
+            text=cat['display_name'], 
+            callback_data=f"set_new_cat_{prod_id}_{cat['id']}"
+        ))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data=f"edit_prod_{prod_id}"))
+    
+    await callback.message.edit_text(
+        "📁 **اختر القسم الذي تريد إظهار هذا المنتج داخله للزبائن:**", 
+        reply_markup=builder.as_markup()
+    )
+
+@router.callback_query(F.data.startswith("set_new_cat_"))
+async def set_new_category(callback: types.CallbackQuery, db_pool):
+    parts = callback.data.split("_")
+    prod_id = int(parts[3])
+    cat_id = int(parts[4])
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE applications SET category_id = $1 WHERE id = $2", cat_id, prod_id)
+        
+    clear_cache("products_list")
+    clear_cache(f"product_details:{prod_id}")
+    clear_cache("categories")
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔙 العودة للمنتج", callback_data=f"edit_prod_{prod_id}"))
+    
+    await callback.message.edit_text(
+        "✅ **تم تعيين القسم بنجاح!**\n\nالمنتج الآن جاهز ويظهر للمستخدمين داخل هذا القسم، ومربوط تلقائياً بـ Mousa Card.", 
+        reply_markup=builder.as_markup()
+    )
+    
