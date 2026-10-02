@@ -26,6 +26,7 @@ ADMIN_BUTTONS: List[Tuple[str, str]] = [
     ("👤 معلومات مستخدم", "user_info"),
     ("⭐ إدارة النقاط", "manage_points"),
     ("📊 تقارير ونسخ", "reports_menu"),
+    ("🔌 إدارة ربط الموقع (API)", "api_services_menu"),
     ("✏️ تعديل منتج", "edit_product"),
     ("🗑️ حذف منتج", "delete_product"),
     ("📱 عرض المنتجات", "list_products"),
