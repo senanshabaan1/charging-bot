@@ -36,8 +36,7 @@ class MousaCardClient:
                 return None
 
     async def get_balance(self) -> float:
-        """جلب رصيد الحساب من الـ API (المسار الصحيح)"""
-        # محاولة فحص المسار المعتاد للرصيد
+        """جلب رصيد الحساب من الـ API"""
         result = await self._make_request("GET", "/client/api/user")
         if isinstance(result, dict):
             data = result.get("data", result)
@@ -66,7 +65,7 @@ class MousaCardClient:
             return {"categories": [], "products": []}
 
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """مزامنة الأقسام والمنتجات بالاعتماد على مسار المنتجات والأقسام معاً"""
+        """مزامنة الأقسام والمنتجات بالاعتماد على api_service_id حصراً"""
         main_content = await self.get_content_by_category(0)
         root_categories = main_content.get('categories', [])
         
@@ -78,6 +77,12 @@ class MousaCardClient:
         synced_prod_count = 0
         
         async with db_pool.acquire() as conn:
+            # تنظيف قيد الاسم المتكرر في قاعدة البيانات إن وجد لمنع أي تعارض مستقبلي
+            try:
+                await conn.execute("ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_name_key;")
+            except:
+                pass
+
             cat_mapping = {}
             categories_to_process = list(root_categories)
             
@@ -149,6 +154,7 @@ class MousaCardClient:
                 parent_api_cat_id = product.get('parent_id', product.get('category_id', 0))
                 target_db_cat_id = cat_mapping.get(parent_api_cat_id, default_cat_id)
                 
+                # البحث بالاعتماد على معرف الـ API حصراً لمنع مشاكل تكرار الأسماء
                 existing = await conn.fetchval(
                     "SELECT id FROM applications WHERE api_service_id = $1",
                     str(prod_id)
@@ -244,11 +250,9 @@ class MousaCardClient:
 def get_api_client() -> MousaCardClient:
     import os
     api_url = os.getenv("MOUSA_API_URL", "https://mousa-card.com")
-    # ⚠️ استبدل هذا الرمز بالرمز الصحيح والجديد من موقع Mousa Card إن لزم الأمر
     api_token = os.getenv("MOUSA_API_TOKEN", "Zut5m0AkmCBEnbyLQxW0vMumniXz8jqf-T_GfgUVHf9Fir83Akbz__ACiDMLS8qt")
     return MousaCardClient(api_url, api_token)
 
-# دوال توافقية إضافية لمنع أخطاء الاستيراد
 def set_api_token(token: str):
     pass
 
