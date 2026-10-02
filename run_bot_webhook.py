@@ -211,8 +211,7 @@ async def init_scheduler():
         )
         
         # ✅ جدولة مزامنة خدمات API التلقائية (إذا كانت مفعلة)
-        if AUTO_SYNC_SERVICES:
-            from api.client import get_api_client
+        if AUTO_SYNC_SERVICES:       
             from config import DEFAULT_API_PROFIT
             
             async def auto_sync_services():
