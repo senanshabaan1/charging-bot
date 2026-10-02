@@ -604,7 +604,6 @@ async def list_products(callback: types.CallbackQuery, db_pool):
     text += f"⚡ سرعة الاستجابة: {elapsed_time:.2f} ثانية"
     
     # 7. إضافة الأزرار (إضافة منتج + رجوع)
-    # استخدمنا builder.row لكل زر ليظهرا تحت بعضهما بشكل عريض
     builder.row(types.InlineKeyboardButton(
         text="➕ إضافة منتج جديد", 
         callback_data="add_product"
@@ -615,12 +614,22 @@ async def list_products(callback: types.CallbackQuery, db_pool):
         callback_data="back_to_admin"
     ))
     
-    # 8. تحديث الرسالة
-    await safe_edit_message(
-        callback.message,
-        text,
-        reply_markup=builder.as_markup()
-    )
+    # 8. التحقق من الطول وتحديث الرسالة
+    if len(text) > 4000:
+        # تقسيم النص إذا كان طويلاً
+        parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
+        for i, part in enumerate(parts):
+            if i == 0:
+                await safe_edit_message(callback.message, part, reply_markup=builder.as_markup() if i == len(parts)-1 else None)
+            else:
+                await callback.message.answer(part, reply_markup=builder.as_markup() if i == len(parts)-1 else None)
+    else:
+        # إرسال طبيعي إذا كان النص قصير
+        await safe_edit_message(
+            callback.message, 
+            text, 
+            reply_markup=builder.as_markup()
+        )
     
     
     # تقسيم النص إذا كان طويلاً
