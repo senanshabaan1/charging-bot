@@ -18,6 +18,7 @@ from database.products import get_product_options, get_product_option
 from utils import get_formatted_damascus_time, format_amount, is_valid_positive_number
 from api.client import get_api_client
 import uuid
+import html
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -440,148 +441,116 @@ async def handle_disabled_option(callback: types.CallbackQuery):
 
 @router.message(OrderStates.qty)
 async def get_qty(message: types.Message, state: FSMContext, db_pool):
-    """استقبال الكمية مع تطبيق الخصم"""
-    logger.info(f"📩 استقبال كمية من {message.from_user.id}: {message.text}")
-    
-    if message.text in ["🔙 رجوع للقائمة", "/cancel", "/رجوع", "🏠 القائمة الرئيسية", "❌ إلغاء"]:
-        await state.clear()
-        is_admin = await is_admin_user(db_pool, message.from_user.id)
-        await message.answer(
-            "✅ تم إلغاء الطلب",
-            reply_markup=get_main_menu_keyboard(is_admin)
-        )
-        return
-
-    if not message.text.isdigit():
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data="cancel_order"
-        ))
-        await message.answer(
-            "⚠️ يرجى إدخال رقم صحيح (كمية).",
-            reply_markup=builder.as_markup()
-        )
-        return
-
-    qty = int(message.text)
-    
-    data = await state.get_data()
-    if not data or 'app' not in data:
-        await message.answer("❌ انتهت صلاحية الطلب، يرجى البدء من جديد")
-        await state.clear()
-        return
-    
-    app = data['app']
-    current_rate = data.get('current_rate', 118)
-    discount = data.get('discount', 0)
-    vip_level = data.get('vip_level', 0)
-    min_units = app.get('min_units', 1) or 1
-    
-    if qty < min_units:
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(
-            text="🔙 رجوع",
-            callback_data="cancel_order"
-        ))
-        await message.answer(
-            f"⚠️ أقل كمية مسموح بها هي {min_units}.",
-            reply_markup=builder.as_markup()
-        )
-        return
-    
-    final_unit_price_usd = data.get('final_unit_price_usd', 0)
-    
-    original_total_usd = final_unit_price_usd * qty
-    original_total_syp = original_total_usd * current_rate
-    
-    discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
-    total_usd = qty * discounted_unit_price_usd
-    total_syp = total_usd * current_rate
-    
-    await state.update_data(
-        qty=qty,
-        total_usd=total_usd,
-        total_syp=total_syp,
-        original_total_syp=original_total_syp
-    )
-    
-    async with db_pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT balance FROM users WHERE user_id = $1",
-            message.from_user.id
-        )
+    """استقبال الكمية مع تطبيق الخصم وإصلاح الأخطاء الصامتة"""
+    try:
+        logger.info(f"📩 استقبال كمية من {message.from_user.id}: {message.text}")
         
-        if not user:
+        if message.text in ["🔙 رجوع للقائمة", "/cancel", "/رجوع", "🏠 القائمة الرئيسية", "❌ إلغاء"]:
+            await state.clear()
             is_admin = await is_admin_user(db_pool, message.from_user.id)
-            await message.answer(
-                "❌ حسابك غير موجود في النظام.",
-                reply_markup=get_main_menu_keyboard(is_admin)
-            )
+            await message.answer("✅ تم إلغاء الطلب", reply_markup=get_main_menu_keyboard(is_admin))
+            return
+
+        if not message.text.isdigit():
+            builder = InlineKeyboardBuilder()
+            builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="cancel_order"))
+            await message.answer("⚠️ يرجى إدخال رقم صحيح (كمية).", reply_markup=builder.as_markup())
+            return
+
+        qty = int(message.text)
+        
+        data = await state.get_data()
+        if not data or 'app' not in data:
+            await message.answer("❌ انتهت صلاحية الطلب، يرجى البدء من جديد")
             await state.clear()
             return
         
-        if user['balance'] < total_syp:
-            remaining = total_syp - user['balance']
+        app = data['app']
+        current_rate = data.get('current_rate', 118)
+        discount = data.get('discount', 0)
+        vip_level = data.get('vip_level', 0)
+        min_units = app.get('min_units', 1) or 1
+        
+        if qty < min_units:
             builder = InlineKeyboardBuilder()
-            builder.row(types.InlineKeyboardButton(
-                text="❌ إلغاء",
-                callback_data="cancel_order"
-            ))
-            await message.answer(
-                f"⚠️ رصيدك غير كافي\n\n"
-                f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
-                f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
-                f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
-                f"قم بشحن رصيدك من قسم إيداع رصيد  ",
-                reply_markup=builder.as_markup()
-            )
+            builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="cancel_order"))
+            await message.answer(f"⚠️ أقل كمية مسموح بها هي {min_units}.", reply_markup=builder.as_markup())
             return
-    
-    if discount > 0:
-        saved_amount = original_total_syp - total_syp
-        price_message = (
-            f"💰 المبلغ قبل الخصم: {original_total_syp:,.0f} ل.س\n"
-            f"💰 المبلغ بعد الخصم: {total_syp:,.0f} ل.س\n"
-            f"🎁 وفرت: {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
+        
+        final_unit_price_usd = data.get('final_unit_price_usd', 0)
+        original_total_usd = final_unit_price_usd * qty
+        original_total_syp = original_total_usd * current_rate
+        
+        discounted_unit_price_usd = final_unit_price_usd * (1 - discount/100)
+        total_usd = qty * discounted_unit_price_usd
+        total_syp = total_usd * current_rate
+        
+        await state.update_data(qty=qty, total_usd=total_usd, total_syp=total_syp, original_total_syp=original_total_syp)
+        
+        async with db_pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT balance FROM users WHERE user_id = $1", message.from_user.id)
+            if not user:
+                is_admin = await is_admin_user(db_pool, message.from_user.id)
+                await message.answer("❌ حسابك غير موجود في النظام.", reply_markup=get_main_menu_keyboard(is_admin))
+                await state.clear()
+                return
+            
+            if user['balance'] < total_syp:
+                remaining = total_syp - user['balance']
+                builder = InlineKeyboardBuilder()
+                builder.row(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_order"))
+                await message.answer(
+                    f"⚠️ رصيدك غير كافي\n\n"
+                    f"💰 الرصيد الحالي: {user['balance']:,.0f} ل.س\n"
+                    f"💳 المبلغ المطلوب: {total_syp:,.0f} ل.س\n"
+                    f"🔸 المبلغ المتبقي: {remaining:,.0f} ل.س\n\n"
+                    f"قم بشحن رصيدك من قسم إيداع رصيد",
+                    reply_markup=builder.as_markup()
+                )
+                return
+        
+        if discount > 0:
+            saved_amount = original_total_syp - total_syp
+            price_message = (
+                f"💰 المبلغ قبل الخصم: {original_total_syp:,.0f} ل.س\n"
+                f"💰 المبلغ بعد الخصم: {total_syp:,.0f} ل.س\n"
+                f"🎁 وفرت: {saved_amount:,.0f} ل.س (خصم VIP {vip_level}: {discount}%)"
+            )
+        else:
+            price_message = f"💰 المبلغ الإجمالي: {total_syp:,.0f} ل.س"
+        
+        app_name = str(app.get('name', '')).lower()
+        instructions = " <b>الرجاء إرسال الــ 🆔</b>:"
+        
+        if any(x in app_name for x in ['pubg', 'ببجي']):
+            instructions = "🎯 <b>الرجاء إرسال 🆔 اللاعب (PUBG)</b>:"
+        elif 'free fire' in app_name or 'فري فاير' in app_name:
+            instructions = "🔥 <b>الرجاء إرسال 🆔 اللاعب (Free Fire)</b>:"
+        elif 'clash' in app_name:
+            instructions = "⚔️ <b>الرجاء إرسال إيميل Supercell ID</b>:"
+        elif 'instagram' in app_name:
+            instructions = "📸 <b>الرجاء إرسال اسم المستخدم على Instagram</b>:"
+        elif 'telegram' in app_name or 'تيليجرام' in app_name:
+            instructions = "<b>الرجاء إرسال معرف تيليجرام (🪪 username)</b>:"
+        
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_order"))
+        
+        await message.answer(
+            f"✅ <b>تم قبول الكمية</b>\n\n"
+            f"{price_message}\n\n"
+            f"{instructions}",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
         )
-    else:
-        price_message = f"💰 المبلغ الإجمالي: {total_syp:,.0f} ل.س"
-    
-    app_name = app['name'].lower()
-    instructions = " <b>الرجاء إرسال الــ 🆔</b>:"
-    
-    if any(x in app_name for x in ['pubg 1', 'pubg 2']):
-        instructions = "🎯 <b>الرجاء إرسال 🆔 اللاعب (PUBG)</b>:"
-    elif 'free fire' in app_name:
-        instructions = "🔥 <b>الرجاء إرسال 🆔 اللاعب</b> (Free Fire):"
-    elif 'clash' in app_name:
-        instructions = "⚔️ <b>الرجاء إرسال إيميل Supercell ID</b>:"
-    elif 'instagram' in app_name:
-        instructions = "📸 <b>الرجاء إرسال اسم المستخدم على Instagram</b>:"
-    elif any(x in app_name for x in ['TELEGRAM', '⭐ telegram']):
-        instructions = "<b>الرجاء إرسال معرف تيليجرام (🪪 username)</b> :"
-    elif 'netflix' in app_name:
-        instructions = "🎬 <b>الرجاء إرسال البريد الإلكتروني للحساب</b>:"
-    
-    # استخدام builder للرجوع
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="❌ إلغاء",
-        callback_data="cancel_order"
-    ))
-    
-    await message.answer(
-        f"✅ <b>تم قبول الكمية</b>\n\n"
-        f"{price_message}\n\n"
-        f"{instructions}",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
-    
-    await state.set_state(OrderStates.target_id)
-    logger.info(f"✅ تم تغيير الحالة إلى target_id للمستخدم {message.from_user.id}")
-
+        
+        await state.set_state(OrderStates.target_id)
+        logger.info(f"✅ تم تغيير الحالة إلى target_id للمستخدم {message.from_user.id}")
+        
+    except Exception as e:
+        logger.error(f"❌ خطأ غير متوقع في get_qty: {e}")
+        await message.answer(f"❌ حدث خطأ أثناء المعالجة، يرجى المحاولة لاحقاً.")
+        await state.clear()
 @router.message(OrderStates.choosing_variant)
 async def handle_choosing_variant(message: types.Message, state: FSMContext):
     """معالج إذا كان المستخدم في حالة اختيار الفئة وأرسل رسالة نصية"""
