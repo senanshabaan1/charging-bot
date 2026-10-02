@@ -894,9 +894,11 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
 
 # ============= تنفيذ الطلب =============
 
+import json
+
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
-    """تنفيذ الطلب (لجميع الأنواع) مع تطبيق الخصم"""
+    """تنفيذ الطلب (تلقائي للـ API، ويدوي للخدمات الخاصة)"""
     data = await state.get_data()
     
     if not data:
@@ -908,6 +910,11 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     discount = data.get('discount', 0)
     vip_level = data.get('vip_level', 0)
     total_syp = float(data['total_syp'])
+    app_data = data['app']
+    
+    # ✅ التحقق إذا كان المنتج مربوط بـ API
+    is_api_linked = bool(app_data.get('api_service_id'))
+    initial_status = 'processing' if is_api_linked else 'pending'
     
     async with db_pool.acquire() as conn:
         async with conn.transaction():
@@ -926,135 +933,64 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
                 total_syp, callback.from_user.id
             )
             
+            # إنشاء الطلب
             if 'variant' in data:
                 variant = data['variant']
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, variant_id, variant_name, 
                      quantity, duration_days, unit_price_usd, total_amount_syp, target_id, status, points_earned)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                     RETURNING id
-                ''',
-                callback.from_user.id,
-                callback.from_user.username,
-                data['app']['id'],
-                data['app']['name'],
-                variant['id'],
-                variant['name'],
-                int(variant.get('quantity', 1) or 1),
-                int(variant.get('duration_days', 0) or 0),
-                float(data.get('final_price_usd', 0)),
-                total_syp,
-                data['target_id'],
-                points
-                )
-                
-                order_data = {
-                    'order_id': order_id,
-                    'user_id': callback.from_user.id,
-                    'username': callback.from_user.username or 'غير معروف',
-                    'app_name': data['app']['name'],
-                    'variant_name': variant['name'],
-                    'quantity': int(variant.get('quantity', 1) or 1),
-                    'total_syp': total_syp,
-                    'target_id': data['target_id'],
-                }
+                ''', callback.from_user.id, callback.from_user.username, app_data['id'], app_data['name'], 
+                     variant['id'], variant['name'], int(variant.get('quantity', 1) or 1), 
+                     int(variant.get('duration_days', 0) or 0), float(data.get('final_price_usd', 0)), 
+                     total_syp, data['target_id'], initial_status, points)
+                order_data_dict = {'order_id': order_id, 'user_id': callback.from_user.id, 'username': callback.from_user.username or 'غير معروف', 'app_name': app_data['name'], 'variant_name': variant['name'], 'quantity': int(variant.get('quantity', 1) or 1), 'total_syp': total_syp, 'target_id': data['target_id']}
             else:
-                # للتوافق مع الخدمات القديمة
                 order_id = await conn.fetchval('''
                     INSERT INTO orders 
                     (user_id, username, app_id, app_name, quantity, unit_price_usd, 
                      total_amount_syp, target_id, status, points_earned)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     RETURNING id
-                ''',
-                callback.from_user.id,
-                callback.from_user.username,
-                data['app']['id'],
-                data['app']['name'],
-                data['qty'],
-                data.get('discounted_unit_price_usd', 0),
-                total_syp,
-                data['target_id'],
-                points
-                )
-                
-                order_data = {
-                    'order_id': order_id,
-                    'user_id': callback.from_user.id,
-                    'username': callback.from_user.username or 'غير معروف',
-                    'app_name': data['app']['name'],
-                    'quantity': data['qty'],
-                    'total_syp': total_syp,
-                    'target_id': data['target_id'],
-                }
-            
-            group_msg_id = await send_order_to_group(bot, order_data)
-            
-            if group_msg_id:
-                await conn.execute(
-                    "UPDATE orders SET group_message_id = $1 WHERE id = $2",
-                    group_msg_id, order_id
-                )
-    
-    if discount > 0:
-        saved_amount = data.get('original_total_syp', total_syp) - total_syp
-        discount_text = f"\n🎁 <b>خصم VIP {vip_level}:</b> {discount}% (وفرت {saved_amount:,.0f} ل.س)"
+                ''', callback.from_user.id, callback.from_user.username, app_data['id'], app_data['name'], 
+                     data['qty'], data.get('discounted_unit_price_usd', 0), total_syp, data['target_id'], initial_status, points)
+                order_data_dict = {'order_id': order_id, 'user_id': callback.from_user.id, 'username': callback.from_user.username or 'غير معروف', 'app_name': app_data['name'], 'quantity': data['qty'], 'total_syp': total_syp, 'target_id': data['target_id']}
+
+    # ✅ التنفيذ التلقائي إذا كان مربوط بـ API
+    if is_api_linked:
+        await callback.message.edit_text("⏳ <b>جاري التنفيذ التلقائي عبر الموقع...</b>\nيرجى الانتظار ثوانٍ معدودة ⏱️", parse_mode="HTML")
+        success = await send_order_to_mousa_api(order_id, db_pool, bot)
+        # إذا تم بنجاح، الدالة send_order_to_mousa_api ستقوم بإرسال رسالة التأكيد للمستخدم
     else:
-        discount_text = ""
+        # إرسال يدوي للجروب للخدمات غير المربوطة
+        group_msg_id = await send_order_to_group(bot, order_data_dict)
+        if group_msg_id:
+            async with db_pool.acquire() as conn:
+                await conn.execute("UPDATE orders SET group_message_id = $1 WHERE id = $2", group_msg_id, order_id)
+        
+        await callback.message.edit_text(
+            f"✅ <b>تم إرسال طلبك بنجاح!</b>\n\n"
+            f"⏳ <b>جاري مراجعة طلبك من قبل الإدارة...</b>\n"
+            f"📋 <b>مدة تنفيذ الطلب من 1 إلى 15 دقيقة.</b>\n"
+            f"🔸 <b>رقم طلبك:</b> #{order_id}",
+            parse_mode="HTML"
+        )
     
-    await callback.message.edit_text(
-        f"✅ <b>تم إرسال طلبك بنجاح!</b>\n\n"
-        f"⏳ <b>جاري مراجعة طلبك من قبل الإدارة...</b>\n"
-        f"📋 <b>مدة تنفيذ الطلب من 1 إلى 15 دقيقة .</b>\n"
-        f"⭐ <b>نقاط مضافة:</b> +{points}"
-        f"{discount_text}\n\n"
-        f"🔸 <b>رقم طلبك:</b> #{order_id}",
-        parse_mode="HTML"
-    )
-    
-    # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
+    # إضافة زر العودة
     is_admin = await is_admin_user(db_pool, callback.from_user.id)
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="🏠 القائمة الرئيسية",
-        callback_data="back_to_main"
-    ))
-    
-    await callback.message.answer(
-        "👋 يمكنك العودة للقائمة الرئيسية من هنا:",
-        reply_markup=builder.as_markup()
-    )
+    builder.row(types.InlineKeyboardButton(text="🏠 القائمة الرئيسية", callback_data="back_to_main"))
+    await callback.message.answer("👋 يمكنك العودة للقائمة الرئيسية من هنا:", reply_markup=builder.as_markup())
     
     await state.clear()
 
-@router.callback_query(F.data == "cancel_order")
-async def cancel_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """إلغاء الطلب"""
-    await state.clear()
-    
-    # إرسال رسالة إلغاء مع القائمة الرئيسية
-    await callback.message.edit_text("❌ <b>تم إلغاء الطلب.</b>", parse_mode="HTML")
-    
-    # إضافة أزرار إنلاين للعودة للقائمة الرئيسية
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(
-        text="🏠 القائمة الرئيسية",
-        callback_data="back_to_main"
-    ))
-    
-    await callback.message.answer(
-        "👋 تم العودة للقائمة الرئيسية",
-        reply_markup=builder.as_markup()
-    )
 async def send_order_to_mousa_api(order_id: int, db_pool, bot: Bot) -> bool:
-    """
-    إرسال طلب إلى Mousa Card API بعد موافقة المشرف
-    """
+    """إرسال طلب إلى Mousa Card API تلقائياً"""
     from api.client import get_api_client
     
     async with db_pool.acquire() as conn:
-        # جلب معلومات الطلب والتطبيق المرتبط
         order = await conn.fetchrow('''
             SELECT o.*, a.api_service_id, a.profit_percentage
             FROM orders o
@@ -1062,85 +998,61 @@ async def send_order_to_mousa_api(order_id: int, db_pool, bot: Bot) -> bool:
             WHERE o.id = $1 AND o.status = 'processing'
         ''', order_id)
         
-        if not order:
-            logger.warning(f"⚠️ الطلب {order_id} غير موجود أو ليس في حالة processing")
-            return False
+        if not order or not order['api_service_id']: return False
         
-        if not order['api_service_id']:
-            logger.warning(f"⚠️ التطبيق {order['app_name']} ليس مرتبطاً بخدمة API")
-            return False
+        extra_params = {'playerId': order['target_id']}
         
-        # تحضير المعاملات الإضافية حسب نوع التطبيق
-        extra_params = {}
-        app_name = order['app_name'].lower()
-        
-        if 'pubg' in app_name:
-            extra_params['playerId'] = order['target_id']
-        elif 'free fire' in app_name:
-            extra_params['playerId'] = order['target_id']
-        elif 'clash' in app_name:
-            extra_params['playerId'] = order['target_id']
-        else:
-            extra_params['playerId'] = order['target_id']
-        
-        # إرسال الطلب إلى Mousa Card API
         api = get_api_client()
         result = await api.create_order(
             product_id=int(order['api_service_id']),
             quantity=order['quantity'],
-            player_id=order['target_id'] if 'player' in str(extra_params) else None,
-            extra_params=extra_params if extra_params else None
+            player_id=order['target_id'],
+            extra_params=extra_params
         )
         
         if result['success']:
-            # تحديث حالة الطلب
+            # تحديث حالة الطلب لـ completed
             await conn.execute('''
-                UPDATE orders 
-                SET status = 'completed',
-                    api_response = $1,
-                    updated_at = CURRENT_TIMESTAMP
+                UPDATE orders SET status = 'completed', api_response = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE id = $2
             ''', json.dumps(result.get('raw', {})), order_id)
             
-            # إشعار المستخدم
-            await bot.send_message(
-                order['user_id'],
-                f"✅ **تم تنفيذ طلبك #{order_id} بنجاح!**\n\n"
-                f"📱 **التطبيق:** {order['app_name']}\n"
-                f"🎯 **المستهدف:** {order['target_id']}\n"
-                f"💰 **المبلغ:** {order['total_amount_syp']:,.0f} ل.س\n"
-                f"📋 **رقم الطلب في الموقع:** {result.get('order_id')}\n\n"
-                f"شكراً لاستخدامك خدماتنا",
-                parse_mode="Markdown"
+            # إضافة النقاط للمستخدم بشكل فعلي
+            points = order['points_earned']
+            await conn.execute(
+                "UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2",
+                points, order['user_id']
             )
             
-            logger.info(f"✅ تم إرسال الطلب {order_id} إلى Mousa Card API بنجاح")
+            await bot.send_message(
+                order['user_id'],
+                f"🎉 <b>تم تنفيذ طلبك بنجاح! (آلياً)</b>\n\n"
+                f"📱 <b>الخدمة:</b> {order['app_name']}\n"
+                f"🎯 <b>المستهدف (الآيدي):</b> <code>{order['target_id']}</code>\n"
+                f"💰 <b>المبلغ المخصوم:</b> {order['total_amount_syp']:,.0f} ل.س\n"
+                f"⭐ <b>نقاط مكتسبة:</b> +{points}\n"
+                f"📋 <b>رقم الطلب:</b> #{result.get('order_id')}\n\n"
+                f"شكراً لاستخدامك النظام الآلي!",
+                parse_mode="HTML"
+            )
             return True
         else:
-            # فشل الإرسال
+            # فشل الإرسال واسترجاع الأموال
             await conn.execute('''
-                UPDATE orders 
-                SET status = 'failed',
-                    admin_notes = $1,
-                    updated_at = CURRENT_TIMESTAMP
+                UPDATE orders SET status = 'failed', admin_notes = $1, updated_at = CURRENT_TIMESTAMP
                 WHERE id = $2
-            ''', f"فشل الإرسال إلى Mousa Card API: {result.get('error')}", order_id)
+            ''', f"فشل الإرسال: {result.get('error')}", order_id)
             
-            # إشعار المستخدم
-            await bot.send_message(
-                order['user_id'],
-                f"❌ **عذراً، تعذر تنفيذ طلبك #{order_id}**\n\n"
-                f"🔸 **السبب:** {result.get('error', 'خطأ في الاتصال بالموقع')}\n\n"
-                f"💰 **تم إعادة المبلغ إلى رصيدك.**\n"
-                f"📞 للاستفسار، تواصل مع الدعم.",
-                parse_mode="Markdown"
-            )
-            
-            # إعادة الرصيد
             await conn.execute(
                 "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
                 order['total_amount_syp'], order['user_id']
             )
             
-            logger.error(f"❌ فشل إرسال الطلب {order_id} إلى Mousa Card API: {result.get('error')}")
+            await bot.send_message(
+                order['user_id'],
+                f"❌ <b>عذراً، تعذر تنفيذ طلبك #{order_id}</b>\n\n"
+                f"🔸 <b>السبب:</b> {result.get('error', 'خدمة غير متاحة حالياً من المصدر')}\n\n"
+                f"💰 <b>تمت إعادة {order['total_amount_syp']:,.0f} ل.س إلى رصيدك.</b>",
+                parse_mode="HTML"
+            )
             return False
