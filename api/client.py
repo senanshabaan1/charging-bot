@@ -1,7 +1,6 @@
 import aiohttp
 import logging
 import uuid
-import json
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -9,7 +8,6 @@ logger = logging.getLogger(__name__)
 class MousaCardClient:
     def __init__(self, api_url: str, api_token: str):
         self.api_url = api_url.rstrip('/')
-        self.base_url = self.api_url
         self.api_token = api_token.strip()
         self.headers = {
             "Authorization": f"Bearer {self.api_token}",
@@ -36,17 +34,6 @@ class MousaCardClient:
                 logger.error(f"❌ خطأ في الاتصال مع Mousa Card ({url}): {e}")
                 return None
 
-    async def get_profile(self) -> dict:
-        """إرجاع بيانات افتراضية لأن مسار الملف الشخصي غير مدعوم في الـ API"""
-        return {"balance": 0.0}
-
-    async def get_balance(self) -> float:
-        """إرجاع رصيد افتراضي لتجنب طلبات الـ 404"""
-        return 0.0
-
-    async def get_user_info(self) -> dict:
-        return {"balance": 0.0}
-
     async def get_products(self) -> List[Dict]:
         """جلب جميع المنتجات المتاحة مباشرة من مسار /client/api/products"""
         data = await self._make_request("GET", "/client/api/products")
@@ -69,7 +56,7 @@ class MousaCardClient:
             return {"categories": [], "products": []}
 
     async def sync_services_to_db(self, db_pool, default_profit: int = 10):
-        """مزامنة الأقسام والمنتجات مع حل مشكلة قيد تكرار الأسماء تلقائياً"""
+        """مزامنة الأقسام والمنتجات بالاعتماد على مسار المنتجات والأقسام معاً"""
         main_content = await self.get_content_by_category(0)
         root_categories = main_content.get('categories', [])
         
@@ -81,11 +68,6 @@ class MousaCardClient:
         synced_prod_count = 0
         
         async with db_pool.acquire() as conn:
-            try:
-                await conn.execute("ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_name_key;")
-            except:
-                pass
-
             cat_mapping = {}
             categories_to_process = list(root_categories)
             
@@ -204,9 +186,12 @@ class MousaCardClient:
 
     async def create_order(self, product_id: int, quantity: int, player_id: str, extra_params: dict = None) -> dict:
         """إنشاء طلب جديد عبر مسار /client/api/newOrder/{product_id}/params"""
+        # توليد معرف فريد لمنع تكرار الطلب (UUIDv4)
         unique_order_uuid = str(uuid.uuid4())
+        
         endpoint = f"/client/api/newOrder/{product_id}/params"
         
+        # تجهيز بارامترات الطلب حسب متطلبات الـ API
         params = {
             "qty": quantity,
             "playerId": player_id,
@@ -215,10 +200,12 @@ class MousaCardClient:
         if extra_params:
             params.update(extra_params)
             
+        # إرسال الطلب بطريقة GET (أو POST حسب المتاح، الـ API يدعم الإثنين)
         result = await self._make_request("GET", endpoint, params=params)
         
         if isinstance(result, dict):
             status = result.get("status", "").lower()
+            # فحص الاستجابة (accept أو OK)
             if status in ["ok", "accept", "success"] or result.get("success") == True:
                 data_dict = result.get("data", result)
                 order_id = data_dict.get("order_id", data_dict.get("id", unique_order_uuid))
@@ -228,35 +215,16 @@ class MousaCardClient:
                     "raw": result
                 }
             else:
+                # إذا كان الحالة reject أو فشل
                 error_msg = result.get("message", result.get("error", "تم رفض الطلب من المصدر (Reject)"))
                 return {"success": False, "error": error_msg}
                 
         return {"success": False, "error": "استجابة غير صالحة من خادم الموقع عند إنشاء الطلب"}
 
-    async def check_orders_status(self, order_ids: list) -> dict:
-        """التحقق من حالة مجموعة طلبات عبر مسار /client/api/check"""
-        orders_json = json.dumps(order_ids)
-        endpoint = "/client/api/check"
-        params = {"orders": orders_json}
-        
-        result = await self._make_request("GET", endpoint, params=params)
-        
-        if isinstance(result, dict) and (result.get("status") == "OK" or result.get("success") == True or "data" in result):
-            return {
-                "success": True,
-                "data": result.get("data", [])
-            }
-        return {"success": False, "data": [], "error": "تعذر جلب حالة الطلبات من المصدر"}
-
 
 def get_api_client() -> MousaCardClient:
     import os
-    api_url = os.getenv("MOUSA_API_URL", "https://mousa-card.com")
-    api_token = os.getenv("MOUSA_API_TOKEN", "Zut5m0AkmCBEnbyLQxW0vMumniXz8jqf-T_GfgUVHf9Fir83Akbz__ACiDMLS8qt")
+    api_url = os.getenv("MOUSA_API_URL", "https://mousacard.com")
+    api_token = "Zut5m0AkmCBEnbyLQxW0vMumniXz8jqf-T_GfgUVHf9Fir83Akbz__ACiDMLS8qt"
     return MousaCardClient(api_url, api_token)
-
-def set_api_token(token: str):
-    pass
-
-def close_api_client():
-    pass
+ 
