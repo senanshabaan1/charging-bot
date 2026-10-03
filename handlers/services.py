@@ -6,7 +6,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import math
 import json
 import logging
-from handlers.time_utils import get_formatted_damascus_time
+
+# ✅ التصحيح الجذري هنا: استدعاء الدوال من المسارات الصحيحة
+from utils import is_admin, format_amount, get_formatted_damascus_time
+from handlers.time_utils import get_damascus_time_now, format_damascus_time
 from handlers.keyboards import get_main_menu_keyboard
 from database.users import is_admin_user
 from database.core import get_exchange_rate
@@ -26,7 +29,6 @@ class OrderStates(StatesGroup):
 # ============= عرض الأقسام =============
 @router.callback_query(F.data == "show_categories")
 async def show_categories_callback(callback: types.CallbackQuery, db_pool):
-    """عرض الأقسام في المتجر (زرين بكل صف)"""
     await callback.answer()
     
     async with db_pool.acquire() as conn:
@@ -65,7 +67,6 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
 # ============= عرض التطبيقات مع الصفحات =============
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
-    """عرض التطبيقات داخل القسم مع نظام Pagination"""
     await callback.answer()
     
     parts = callback.data.split("_")
@@ -127,7 +128,6 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
 # ============= اختيار التطبيق =============
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """تحديد نوع المنتج: ثابت (خيارات) أم عداد (كمية متغيرة)"""
     await callback.answer()
     app_id = int(callback.data.split("_")[1])
     
@@ -200,7 +200,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
 # ============= تفاصيل المنتج الثابت =============
 @router.callback_query(F.data.startswith("var_"))
 async def show_variant_details(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """عرض تفاصيل المنتج الثابت"""
     await callback.answer()
     variant_id = int(callback.data.split("_")[1])
     
@@ -244,7 +243,6 @@ async def show_variant_details(callback: types.CallbackQuery, state: FSMContext,
 # ============= معالجة الكمية للعداد =============
 @router.message(OrderStates.qty)
 async def process_counter_qty(message: types.Message, state: FSMContext, db_pool):
-    """حساب وإدخال الكمية للعدادات"""
     if not message.text.isdigit():
         return await message.answer("⚠ يرجى إدخال أرقام فقط للكمية.")
         
@@ -289,7 +287,6 @@ async def ask_for_id_variant(callback: types.CallbackQuery, state: FSMContext):
 # ============= إرسال الطلب وحفظه =============
 @router.message(OrderStates.target_id)
 async def process_target_id_and_checkout(message: types.Message, state: FSMContext, db_pool):
-    """خصم الرصيد وتسجيل الطلب في قاعدة البيانات"""
     target_id = message.text.strip()
     data = await state.get_data()
     total_syp = data['total_syp']
@@ -339,9 +336,6 @@ async def disabled_app_callback(callback: types.CallbackQuery):
 
 # ============= توجيه الطلبات للمزود الذكي =============
 async def send_order_to_api(order_id: int, db_pool, bot: Bot) -> bool:
-    """
-    توجيه الطلب إلى API المزود الصحيح بناءً على إعدادات المنتج في قاعدة البيانات
-    """
     from api.client import get_api_client
     
     async with db_pool.acquire() as conn:
