@@ -5,9 +5,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 async def init_db():
-    """إنشاء وتحديث الجداول تلقائياً"""
+    """إنشاء وتحديث الجداول تلقائياً مع تعطيل statement_cache لتوافق PgBouncer"""
     from config import DATABASE_URL
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    
+    # إنشاء مجمع الاتصالات مع تعطيل التخزين المؤقت للـ statements لتجنب مشاكل Supabase / PgBouncer
+    pool = await asyncpg.create_pool(
+        DATABASE_URL, 
+        min_size=2, 
+        max_size=10, 
+        statement_cache_size=0
+    )
+    
     async with pool.acquire() as conn:
         # إعدادات البوت
         await conn.execute('''
@@ -18,7 +26,7 @@ async def init_db():
         ''')
         await conn.execute("INSERT INTO settings (key, value) VALUES ('exchange_rate', '15000') ON CONFLICT DO NOTHING")
 
-        # المستخدمين (تمت مطابقة حقل balance)
+        # المستخدمين
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
@@ -28,14 +36,13 @@ async def init_db():
             )
         ''')
         
-        # التأكد من وجود الأعمدة إذا كان الجدول قديماً
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS balance FLOAT DEFAULT 0")
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'")
         except:
             pass
 
-        # مزودي الخدمة (موافع الـ API)
+        # مزودي الخدمة (مواقع الـ API)
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS api_providers (
                 id SERIAL PRIMARY KEY,
