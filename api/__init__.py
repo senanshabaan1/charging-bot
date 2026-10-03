@@ -1,9 +1,8 @@
 # api/__init__.py
-from .client import MousaCardAPI, get_api_client, set_api_token, close_api_client
+from .client import UniversalAPIClient, get_api_client, close_all_api_clients
 
 __all__ = [
-    'MousaCardAPI',
+    'UniversalAPIClient',
     'get_api_client',
-    'set_api_token',
-    'close_api_client'
+    'close_all_api_clients'
 ]
