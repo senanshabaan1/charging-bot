@@ -30,7 +30,10 @@ async def cmd_start(message: types.Message, state: FSMContext, db_pool):
     rate = await db.get_exchange_rate(db_pool)
     
     is_admin = (message.from_user.id == ADMIN_ID)
-    balance_display = user['balance_usd'] if user['currency'] == 'USD' else user['balance_usd'] * rate
+    
+    # استخدام balance حصراً
+    raw_balance = user['balance'] if user and 'balance' in user else 0.0
+    balance_display = raw_balance if user['currency'] == 'USD' else raw_balance * rate
     curr_sym = "$" if user['currency'] == 'USD' else "ل.س"
 
     text = (
