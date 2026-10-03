@@ -1,10 +1,10 @@
 # handlers/services.py
-
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import math
+import json
 import logging
 from handlers.time_utils import get_formatted_damascus_time
 from handlers.keyboards import get_main_menu_keyboard
@@ -23,10 +23,10 @@ class OrderStates(StatesGroup):
     target_id = State()
     confirm = State()
 
-# ============= عرض الأقسام (صورة 1001) =============
+# ============= عرض الأقسام =============
 @router.callback_query(F.data == "show_categories")
 async def show_categories_callback(callback: types.CallbackQuery, db_pool):
-    """عرض الأقسام في المتجر"""
+    """عرض الأقسام في المتجر (زرين بكل صف)"""
     await callback.answer()
     
     async with db_pool.acquire() as conn:
@@ -41,16 +41,14 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
     for cat in categories:
         icon = cat.get('icon', '📁')
         name = cat.get('display_name', 'قسم')
-        # عكس الترتيب (الأيقونة على اليمين إذا كان يدعمها جهاز المستخدم، أو نضعها بشكل متناسق)
         buttons.append(types.InlineKeyboardButton(
             text=f"{name} {icon}", 
-            callback_data=f"cat_{cat['id']}_1" # 1 هي رقم الصفحة
+            callback_data=f"cat_{cat['id']}_1"
         ))
     
-    # صفين لكل عمود
     for i in range(0, len(buttons), 2):
         if i + 1 < len(buttons):
-            builder.row(buttons[i+1], buttons[i]) # عكس الأزرار للغة العربية من اليمين لليسار
+            builder.row(buttons[i+1], buttons[i])
         else:
             builder.row(buttons[i])
             
@@ -64,7 +62,7 @@ async def show_categories_callback(callback: types.CallbackQuery, db_pool):
         parse_mode="Markdown"
     )
 
-# ============= عرض التطبيقات مع الصفحات (صورة 104) =============
+# ============= عرض التطبيقات مع الصفحات =============
 @router.callback_query(F.data.startswith("cat_"))
 async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
     """عرض التطبيقات داخل القسم مع نظام Pagination"""
@@ -103,7 +101,6 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         else:
             builder.row(buttons[i])
             
-    # نظام الصفحات (Pagination)
     nav_buttons = []
     if total_pages > 1:
         if page < total_pages:
@@ -127,10 +124,10 @@ async def show_apps_by_category(callback: types.CallbackQuery, db_pool):
         parse_mode="Markdown"
     )
 
-# ============= اختيار التطبيق (خيارات أم عداد) =============
+# ============= اختيار التطبيق =============
 @router.callback_query(F.data.startswith("buy_"))
 async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """إذا كان التطبيق له خيارات (ثابت) نظهرها، وإذا لم يكن نظهر تفاصيل العداد"""
+    """تحديد نوع المنتج: ثابت (خيارات) أم عداد (كمية متغيرة)"""
     await callback.answer()
     app_id = int(callback.data.split("_")[1])
     
@@ -151,7 +148,6 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
     
     await state.update_data(app=app_dict, current_rate=current_rate, discount=discount)
     
-    # 1. منتج ثابت (خيارات متعددة)
     if options:
         builder = InlineKeyboardBuilder()
         for opt in options:
@@ -166,9 +162,7 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
-    # 2. منتج عداد (صورة 454545)
     else:
-        # حساب السعر المخفض
         unit_price = app_dict['unit_price_usd'] * (1 + (app_dict['profit_percentage'] / 100))
         discounted_price = unit_price * (1 - discount/100)
         
@@ -203,10 +197,10 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
         await callback.message.answer("📝 **أرسل الكمية المطلوبة الآن (أرقام فقط):**", parse_mode="Markdown")
 
-# ============= تفاصيل المنتج الثابت (صورة 4545) =============
+# ============= تفاصيل المنتج الثابت =============
 @router.callback_query(F.data.startswith("var_"))
 async def show_variant_details(callback: types.CallbackQuery, state: FSMContext, db_pool):
-    """عرض تفاصيل الباقة المحددة"""
+    """عرض تفاصيل المنتج الثابت"""
     await callback.answer()
     variant_id = int(callback.data.split("_")[1])
     
@@ -228,7 +222,7 @@ async def show_variant_details(callback: types.CallbackQuery, state: FSMContext,
     await state.update_data(variant=dict(option), final_price_usd=discounted_price, total_syp=total_syp, is_variant=True)
     
     text = (
-        f"**تفاصيل المنتج 🛍️️**\n"
+        f"**تفاصيل المنتج 🛍**\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🏷️ **المنتج:** {option['name']}\n"
         f"📦 **القسم:** {app['cat_name']}\n"
@@ -247,11 +241,12 @@ async def show_variant_details(callback: types.CallbackQuery, state: FSMContext,
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
-# ============= استلام الكمية للعداد =============
+# ============= معالجة الكمية للعداد =============
 @router.message(OrderStates.qty)
 async def process_counter_qty(message: types.Message, state: FSMContext, db_pool):
+    """حساب وإدخال الكمية للعدادات"""
     if not message.text.isdigit():
-        return await message.answer("⚠️️ يرجى إدخال أرقام فقط للكمية.")
+        return await message.answer("⚠ يرجى إدخال أرقام فقط للكمية.")
         
     qty = int(message.text)
     data = await state.get_data()
@@ -276,7 +271,7 @@ async def process_counter_qty(message: types.Message, state: FSMContext, db_pool
         parse_mode="Markdown"
     )
 
-# ============= زر طلب المنتج الثابت =============
+# ============= طلب الآيدي للمنتج الثابت =============
 @router.callback_query(F.data == "confirm_variant_order")
 async def ask_for_id_variant(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -291,9 +286,10 @@ async def ask_for_id_variant(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
 
-# ============= استلام الـ ID والتنفيذ النهائي =============
+# ============= إرسال الطلب وحفظه =============
 @router.message(OrderStates.target_id)
 async def process_target_id_and_checkout(message: types.Message, state: FSMContext, db_pool):
+    """خصم الرصيد وتسجيل الطلب في قاعدة البيانات"""
     target_id = message.text.strip()
     data = await state.get_data()
     total_syp = data['total_syp']
@@ -305,10 +301,7 @@ async def process_target_id_and_checkout(message: types.Message, state: FSMConte
             await state.clear()
             return await message.answer("❌ رصيدك غير كافي لإتمام هذه العملية.\nيرجى شحن رصيدك والمحاولة لاحقاً.")
             
-        # الخصم من الرصيد
         await conn.execute("UPDATE users SET balance = balance - $1, total_orders = total_orders + 1 WHERE user_id = $2", total_syp, message.from_user.id)
-        
-        # إنشاء الطلب في قاعدة البيانات (سواء متغير أو عداد)
         points = await get_points_per_order(db_pool)
         
         if data['is_variant']:
@@ -343,3 +336,81 @@ async def ignore_callback(callback: types.CallbackQuery):
 @router.callback_query(F.data == "disabled_app")
 async def disabled_app_callback(callback: types.CallbackQuery):
     await callback.answer("🔒 هذا التطبيق متوقف حالياً للصيانة", show_alert=True)
+
+# ============= توجيه الطلبات للمزود الذكي =============
+async def send_order_to_api(order_id: int, db_pool, bot: Bot) -> bool:
+    """
+    توجيه الطلب إلى API المزود الصحيح بناءً على إعدادات المنتج في قاعدة البيانات
+    """
+    from api.client import get_api_client
+    
+    async with db_pool.acquire() as conn:
+        order = await conn.fetchrow('''
+            SELECT o.*, a.api_service_id, p.base_url, p.api_token, p.name as provider_name
+            FROM orders o
+            JOIN applications a ON o.app_id = a.id
+            LEFT JOIN api_providers p ON a.provider_id = p.id
+            WHERE o.id = $1 AND o.status = 'processing'
+        ''', order_id)
+        
+        if not order:
+            logger.warning(f"⚠️ الطلب {order_id} غير موجود أو ليس في حالة processing")
+            return False
+        
+        if not order['api_service_id'] or not order['base_url']:
+            logger.warning(f"⚠️ التطبيق {order['app_name']} غير مرتبط بمزود API صالح")
+            return False
+        
+        extra_params = {}
+        app_name = order['app_name'].lower()
+        if any(x in app_name for x in ['pubg', 'free fire', 'clash']):
+            extra_params['playerId'] = order['target_id']
+        else:
+            extra_params['playerId'] = order['target_id']
+        
+        api = get_api_client(order['base_url'], order['api_token'])
+        
+        result = await api.create_order(
+            product_id=int(order['api_service_id']),
+            quantity=order['quantity'],
+            player_id=order['target_id'] if 'player' in str(extra_params) else None,
+            extra_params=extra_params if extra_params else None
+        )
+        
+        if result['success']:
+            await conn.execute('''
+                UPDATE orders 
+                SET status = 'completed', api_response = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2
+            ''', json.dumps(result.get('raw', {})), order_id)
+            
+            await bot.send_message(
+                order['user_id'],
+                f"✅ **تم تنفيذ طلبك #{order_id} بنجاح!**\n\n"
+                f"📱 **المنتج:** {order['app_name']}\n"
+                f"🎯 **الحساب:** {order['target_id']}\n"
+                f"📋 **رقم العملية ({order['provider_name']}):** {result.get('order_id')}\n\n"
+                f"شكراً لاستخدامك خدماتنا!",
+                parse_mode="Markdown"
+            )
+            return True
+        else:
+            await conn.execute('''
+                UPDATE orders 
+                SET status = 'failed', admin_notes = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2
+            ''', f"فشل الإرسال للمزود: {result.get('error')}", order_id)
+            
+            await conn.execute(
+                "UPDATE users SET balance = balance + $1 WHERE user_id = $2",
+                order['total_amount_syp'], order['user_id']
+            )
+            
+            await bot.send_message(
+                order['user_id'],
+                f"❌ **عذراً، تعذر تنفيذ طلبك #{order_id}**\n\n"
+                f"🔸 **السبب:** مزود الخدمة يواجه ضغطاً حالياً.\n"
+                f"💰 **تم إعادة المبلغ إلى رصيدك.**\n",
+                parse_mode="Markdown"
+            )
+            return False
