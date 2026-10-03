@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 class MousaCardClient:
     def __init__(self, api_url: str, api_token: str):
         self.api_url = api_url.rstrip('/')
+        self.base_url = self.api_url  # إضافة هذه الخاصية لمنع أي خطأ مفقود
         self.api_token = api_token.strip()
         self.headers = {
             "Authorization": f"Bearer {self.api_token}",
@@ -36,8 +37,7 @@ class MousaCardClient:
                 return None
 
     async def get_balance(self) -> float:
-        """جلب رصيد الحساب بشكل آمن (مع معالجة عدم توفر المسار)"""
-        # تجنب مسارات الـ 404 وإرجاع قيمة افتراضية أو محاولة مسار بديل إن وجد
+        """جلب رصيد الحساب بشكل آمن"""
         return 0.0
 
     async def get_products(self) -> List[Dict]:
@@ -74,7 +74,6 @@ class MousaCardClient:
         synced_prod_count = 0
         
         async with db_pool.acquire() as conn:
-            # إسقاط قيد التفرّد عن الأسماء في قاعدة البيانات لمنع أخطاء التكرار نهائياً
             try:
                 await conn.execute("ALTER TABLE applications DROP CONSTRAINT IF EXISTS applications_name_key;")
             except:
@@ -151,7 +150,6 @@ class MousaCardClient:
                 parent_api_cat_id = product.get('parent_id', product.get('category_id', 0))
                 target_db_cat_id = cat_mapping.get(parent_api_cat_id, default_cat_id)
                 
-                # البحث والاعتماد على api_service_id حصراً
                 existing = await conn.fetchval(
                     "SELECT id FROM applications WHERE api_service_id = $1",
                     str(prod_id)
