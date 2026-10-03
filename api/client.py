@@ -37,23 +37,15 @@ class MousaCardClient:
                 return None
 
     async def get_profile(self) -> dict:
-        """جلب معلومات الحساب والملف الشخصي والرصيد"""
-        # تجربة المسار المعتاد للملف الشخصي/الرصيد
-        result = await self._make_request("GET", "/client/api/user")
-        if isinstance(result, dict):
-            return result.get("data", result)
+        """إرجاع بيانات افتراضية لأن مسار الملف الشخصي غير مدعوم في الـ API"""
         return {"balance": 0.0}
 
     async def get_balance(self) -> float:
-        """جلب الرصيد حصراً كقيمة رقمية"""
-        profile = await self.get_profile()
-        if isinstance(profile, dict):
-            return float(profile.get("balance", profile.get("wallet", 0.0)))
+        """إرجاع رصيد افتراضي لتجنب طلبات الـ 404"""
         return 0.0
 
     async def get_user_info(self) -> dict:
-        """دالة توافقية إضافية"""
-        return await self.get_profile()
+        return {"balance": 0.0}
 
     async def get_products(self) -> List[Dict]:
         """جلب جميع المنتجات المتاحة مباشرة من مسار /client/api/products"""
