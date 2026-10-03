@@ -32,7 +32,7 @@ from handlers.middleware import BotStatusMiddleware, refresh_bot_status_cache
 from handlers.reports import send_daily_report
 from cache import clear_cache, get_cache_stats
 
-# ✅ استدعاء الدوال الجديدة للموجه الذكي
+# ✅ الاستدعاء الصحيح للموجه الذكي للـ API
 from api.client import get_api_client, close_all_api_clients
 
 # ============= إعداد التسجيل (Logging) =============
@@ -83,6 +83,7 @@ async def set_bot_commands(bot: Bot):
     
     if ADMIN_ID:
         commands.append(BotCommand(command="admin", description="🛠 لوحة التحكم"))
+        commands.append(BotCommand(command="format_store", description="🗑 تفريغ المتجر"))
     
     try:
         await bot.set_my_commands(commands)
@@ -291,7 +292,6 @@ async def create_web_app(base_url: str) -> web.Application:
         
         try:
             async with db_pool.acquire() as conn:
-                # نأخذ أول مزود نشط كاختبار للحالة
                 provider = await conn.fetchrow("SELECT base_url, api_token FROM api_providers WHERE is_active = TRUE LIMIT 1")
             
             if provider:
@@ -342,7 +342,7 @@ async def create_web_app(base_url: str) -> web.Application:
                     <p>البوت يعمل بنجاح!</p>
                     <p>⏱️ وقت التشغيل: {hours} ساعة {minutes} دقيقة</p>
                     <p>🔗 Webhook: <a href="{base_url}{WEBHOOK_PATH}">{base_url}{WEBHOOK_PATH}</a></p>
-                    <p>📊 <a href="/health">فحص الصحة</a> | ℹ️ <a href="/info">معلومات</a></p>
+                    <p>📊 <a href="/health">فحص الصحة</a> | ℹ️️ <a href="/info">معلومات</a></p>
                 </body>
             </html>
             """,
