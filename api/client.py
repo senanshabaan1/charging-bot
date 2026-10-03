@@ -245,7 +245,7 @@ class MousaCardClient:
 def get_api_client() -> MousaCardClient:
     import os
     api_url = os.getenv("MOUSA_API_URL", "https://mousa-card.com")
-    api_token = os.getenv("MOUSA_API_TOKEN", "eVbvddm6ATc7pVsSMtakM5hTpZzd9RtvP6GRYPMByDQb5fWtfZKQPCsqEzYPBM1q")
+    api_token = os.getenv("MOUSA_API_TOKEN", "Zut5m0AkmCBEnbyLQxW0vMumniXz8jqf-T_GfgUVHf9Fir83Akbz__ACiDMLS8qt")
     return MousaCardClient(api_url, api_token)
 
 def set_api_token(token: str):
