@@ -406,8 +406,7 @@ async def init_db(pool=None):
                 ('profit_percentage', 'FLOAT DEFAULT 10'),
                 ('category_id', 'INTEGER REFERENCES categories(id)'),
                 ('type', "VARCHAR(50) DEFAULT 'service'"),
-                ('is_active', 'BOOLEAN DEFAULT TRUE'),
-                ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                ('is_active', 'BOOLEAN DEFAULT TRUE')
             ],
             'deposit_requests': [
                 ('group_message_id', 'BIGINT'),
