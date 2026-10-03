@@ -246,8 +246,19 @@ class MousaCardAPI:
         for item in products:
             qty_values = item.get('qty_values', {})
             if isinstance(qty_values, dict):
-                min_qty = int(qty_values.get('min', 1))
-                max_qty = int(qty_values.get('max', 99999)) if qty_values.get('max') else 99999
+                # قراءة الحد الأدنى بأمان
+                try:
+                    min_val = qty_values.get('min', 1)
+                    min_qty = int(float(min_val)) if min_val else 1
+                except (ValueError, TypeError):
+                    min_qty = 1
+                
+                # قراءة الحد الأقصى بأمان (وهنا كان الخطأ 1e+21)
+                try:
+                    max_val = qty_values.get('max', 99999)
+                    max_qty = int(float(max_val)) if max_val else 99999
+                except (ValueError, TypeError):
+                    max_qty = 99999
             else:
                 min_qty = 1
                 max_qty = 99999
