@@ -1,34 +1,41 @@
+# database.py
 import asyncpg
 import logging
-from config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
 async def init_db():
-    """إنشاء الجداول الأساسية"""
+    """إنشاء وتحديث الجداول تلقائياً"""
+    from config import DATABASE_URL
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
     async with pool.acquire() as conn:
-        # إعدادات البوت (مثل سعر الصرف)
+        # إعدادات البوت
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         ''')
-        # تعيين سعر صرف افتراضي إذا لم يوجد
         await conn.execute("INSERT INTO settings (key, value) VALUES ('exchange_rate', '15000') ON CONFLICT DO NOTHING")
 
-        # المستخدمين
+        # المستخدمين (تمت مطابقة حقل balance)
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
-                balance_usd FLOAT DEFAULT 0,
+                balance FLOAT DEFAULT 0,
                 currency VARCHAR(10) DEFAULT 'USD',
                 is_banned BOOLEAN DEFAULT FALSE
             )
         ''')
+        
+        # التأكد من وجود الأعمدة إذا كان الجدول قديماً
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS balance FLOAT DEFAULT 0")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'")
+        except:
+            pass
 
-        # مزودي الخدمة (مواقع الـ API)
+        # مزودي الخدمة (موافع الـ API)
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS api_providers (
                 id SERIAL PRIMARY KEY,
@@ -73,8 +80,6 @@ async def init_db():
             )
         ''')
     return pool
-
-# ================== دوال مساعدة ==================
 
 async def get_exchange_rate(pool) -> float:
     async with pool.acquire() as conn:
