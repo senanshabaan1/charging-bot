@@ -165,17 +165,19 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
         options = await conn.fetch("SELECT * FROM product_options WHERE product_id = $1 ORDER BY is_active DESC, sort_order, price_usd", app_id)
     
     app_dict = dict(app)
-    app_dict['unit_price_usd'] = float(app_dict['unit_price_usd'] or 0.0) 
+    app_dict['unit_price_usd'] = float(app_dict['unit_price_usd'] or 0.0) # يمثل السعر الصافي بالسوري
     app_dict['profit_percentage'] = float(app_dict.get('profit_percentage', 0) or 0)
     app_dict['min_units'] = int(app_dict.get('min_units', 1) or 1)
     
     await state.update_data({'app': app_dict, 'app_type': app_type, 'discount': discount, 'vip_level': vip_level})
     
+    # إذا كان للخدمة خيارات (Variants / Packages)
     if options:
         builder = InlineKeyboardBuilder()
         for opt in options:
-            opt_price = float(opt['price_usd'] or 0.0) 
+            opt_price = float(opt['price_usd'] or 0.0) # السعر الصافي للباقة بالسوري
             if opt['is_active']:
+                # تطبيق نسبة الربح مرة واحدة فقط
                 price_with_profit = opt_price * (1 + (app_dict['profit_percentage'] / 100))
                 discounted_price = price_with_profit * (1 - discount/100)
                 
@@ -193,6 +195,8 @@ async def start_order(callback: types.CallbackQuery, state: FSMContext, db_pool)
             reply_markup=builder.as_markup(), parse_mode="HTML"
         )
         await state.set_state(OrderStates.choosing_variant)
+    
+    # إذا كانت خدمة بكمية مفتوحة
     else:
         profit_percentage = app_dict['profit_percentage']
         base_unit = app_dict['unit_price_usd']
@@ -245,8 +249,9 @@ async def choose_variant(callback: types.CallbackQuery, state: FSMContext, db_po
     discount, vip_level = data['discount'], data['vip_level']
     
     app_profit = float(app.get('profit_percentage', 0) or 0) / 100
-    opt_price = float(option['price_usd'] or 0.0) 
+    opt_price = float(option['price_usd'] or 0.0) # السعر الصافي بالسوري
     
+    # تطبيق نسبة الربح مرة واحدة فقط
     price_with_profit = opt_price * (1 + app_profit)
     total_syp = price_with_profit * (1 - discount/100)
     original_syp = price_with_profit
@@ -309,6 +314,7 @@ async def ask_for_target_id(message_obj: types.Message, state: FSMContext, app_n
     elif 'tiktok' in app_name_lower or 'instagram' in app_name_lower:
         instructions = "📸 <b>الرجاء إرسال اسم المستخدم (الرابط أو اليوزر):</b>"
 
+    # عرض السعر الإجمالي فقط بدون ذكر "سعر الوحدة"
     price_text = f"💰 <b>الإجمالي المطلوب:</b> {total_syp:,.0f} ل.س"
     if discount > 0:
         saved = original_syp - total_syp
@@ -376,7 +382,7 @@ async def confirm_order(message: types.Message, state: FSMContext, db_pool):
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(OrderStates.confirm)
 
-# ============= التنفيذ (الآلي / اليدوي / التحويل التلقائي عند التعذر) =============
+# ============= التنفيذ (الآلي / اليدوي) =============
 @router.callback_query(F.data == "execute_buy")
 async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_pool, bot: Bot):
     data = await state.get_data()
@@ -416,7 +422,7 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
 
     if is_api_linked:
         await callback.message.edit_text("⚡ <b>جاري التنفيذ التلقائي عبر الـ API...</b>\nالرجاء الانتظار ثوانٍ معدودة ⏱️", parse_mode="HTML")
-        await send_order_to_mousa_api(order_id, db_pool, bot, order_dict)
+        await send_order_to_mousa_api(order_id, db_pool, bot)
     else:
         group_msg_id = await send_order_to_group(bot, order_dict)
         if group_msg_id:
@@ -428,47 +434,20 @@ async def execute_order(callback: types.CallbackQuery, state: FSMContext, db_poo
     await callback.message.answer("👋 عدنا للقائمة الرئيسية", reply_markup=get_main_menu_keyboard(is_admin))
     await state.clear()
 
-async def send_order_to_group(bot: Bot, order_data: dict, error_reason: str = None):
-    """إرسال الطلب اليدوي أو الطلب المتعذر آلياً إلى مجموعة الإدارة"""
+async def send_order_to_group(bot: Bot, order_data: dict):
     try:
-        title = "🆕 <b>طلب خدمة يدوية جديدة</b>"
-        extra_info = ""
-        
-        if error_reason:
-            title = "⚠️ <b>تنبيه: تعذر التنفيذ الآلي وتم تحويله ليدوي!</b>"
-            extra_info = f"❌ <b>سبب التعذر:</b> <code>{error_reason}</code>\n\n"
-
-        caption = (
-            f"{title}\n\n"
-            f"🆔 <b>رقم الطلب:</b> #{order_data['order_id']}\n"
-            f"👤 <b>العميل:</b> @{order_data['username']} (<code>{order_data['user_id']}</code>)\n"
-            f"📱 <b>الخدمة:</b> {order_data['app_name']}\n"
-            f"📦 <b>الباقة/الكمية:</b> {order_data.get('variant_name', order_data.get('quantity'))}\n"
-            f"💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n"
-            f"🎯 <b>المستهدف (ID):</b> <code>{order_data['target_id']}</code>\n\n"
-            f"{extra_info}"
-            f"🔹 <b>القرار الإداري:</b>"
-        )
-        
+        caption = f"🆕 <b>طلب خدمة يدوية</b>\n\n👤 <b>العميل:</b> @{order_data['username']}\n📱 <b>الخدمة:</b> {order_data['app_name']}\n📦 <b>الباقة:</b> {order_data.get('variant_name', order_data.get('quantity'))}\n💰 <b>المبلغ:</b> {order_data['total_syp']:,.0f} ل.س\n🎯 <b>المستهدف:</b> <code>{order_data['target_id']}</code>\n\n🔹 <b>القرار:</b>"
         builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(text="✅ موافقة وتأكيد", callback_data=f"appr_order_{order_data['order_id']}"),
-            types.InlineKeyboardButton(text="❌ رفض واسترجاع", callback_data=f"reje_order_{order_data['order_id']}")
-        )
-        
+        builder.row(types.InlineKeyboardButton(text="✅ موافقة وتأكيد", callback_data=f"appr_order_{order_data['order_id']}"), types.InlineKeyboardButton(text="❌ رفض", callback_data=f"reje_order_{order_data['order_id']}"))
         msg = await bot.send_message(chat_id=ORDERS_GROUP, text=caption, reply_markup=builder.as_markup(), parse_mode="HTML")
         return msg.message_id
-    except Exception as e:
-        logger.error(f"❌ خطأ في إرسال الطلب للمجموعة: {e}")
-        return None
+    except: return None
 
-async def send_order_to_mousa_api(order_id: int, db_pool, bot: Bot, order_dict: dict) -> bool:
-    """تنفيذ الطلب عبر الـ API، وإذا تعذر يتم تحويله تلقائياً إلى مجموعة الإدارة ليتولاه المسؤول يدوياً"""
+async def send_order_to_mousa_api(order_id: int, db_pool, bot: Bot) -> bool:
     api = get_api_client()
     async with db_pool.acquire() as conn:
         order = await conn.fetchrow("SELECT o.*, a.api_service_id FROM orders o JOIN applications a ON o.app_id = a.id WHERE o.id = $1", order_id)
-        if not order or not order['api_service_id']: 
-            return False
+        if not order or not order['api_service_id']: return False
         
         result = await api.create_order(
             product_id=int(order['api_service_id']),
@@ -478,43 +457,22 @@ async def send_order_to_mousa_api(order_id: int, db_pool, bot: Bot, order_dict: 
         )
         
         if result['success']:
-            # === الحالة الأولى: نجاح التنفيذ الآلي الفوري ===
             await conn.execute("UPDATE orders SET status = 'completed', api_response = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", json.dumps(result.get('raw', {})), order_id)
             await conn.execute("UPDATE users SET total_points = total_points + $1, total_points_earned = total_points_earned + $1 WHERE user_id = $2", order['points_earned'], order['user_id'])
             
             await bot.send_message(
                 order['user_id'],
-                f"🎉 <b>تم تنفيذ طلبك آلياً في ثوانٍ!</b>\n\n"
-                f"📱 الخدمة: {order['app_name']}\n"
-                f"🎯 المستهدف: <code>{order['target_id']}</code>\n"
-                f"⭐ نقاط مكتسبة: +{order['points_earned']}\n"
-                f"📋 رقم الطلب: #{result.get('order_id')}",
+                f"🎉 <b>تم تنفيذ طلبك آلياً في ثوانٍ!</b>\n\n📱 الخدمة: {order['app_name']}\n🎯 المستهدف: <code>{order['target_id']}</code>\n⭐ نقاط مكتسبة: +{order['points_earned']}\n📋 رقم الطلب: #{result.get('order_id')}",
                 parse_mode="HTML"
             )
             return True
         else:
-            # === الحالة الثانية: تعذر التنفيذ الآلي -> تحويل ذكي إلى مجموعة الإدارة (طلب يدوي) ===
-            error_reason = result.get('error', 'خطأ غير معروف من المصدر الخارجي')
+            await conn.execute("UPDATE orders SET status = 'failed', admin_notes = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", f"فشل API: {result.get('error')}", order_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id = $2", order['total_amount_syp'], order['user_id'])
             
-            # تحديث حالة الطلب في قاعدة البيانات إلى pending_manual (قيد المراجعة اليدوية) مع الاحتفاظ بالرصيد مخصوماً لتقوم الإدارة بالتنفيذ اليدوي
-            await conn.execute(
-                "UPDATE orders SET status = 'pending_manual', admin_notes = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
-                f"تعذر آلياً وتحول ليدوي: {error_reason}", order_id
-            )
-            
-            # إرسال تفاصيل الطلب المتعذر إلى مجموعة الإدارة
-            group_msg_id = await send_order_to_group(bot, order_dict, error_reason=error_reason)
-            if group_msg_id:
-                await conn.execute("UPDATE orders SET group_message_id = $1 WHERE id = $2", group_msg_id, order_id)
-            
-            # إعلام المستخدم أن طلبه قيد المراجعة اليدوية من قبل الإدارة
             await bot.send_message(
                 order['user_id'],
-                f"⏳ <b>تعذر التنفيذ الآلي الفوري، وتم تحويل طلبك للمتابعة اليدوية من الإدارة.</b>\n\n"
-                f"📦 الخدمة: {order['app_name']}\n"
-                f"🆔 المستهدف: <code>{order['target_id']}</code>\n"
-                f"📋 رقم الطلب: #{order_id}\n\n"
-                f"💡 <i>سيقوم الفريق المسؤول بشحنه يدوياً في أقرب وقت وإعلامك بالنتيجة!</i>",
+                f"❌ <b>عذراً، فشل تنفيذ الطلب آلياً</b>\nالسبب: {result.get('error', 'خدمة غير متاحة من المصدر')}\n💰 تمت استعادة {order['total_amount_syp']:,.0f} ل.س إلى رصيدك.",
                 parse_mode="HTML"
             )
             return False
