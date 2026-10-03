@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class MousaCardClient:
     def __init__(self, api_url: str, api_token: str):
         self.api_url = api_url.rstrip('/')
-        self.base_url = self.api_url  # إضافة هذه الخاصية لمنع أي خطأ مفقود
+        self.base_url = self.api_url
         self.api_token = api_token.strip()
         self.headers = {
             "Authorization": f"Bearer {self.api_token}",
@@ -36,9 +36,24 @@ class MousaCardClient:
                 logger.error(f"❌ خطأ في الاتصال مع Mousa Card ({url}): {e}")
                 return None
 
+    async def get_profile(self) -> dict:
+        """جلب معلومات الحساب والملف الشخصي والرصيد"""
+        # تجربة المسار المعتاد للملف الشخصي/الرصيد
+        result = await self._make_request("GET", "/client/api/user")
+        if isinstance(result, dict):
+            return result.get("data", result)
+        return {"balance": 0.0}
+
     async def get_balance(self) -> float:
-        """جلب رصيد الحساب بشكل آمن"""
+        """جلب الرصيد حصراً كقيمة رقمية"""
+        profile = await self.get_profile()
+        if isinstance(profile, dict):
+            return float(profile.get("balance", profile.get("wallet", 0.0)))
         return 0.0
+
+    async def get_user_info(self) -> dict:
+        """دالة توافقية إضافية"""
+        return await self.get_profile()
 
     async def get_products(self) -> List[Dict]:
         """جلب جميع المنتجات المتاحة مباشرة من مسار /client/api/products"""
