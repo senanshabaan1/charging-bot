@@ -8,7 +8,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from config import BOT_TOKEN, WEBHOOK_PATH, WEBHOOK_URL, PORT
 import database as db
-from handlers import router
+from bot_handlers import router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
