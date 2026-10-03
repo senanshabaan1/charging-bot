@@ -1,3 +1,4 @@
+# run_bot_webhook.py
 import asyncio
 import logging
 import os
@@ -18,7 +19,7 @@ from config import (
     TOKEN, ADMIN_ID, DEBUG, LOG_LEVEL, LOG_FORMAT, LOG_FILE,
     WEBHOOK_PATH, WEBHOOK_PORT, WEBHOOK_HOST, WEBHOOK_URL,
     load_exchange_rate, load_bot_settings, load_api_settings,
-    AUTO_SYNC_SERVICES, SYNC_INTERVAL_HOURS, DEFAULT_API_PROFIT
+    AUTO_SYNC_SERVICES, SYNC_INTERVAL_HOURS
 )
 from database.connection import get_pool, init_db, DAMASCUS_TZ
 from database.points import fix_points_history_table
@@ -94,12 +95,14 @@ async def init_database():
     logger.info("📦 جاري الاتصال بقاعدة البيانات...")
     
     try:
+        # ✅ إنشاء مجمع الاتصالات
         db_pool = await get_pool()
         
         if not db_pool:
             logger.error("❌ فشل إنشاء مجمع الاتصالات")
             return False
 
+        # ✅ التحقق من الاتصال
         async with db_pool.acquire() as conn:
             test = await conn.fetchval("SELECT 1")
             if test != 1:
@@ -107,15 +110,18 @@ async def init_database():
                 return False
             logger.info("✅ تم اختبار الاتصال بقاعدة البيانات بنجاح")
 
+        # ✅ تهيئة قاعدة البيانات
         await init_db(db_pool)
         logger.info("✅ تم تهيئة قاعدة البيانات")
         
+        # ✅ إصلاح الجداول
         try:
             await fix_points_history_table(db_pool)
             logger.info("✅ تم إصلاح جداول النقاط")
         except Exception as e:
             logger.warning(f"⚠️ خطأ في إصلاح جداول النقاط: {e}")
         
+        # ✅ إصلاح الـ VIP اليدوي
         try:
             await fix_manual_vip_for_existing_users(db_pool)
             logger.info("✅ تم إصلاح مستويات VIP اليدوية")
@@ -149,13 +155,18 @@ async def init_bot():
     global bot, dp
     
     try:
+        # ✅ إنشاء البوت
         bot = Bot(token=TOKEN)
+        
+        # ✅ إنشاء Dispatcher
         dp = Dispatcher()
         dp["db_pool"] = db_pool
         
+        # ✅ إضافة ميدل وير
         dp.message.middleware(BotStatusMiddleware(db_pool))
         dp.callback_query.middleware(BotStatusMiddleware(db_pool))
         
+        # ✅ تسجيل الهاندلرز
         dp.include_routers(
             start.router,
             admin_router,
@@ -187,6 +198,7 @@ async def init_scheduler():
         
         scheduler = AsyncIOScheduler(timezone='Asia/Damascus')
         
+        # ✅ جدولة التقرير اليومي
         scheduler.add_job(
             send_daily_report,
             'cron',
@@ -198,18 +210,23 @@ async def init_scheduler():
             misfire_grace_time=3600
         )
         
-        if AUTO_SYNC_SERVICES:       
+        # ✅ جدولة مزامنة خدمات API التلقائية (إذا كانت مفعلة)
+        if AUTO_SYNC_SERVICES:
+            from api.client import get_api_client
+            from config import DEFAULT_API_PROFIT
+            
             async def auto_sync_services():
                 """مزامنة الخدمات من API تلقائياً"""
                 logger.info("🔄 بدء المزامنة التلقائية للخدمات من Mousa Card API...")
                 try:
-                    client_api = get_api_client()
+                    api = get_api_client()
+                    # جلب نسبة الربح الافتراضية من قاعدة البيانات
                     async with db_pool.acquire() as conn:
                         default_profit = await conn.fetchval(
                             "SELECT value::int FROM bot_settings WHERE key = 'api_default_profit'"
                         ) or DEFAULT_API_PROFIT
                     
-                    synced_count = await client_api.sync_services_to_db(db_pool, default_profit)
+                    synced_count = await api.sync_services_to_db(db_pool, default_profit)
                     if synced_count > 0:
                         logger.info(f"✅ تمت مزامنة {synced_count} خدمة تلقائياً")
                     else:
@@ -217,6 +234,7 @@ async def init_scheduler():
                 except Exception as e:
                     logger.error(f"❌ خطأ في المزامنة التلقائية: {e}")
             
+            # جدولة المزامنة كل X ساعات
             scheduler.add_job(
                 auto_sync_services,
                 'interval',
@@ -279,12 +297,13 @@ async def create_web_app(base_url: str) -> web.Application:
         uptime = time.time() - start_time
         cache_stats = get_cache_stats()
         
+        # ✅ جلب معلومات API للـ health check
         api_status = "unknown"
         api_balance = None
         try:
-            client_api = get_api_client()
-            api_balance = await client_api.get_balance()
-            api_status = "connected"
+            api = get_api_client()
+            api_balance = await api.get_balance()
+            api_status = "connected" if api_balance is not None else "error"
         except Exception as e:
             api_status = f"error: {str(e)[:50]}"
         
@@ -318,13 +337,8 @@ async def create_web_app(base_url: str) -> web.Application:
         hours = int(uptime // 3600)
         minutes = int((uptime % 3600) // 60)
         
-        # فحص حالة الـ API بدون أخطاء
-        try:
-            client_api = get_api_client()
-            bal = await client_api.get_balance()
-            api_status = "🟢 متصل"
-        except Exception:
-            api_status = "🔴 غير متصل"
+        # ✅ جلب معلومات API للعرض
+        api_status = "🟢 متصل" if await get_api_client().get_balance() is not None else "🔴 غير متصل"
         
         return web.Response(
             text=f"""
@@ -375,7 +389,8 @@ async def shutdown():
         await db_pool.close()
         logger.info("✅ تم إغلاق مجمع اتصالات قاعدة البيانات")
     
-    close_api_client()
+    # ✅ إغلاق عميل API
+    await close_api_client()
     logger.info("✅ تم إغلاق عميل API")
     
     clear_cache()
@@ -401,59 +416,86 @@ async def main():
     logger.info(f"🔧 وضع التطوير: {'نعم' if DEBUG else 'لا'}")
     
     try:
+        # ✅ 1. تهيئة قاعدة البيانات (مع التحقق)
         if not await init_database():
             logger.error("❌ فشل تهيئة قاعدة البيانات، إعادة المحاولة...")
+            # محاولة ثانية
             await asyncio.sleep(2)
             if not await init_database():
                 logger.critical("❌ فشل تهيئة قاعدة البيانات بعد المحاولتين")
                 return
         
+        # ✅ 2. التحقق من الوقت
         await check_timezone()
         
+        # ✅ 3. تحميل الإعدادات
         try:
             await load_exchange_rate(db_pool)
             await load_bot_settings(db_pool)
-            await load_api_settings(db_pool)
+            await load_api_settings(db_pool)  # ✅ تحميل إعدادات API
         except Exception as e:
             logger.error(f"❌ خطأ في تحميل الإعدادات: {e}")
         
+        # ✅ 4. اختبار اتصال API (تحذير فقط)
         try:
-            client_api = get_api_client()
-            balance = await client_api.get_balance()
-            logger.info("💰 تم تحميل عميل Mousa Card API بنجاح")
+            api = get_api_client()
+            balance = await api.get_balance()
+            if balance is not None:
+                logger.info(f"💰 API Mousa Card متصل - الرصيد: ${balance:.2f}")
+            else:
+                logger.warning("⚠️ API Mousa Card غير متصل - تحقق من التوكن")
         except Exception as e:
-            logger.warning(f"⚠️ تحذير اتصال API: {e}")
+            logger.warning(f"⚠️ فشل اختبار اتصال API: {e}")
         
+        # ✅ 5. تهيئة البوت
         if not await init_bot():
             logger.error("❌ فشل تهيئة البوت")
             return
         
+        # ✅ 6. تحديث كاش حالة البوت
         await refresh_bot_status_cache(db_pool)
-        clear_clear_cache = clear_cache()
+        
+        # ✅ 7. مسح الكاش
+        clear_cache()
+        
+        # ✅ 8. تعيين الأوامر
         await set_bot_commands(bot)
+        
+        # ✅ 9. تهيئة الجدولة (مع المزامنة التلقائية)
         await init_scheduler()
         
+        # ✅ 10. إعداد webhook
         port, base_url = await setup_webhook()
+        
+        # ✅ 11. إنشاء تطبيق الويب
         await create_web_app(base_url)
+        
+        # ✅ 12. تشغيل الخادم
         await start_server(port)
         
+        # ✅ 13. إحصائيات البداية
         elapsed = time.time() - start_time
         logger.info(f"✅ تم بدء التشغيل بنجاح في {elapsed:.2f} ثانية")
         logger.info(f"📊 إحصائيات الكاش: {get_cache_stats()}")
         
+        # ✅ 14. مزامنة أولية للخدمات (اختياري)
         if AUTO_SYNC_SERVICES:
+            from api.client import get_api_client
+            from config import DEFAULT_API_PROFIT
+            
             logger.info("🔄 جاري إجراء مزامنة أولية للخدمات...")
             try:
-                client_api = get_api_client()
+                api = get_api_client()
                 async with db_pool.acquire() as conn:
                     default_profit = await conn.fetchval(
                         "SELECT value::int FROM bot_settings WHERE key = 'api_default_profit'"
                     ) or DEFAULT_API_PROFIT
-                await client_api.sync_services_to_db(db_pool, default_profit)
+                await api.sync_services_to_db(db_pool, default_profit)
                 logger.info("✅ تمت المزامنة الأولية للخدمات")
             except Exception as e:
                 logger.warning(f"⚠️ فشلت المزامنة الأولية: {e}")
         
+        # ✅ 15. الانتظار
         await asyncio.Event().wait()
         
     except asyncio.CancelledError:
